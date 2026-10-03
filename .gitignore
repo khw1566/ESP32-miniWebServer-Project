@@ -1,0 +1,41 @@
+**/build/
+**/managed_components/
+**/.pio/
+**/.cache/
+**/.vscode/
+**/node_modules/
+**/__pycache__/
+*.pyc
+**/sdkconfig.old
+**/.clangd
+*.zip
+*.7z
+*.rar
+*.log
+*.bin
+*.elf
+*.map
+.env
+.env.*
+!.env.example
+**/ngrok.yml
+**/ngrok.yaml
+**/credentials.json
+/.agents/
+/patch_backups/
+/results/
+/test/
+/firmware_upload/
+/opera_2021/
+/esp32 2432s028 예제/
+/2026 */
+/기획서/
+/모델링/
+/*.hwp
+/*.hwpx
+/*.ipt
+/보고서 초안.md
+/ngrok_qrcode.png
+/sample.webp
+/Setup_nrok.bat
+/Serve_Opera_2021_ngrok.bat

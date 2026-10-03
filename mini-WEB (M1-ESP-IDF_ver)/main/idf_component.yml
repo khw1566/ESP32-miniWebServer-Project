@@ -1,0 +1,8 @@
+dependencies:
+  lvgl/lvgl:
+    version: "8.4.0"
+    public: true
+  espressif/esp_lcd_ili9341:
+    version: "2.1.0"
+  espressif/mdns:
+    version: "1.13.1"

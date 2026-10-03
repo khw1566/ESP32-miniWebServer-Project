@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>스마트 온실 실시간 텔레메트리 대시보드</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #090d16; color: #f1f5f9; padding: 16px; padding-bottom: 40px; -webkit-font-smoothing: antialiased; }
+    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 14px; border-bottom: 1px solid #1e293b; margin-bottom: 16px; }
+    .title-area h1 { font-size: 18px; font-weight: 700; color: #38bdf8; }
+    .title-area p { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .badge-live { display: flex; align-items: center; gap: 6px; font-size: 11px; background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid #10b981; padding: 4px 10px; border-radius: 20px; font-weight: 700; }
+    .badge-dot { width: 6px; height: 6px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { opacity: 0.4; transform:scale(0.8); } 50% { opacity: 1; transform:scale(1.2); } 100% { opacity: 0.4; transform:scale(0.8); } }
+    .hero-banner { width: 100%; height: 180px; border-radius: 14px; overflow: hidden; position: relative; margin-bottom: 16px; border: 1px solid #1e293b; }
+    .hero-banner img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s ease; }
+    .hero-banner:hover img { transform: scale(1.04); }
+    .hero-banner .overlay { position: absolute; bottom: 0; left: 0; right: 0; padding: 12px 14px; background: linear-gradient(transparent, rgba(9,13,22,0.95)); font-size: 12px; color: #cbd5e1; display:flex; justify-content:space-between; align-items:center; }
+    .webp-chip { background:rgba(56,189,248,0.2); color:#38bdf8; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; border:1px solid #38bdf8; }
+    .section-title { font-size: 14px; font-weight: 700; color: #94a3b8; margin-bottom: 10px; display:flex; justify-content:space-between; align-items:center; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .sensor-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.25s cubic-bezier(0.4,0,0.2,1); }
+    .sensor-card:hover { border-color: #38bdf8; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(56,189,248,0.1); }
+    .sensor-label { font-size: 11px; color: #94a3b8; font-weight: 600; }
+    .sensor-value { font-size: 22px; font-weight: 800; color: #38bdf8; margin: 8px 0 4px; transition: color 0.3s; }
+    .sensor-status { font-size: 11px; color: #10b981; font-weight: 600; }
+    .control-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .control-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
+    .control-row:last-child { border-bottom: none; }
+    .switch-btn { background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 2px 8px rgba(2, 132, 199, 0.3); }
+    .switch-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(2, 132, 199, 0.5); }
+    .switch-btn:active { transform: translateY(0); }
+    .switch-btn.off { background: #334155; color: #94a3b8; box-shadow: none; }
+    .switch-btn.off:hover { background: #475569; color: #e2e8f0; }
+    .toast-msg { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px); background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; padding: 10px 20px; border-radius: 20px; font-size: 12px; font-weight: 700; transition: transform 0.3s ease; z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; }
+    .toast-msg.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title-area">
+      <h1>스마트팜 3호 온실 (딸기)</h1>
+      <p>ESP32 직접 통신 저지연 엣지 텔레메트리</p>
+    </div>
+    <div class="badge-live">
+      <div class="badge-dot"></div>
+      <span>실시간 연동</span>
+    </div>
+  </div>
+
+  <div class="hero-banner">
+    <picture>
+      <source srcset="/farm.webp" type="image/webp">
+      <img src="farm.webp" alt="Smart Farm Banner" onerror="this.src='https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?w=800'">
+    </picture>
+    <div class="overlay">
+      <span>구역: C-동 수경재배 라인 (온실 내부 직결 통신)</span>
+      <span class="webp-chip">WebP Stream</span>
+    </div>
+  </div>
+
+  <div class="section-title">
+    <span>온실 핵심 환경 데이터</span>
+    <span style="font-size:11px;color:#10b981;font-weight:600;">2초 주기 갱신 중</span>
+  </div>
+  <div class="grid">
+    <div class="sensor-card">
+      <div class="sensor-label">내부 온도</div>
+      <div class="sensor-value" id="valTemp">23.8 °C</div>
+      <div class="sensor-status">정상 (적정 22~25°C)</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sensor-label">상대 습도</div>
+      <div class="sensor-value" id="valHumi">68.4 %</div>
+      <div class="sensor-status">최적 생육 습도</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sensor-label">CO2 농도</div>
+      <div class="sensor-value" id="valCo2">840 ppm</div>
+      <div class="sensor-status">광합성 적정 수준</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sensor-label">양액 EC 지수</div>
+      <div class="sensor-value" id="valEc">1.8 ms/cm</div>
+      <div class="sensor-status">영양 공급 정상</div>
+    </div>
+  </div>
+
+  <div class="section-title">온실 구동기 원격 제어</div>
+  <div class="control-card">
+    <div class="control-row">
+      <span>순환 팬 (공기 유동)</span>
+      <button class="switch-btn" onclick="toggleBtn(this, '순환 팬')">가동 중</button>
+    </div>
+    <div class="control-row">
+      <span>LED 생장 조명 (청색광)</span>
+      <button class="switch-btn" onclick="toggleBtn(this, '생장 조명')">가동 중</button>
+    </div>
+    <div class="control-row">
+      <span>지능형 차광 커튼</span>
+      <button class="switch-btn off" onclick="toggleBtn(this, '차광 커튼')">대기 (OPEN)</button>
+    </div>
+    <div class="control-row">
+      <span>미세 분무 포그 노즐</span>
+      <button class="switch-btn off" onclick="toggleBtn(this, '분무 포그')">정지 (OFF)</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast-msg">구동기 상태 변경됨</div>
+
+  <script>
+    function showToast(msg) {
+      var toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(function(){ toast.classList.remove('show'); }, 1800);
+    }
+    function toggleBtn(btn, name) {
+      if (btn.classList.contains('off')) {
+        btn.classList.remove('off');
+        btn.textContent = '가동 중';
+        showToast(name + ' 구동 시작');
+      } else {
+        btn.classList.add('off');
+        btn.textContent = '정지 (OFF)';
+        showToast(name + ' 작동 정지');
+      }
+    }
+    setInterval(function(){
+      var t = (23.5 + Math.random() * 0.6).toFixed(1);
+      var h = (68.0 + Math.random() * 0.8).toFixed(1);
+      document.getElementById('valTemp').textContent = t + ' °C';
+      document.getElementById('valHumi').textContent = h + ' %';
+    }, 2000);
+  </script>
+</body>
+</html>
+

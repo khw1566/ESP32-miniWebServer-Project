@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>국립박물관 스마트 디지털 도슨트 가이드</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0c0a09; color: #f5f5f4; padding-bottom: 50px; -webkit-font-smoothing: antialiased; }
+    .hero { position: relative; width: 100%; height: 280px; overflow: hidden; }
+    .hero img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.8s ease; }
+    .hero:hover img { transform: scale(1.04); }
+    .hero-grad { position: absolute; inset: 0; background: linear-gradient(transparent 30%, #0c0a09 100%); }
+    .content { padding: 0 16px; margin-top: -30px; position: relative; z-index: 10; }
+    .tag-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .tag { display: inline-block; background: #d97706; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+    .webp-tag { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid #f59e0b; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    h1 { font-size: 22px; font-weight: 800; color: #fafaf9; line-height: 1.3; }
+    .subtitle { font-size: 13px; color: #a8a29e; margin-top: 4px; margin-bottom: 18px; }
+    .audio-player { background: #1c1917; border: 1px solid #292524; border-radius: 14px; padding: 18px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .audio-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .audio-title { font-size: 13px; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px; }
+    .sound-wave { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+    .sound-wave span { width: 3px; background: #f59e0b; border-radius: 1px; animation: wave 1s infinite ease-in-out; }
+    .sound-wave span:nth-child(2) { animation-delay: 0.2s; }
+    .sound-wave span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes wave { 0%, 100% { height: 4px; } 50% { height: 12px; } }
+    .audio-time { font-size: 12px; color: #a8a29e; margin-top: 6px; } .native-tag { font-size: 10px; border: 1px solid #7c5b2a; color: #fbbf24; border-radius: 99px; padding: 3px 8px; margin-left: 5px; } .voice-label {display:block;margin-top:14px;color:#a8a29e;font-size:12px}.voice-select,.rate-label select {background:#292524;color:#f5f5f4;border:1px solid #57534e;border-radius:8px;padding:8px}.voice-select{width:100%;margin-top:5px}.audio-notice{font-size:11px;color:#a8a29e;line-height:1.5;margin-top:10px}.exhibit-list{display:grid;gap:8px;margin:0 0 20px}.exhibit{width:100%;display:flex;align-items:center;gap:12px;text-align:left;padding:12px;background:#171412;border:1px solid #332c26;border-radius:12px;color:#f5f5f4;cursor:pointer}.exhibit.active{border-color:#d97706;background:#21190f}.exhibit-number{font-size:12px;color:#fbbf24;font-weight:800}.exhibit small{display:block;color:#a8a29e;margin-top:3px}.exhibit-play{margin-left:auto;color:#fbbf24;font-size:12px}
+    .audio-bar-bg { width: 100%; background: #292524; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: 16px; cursor: pointer; }
+    .audio-bar-fill { width: 35%; background: linear-gradient(90deg, #d97706, #f59e0b); height: 100%; transition: width 0.3s; }
+    .audio-controls { display: flex; justify-content: center; align-items: center; gap: 24px; }
+    .play-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: #000; border: none; width: 48px; height: 48px; border-radius: 50%; font-size: 18px; font-weight: 900; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4); }
+    .play-btn:hover { transform: scale(1.1); box-shadow: 0 6px 22px rgba(245, 158, 11, 0.6); }
+    .play-btn:active { transform: scale(0.95); }
+    .sub-btn { background: #292524; border: 1px solid #3d3835; color: #d6d3d1; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: 0.2s; }
+    .sub-btn:hover { background: #3d3835; color: #fff; }
+    .article-box { background: #1c1917; border: 1px solid #292524; border-radius: 14px; padding: 18px; line-height: 1.7; font-size: 14px; color: #d6d3d1; margin-bottom: 20px; }
+    .article-box h2 { font-size: 16px; color: #fafaf9; margin-bottom: 10px; }
+    .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #292524; font-size: 12px; }
+    .meta-item { display: flex; flex-direction: column; gap: 2px; }
+    .meta-lbl { color: #78716c; }
+    .meta-val { color: #f5f5f4; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <div class="hero">
+    <picture>
+      <source srcset="museum.webp" type="image/webp">
+      <img src="museum.webp" alt="Museum Exhibition">
+    </picture>
+    <div class="hero-grad"></div>
+  </div>
+
+  <div class="content">
+    <div class="tag-row">
+      <span class="tag">EXHIBITION EXHIBIT #07</span>
+      <span class="webp-tag">WebP Ultra HD</span>
+    </div>
+    <h1>황금의 태양신 이시스 여신상</h1>
+    <p class="subtitle">기원전 3세기 고대 이집트 왕조 유물 (전시실 B구역 07번 스팟)</p>
+
+    <section class="audio-player" aria-label="음성 도슨트 재생기">
+      <div class="audio-header">
+        <div><div class="audio-title">한국어 음성 도슨트 <span class="native-tag">기기 음성 재생</span></div><div class="audio-time" id="playerStatus" aria-live="polite">재생할 전시 해설을 선택하세요</div></div>
+      </div>
+      <div class="audio-controls">
+        <button class="play-btn" id="playBtn" type="button" aria-label="재생">재생</button>
+        <button class="sub-btn" id="pauseBtn" type="button">일시정지</button>
+        <button class="sub-btn" id="stopBtn" type="button">정지</button>
+        <label class="rate-label">속도 <select id="rateSelect" aria-label="음성 속도"><option value="0.85">느리게</option><option value="1" selected>보통</option><option value="1.15">빠르게</option></select></label>
+      </div>
+      <label class="voice-label" for="voiceSelect">음성</label><select id="voiceSelect" class="voice-select" aria-label="한국어 음성 선택"></select>
+      <div class="audio-notice" id="audioNotice">휴대전화 또는 브라우저에 설치된 한국어 음성을 사용합니다. 기기 설정에 따라 음성 품질과 네트워크 필요 여부가 달라질 수 있습니다.</div>
+    </section>
+    <div class="exhibit-list" aria-label="전시 해설 목록">
+      <button class="exhibit active" data-exhibit="isis"><span class="exhibit-number">07</span><span><b>이시스 여신상</b><small>고대 이집트 · 약 2분 안내</small></span><span class="exhibit-play">재생</span></button>
+      <button class="exhibit" data-exhibit="craft"><span class="exhibit-number">08</span><span><b>금속 공예의 비밀</b><small>제작 기법 · 약 1분 안내</small></span><span class="exhibit-play">재생</span></button>
+      <button class="exhibit" data-exhibit="symbol"><span class="exhibit-number">09</span><span><b>태양 원반과 상징</b><small>신화와 의례 · 약 1분 안내</small></span><span class="exhibit-play">재생</span></button>
+    </div>    <div class="article-box">
+      <h2>유물 상세 해설</h2>
+      <p>
+        본 유물은 고대 이집트 헬레니즘 왕조 시대에 제작된 순금 도금 청동 여신상으로, 태양과 부활을 상징하는 두 뿔 사이의 원반 관을 쓰고 있습니다.
+        당시 제사장들이 의식을 거행할 때 사용되었으며, 섬세한 옷자락의 음각 주름과 눈매의 감청석 상감 기법은 당대 최고 수준의 금속 공예 기술을 입증합니다.
+      </p>
+      <div class="meta-grid">
+        <div class="meta-item"><span class="meta-lbl">시대 구분</span><span class="meta-val">기원전 305년 경</span></div>
+        <div class="meta-item"><span class="meta-lbl">소장 구분</span><span class="meta-val">국립 중앙 박물관 기획전</span></div>
+        <div class="meta-item"><span class="meta-lbl">발굴 지역</span><span class="meta-val">이집트 알렉산드리아</span></div>
+        <div class="meta-item"><span class="meta-lbl">전시 번호</span><span class="meta-val">SPOT-B07</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const scripts = {
+      isis: '전시 번호 7번, 황금의 태양신 이시스 여신상입니다. 이 작품은 고대 이집트 프톨레마이오스 왕조 시대의 신앙과 장인 기술을 함께 보여줍니다. 머리 위의 태양 원반과 양옆의 뿔은 이시스 여신의 권능과 생명의 순환을 상징합니다. 표면의 금빛 장식은 빛을 받아 신성한 존재감을 드러내도록 제작되었습니다. 얼굴과 옷자락을 천천히 살펴보며 고대 장인이 남긴 섬세한 흔적을 찾아보세요.',
+      craft: '전시 번호 8번, 금속 공예의 비밀입니다. 고대 장인들은 청동 표면을 다듬고 얇은 금박을 입혀 빛을 표현했습니다. 작은 도구로 새긴 선은 옷의 주름과 장신구의 경계를 또렷하게 만듭니다. 가까이에서 보면 반복되는 무늬의 간격과 표면의 질감이 서로 다릅니다. 이 차이가 수작업의 흔적입니다.',
+      symbol: '전시 번호 9번, 태양 원반과 상징입니다. 고대 이집트에서 태양은 생명과 왕권, 매일의 재생을 뜻했습니다. 머리 위 원반은 하늘을 가로지르는 태양의 힘을 나타냅니다. 전시품의 상징은 장식인 동시에 기도와 의례의 의미를 담는 시각 언어였습니다.'
+    };
+    const voiceSelect=document.getElementById('voiceSelect'), status=document.getElementById('playerStatus'), playBtn=document.getElementById('playBtn');
+    let current='isis', utterance=null, active=false;
+    function loadVoices(){const all=speechSynthesis.getVoices();const ko=all.filter(v=>v.lang.toLowerCase().startsWith('ko'));voiceSelect.replaceChildren();(ko.length?ko:all).forEach(v=>{const o=document.createElement('option');o.value=v.name;o.textContent=`${v.name} (${v.lang})`;voiceSelect.append(o)});if(!ko.length)document.getElementById('audioNotice').textContent='기기에 한국어 음성이 없습니다. 한국어 음성 팩을 설치하거나 다른 브라우저에서 열어 주세요.'}
+    function play(){if(!('speechSynthesis'in window)){status.textContent='이 브라우저는 음성 안내를 지원하지 않습니다.';return}speechSynthesis.cancel();utterance=new SpeechSynthesisUtterance(scripts[current]);utterance.lang='ko-KR';utterance.rate=Number(document.getElementById('rateSelect').value);utterance.voice=speechSynthesis.getVoices().find(v=>v.name===voiceSelect.value)||speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('ko'))||null;utterance.onstart=()=>{active=true;playBtn.textContent='재생 중';status.textContent='음성 안내를 재생하고 있습니다'};utterance.onend=()=>{active=false;playBtn.textContent='재생';status.textContent='안내가 끝났습니다'};utterance.onerror=()=>{active=false;playBtn.textContent='재생';status.textContent='음성을 재생하지 못했습니다. 기기 음성 설정을 확인하세요.'};speechSynthesis.speak(utterance)}
+    playBtn.addEventListener('click',play);document.getElementById('pauseBtn').addEventListener('click',()=>{if(speechSynthesis.speaking&&!speechSynthesis.paused){speechSynthesis.pause();status.textContent='일시정지했습니다'}});document.getElementById('stopBtn').addEventListener('click',()=>{speechSynthesis.cancel();active=false;playBtn.textContent='재생';status.textContent='재생을 정지했습니다'});
+    document.querySelectorAll('.exhibit').forEach(btn=>btn.addEventListener('click',()=>{current=btn.dataset.exhibit;document.querySelectorAll('.exhibit').forEach(x=>x.classList.toggle('active',x===btn));play()}));speechSynthesis.onvoiceschanged=loadVoices;loadVoices();
+  </script></body>
+</html>
+
+
+
+

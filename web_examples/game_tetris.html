@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>네온 테트리스 - ESP32 미니게임</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; touch-action: none; }
+    body { background: #090d16; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; -webkit-user-select: none; user-select: none; }
+    .game-wrapper { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; }
+    .game-header { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .header-left h1 { font-size: 24px; font-weight: 800; color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.4); line-height: 1; }
+    .header-left p { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .scores-row { display: flex; gap: 8px; }
+    .score-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 4px 10px; text-align: center; }
+    .score-lbl { font-size: 9px; color: #94a3b8; font-weight: 700; text-transform: uppercase; }
+    .score-num { font-size: 14px; font-weight: 800; color: #38bdf8; }
+    .main-area { display: flex; gap: 12px; width: 100%; justify-content: center; align-items: flex-start; }
+    .canvas-wrap { position: relative; border: 2px solid #334155; border-radius: 12px; overflow: hidden; background: #030712; box-shadow: 0 8px 30px rgba(0,0,0,0.7); }
+    canvas { display: block; }
+    .side-panel { display: flex; flex-direction: column; gap: 10px; width: 85px; }
+    .panel-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 8px; text-align: center; }
+    .panel-title { font-size: 10px; color: #94a3b8; font-weight: 700; margin-bottom: 4px; }
+    #nextCanvas { display: block; margin: 0 auto; background: #030712; border-radius: 6px; }
+    .game-btn { width: 100%; background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: none; padding: 8px 0; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(2,132,199,0.3); }
+    .game-btn:active { transform: scale(0.95); }
+    .btn-nav { color: #64748b; text-decoration: none; font-size: 11px; font-weight: 600; text-align: center; display: block; margin-top: 4px; }
+    .btn-nav:hover { color: #38bdf8; }
+    .overlay-lost { position: absolute; inset: 0; background: rgba(3, 7, 18, 0.85); backdrop-filter: blur(4px); display: none; flex-direction: column; justify-content: center; align-items: center; gap: 10px; z-index: 10; }
+    .overlay-lost h2 { font-size: 22px; font-weight: 800; color: #ef4444; text-shadow: 0 0 10px rgba(239, 68, 68, 0.5); }
+    .mobile-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; margin-top: 14px; }
+    .ctrl-btn { background: #1e293b; border: 1px solid #334155; color: #f8fafc; padding: 14px 0; border-radius: 10px; font-size: 18px; font-weight: 800; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: 0.15s; }
+    .ctrl-btn:active { background: #0284c7; border-color: #0284c7; transform: scale(0.95); }
+    .ctrl-drop { grid-column: span 2; background: linear-gradient(135deg, #eab308, #ca8a04); color: #000; font-size: 14px; font-weight: 800; }
+    .ctrl-drop:active { background: #ca8a04; }
+  </style>
+</head>
+<body>
+
+  <div class="game-wrapper">
+    <div class="game-header">
+      <div class="header-left">
+        <h1>TETRIS</h1>
+        <p>ESP32 Canvas 60FPS 엔진</p>
+      </div>
+      <div class="scores-row">
+        <div class="score-box">
+          <div class="score-lbl">Score</div>
+          <div class="score-num" id="score">0</div>
+        </div>
+        <div class="score-box">
+          <div class="score-lbl">Lines</div>
+          <div class="score-num" id="lines">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-area">
+      <div class="canvas-wrap">
+        <canvas id="tetrisCanvas" width="200" height="400"></canvas>
+        <div class="overlay-lost" id="gameOverlay">
+          <h2>GAME OVER</h2>
+          <p style="font-size:12px;color:#94a3b8;">최종 점수: <b id="finalScore" style="color:#fff;">0</b></p>
+          <button class="game-btn" onclick="startGame()" style="width:100px;">다시 시작</button>
+        </div>
+      </div>
+
+      <div class="side-panel">
+        <div class="panel-box">
+          <div class="panel-title">NEXT</div>
+          <canvas id="nextCanvas" width="60" height="60"></canvas>
+        </div>
+        <div class="panel-box">
+          <div class="panel-title">LEVEL</div>
+          <div class="score-num" id="level">1</div>
+        </div>
+        <button class="game-btn" id="pauseBtn" onclick="togglePause()">일시 정지</button>
+        <button class="game-btn" onclick="startGame()">새 게임</button>
+        <a href="/" class="btn-nav">← 메인 허브</a>
+      </div>
+    </div>
+
+    <!-- 모바일 컨트롤러 패널 -->
+    <div class="mobile-controls">
+      <button class="ctrl-btn" onclick="playerMove(-1)">◀</button>
+      <button class="ctrl-btn" onclick="playerRotate()">↻</button>
+      <button class="ctrl-btn" onclick="playerMove(1)">▶</button>
+      <button class="ctrl-btn" onclick="playerDrop()">▼</button>
+      <button class="ctrl-btn ctrl-drop" onclick="playerHardDrop()">하드 드롭 (즉시낙하)</button>
+      <button class="ctrl-btn" style="grid-column:span 2;background:#334155;font-size:13px;" onclick="playerRotate()">회전 (ROTATE)</button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('tetrisCanvas');
+    const ctx = canvas.getContext('2d');
+    const nextCanvas = document.getElementById('nextCanvas');
+    const nextCtx = nextCanvas.getContext('2d');
+
+    const COLS = 10;
+    const ROWS = 20;
+    const BLOCK = 20;
+
+    const COLORS = [
+      null,
+      '#06b6d4', // I 하늘색
+      '#3b82f6', // J 파랑
+      '#f97316', // L 주황
+      '#eab308', // O 노랑
+      '#10b981', // S 초록
+      '#a855f7', // T 보라
+      '#ef4444'  // Z 빨강
+    ];
+
+    const PIECES = [
+      [],
+      [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], // I
+      [[2,0,0],[2,2,2],[0,0,0]],                 // J
+      [[0,0,3],[3,3,3],[0,0,0]],                 // L
+      [[4,4],[4,4]],                             // O
+      [[0,5,5],[5,5,0],[0,0,0]],                 // S
+      [[0,6,0],[6,6,6],[0,0,0]],                 // T
+      [[7,7,0],[0,7,7],[0,0,0]]                  // Z
+    ];
+
+    let arena = createMatrix(COLS, ROWS);
+    let player = { pos: { x: 0, y: 0 }, matrix: null, score: 0, lines: 0, level: 1 };
+    let nextPiece = null;
+    let dropCounter = 0;
+    let dropInterval = 800;
+    let lastTime = 0;
+    let isPaused = false;
+    let isGameOver = false;
+
+    function createMatrix(w, h) {
+      const mat = [];
+      while (h--) mat.push(new Array(w).fill(0));
+      return mat;
+    }
+
+    function collide(arena, player) {
+      const m = player.matrix;
+      const o = player.pos;
+      for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+          if (m[y][x] !== 0 && (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function merge(arena, player) {
+      player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) {
+            arena[y + player.pos.y][x + player.pos.x] = value;
+          }
+        });
+      });
+    }
+
+    function rotate(matrix) {
+      for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < y; ++x) {
+          [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+        }
+      }
+      matrix.forEach(row => row.reverse());
+    }
+
+    function playerRotate() {
+      if (isPaused || isGameOver) return;
+      const pos = player.pos.x;
+      let offset = 1;
+      rotate(player.matrix);
+      while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+          rotate(player.matrix);
+          rotate(player.matrix);
+          rotate(player.matrix);
+          player.pos.x = pos;
+          return;
+        }
+      }
+    }
+
+    function playerMove(dir) {
+      if (isPaused || isGameOver) return;
+      player.pos.x += dir;
+      if (collide(arena, player)) {
+        player.pos.x -= dir;
+      }
+    }
+
+    function playerDrop() {
+      if (isPaused || isGameOver) return;
+      player.pos.y++;
+      if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
+      }
+      dropCounter = 0;
+    }
+
+    function playerHardDrop() {
+      if (isPaused || isGameOver) return;
+      while (!collide(arena, player)) {
+        player.pos.y++;
+      }
+      player.pos.y--;
+      merge(arena, player);
+      playerReset();
+      arenaSweep();
+      dropCounter = 0;
+    }
+
+    function arenaSweep() {
+      let rowCount = 1;
+      outer: for (let y = arena.length - 1; y >= 0; --y) {
+        for (let x = 0; x < arena[y].length; ++x) {
+          if (arena[y][x] === 0) continue outer;
+        }
+        const row = arena.splice(y, 1)[0].fill(0);
+        arena.unshift(row);
+        ++y;
+
+        player.score += rowCount * 100;
+        player.lines++;
+        rowCount *= 2;
+      }
+
+      player.level = Math.floor(player.lines / 10) + 1;
+      dropInterval = Math.max(150, 800 - (player.level - 1) * 70);
+
+      document.getElementById('score').textContent = player.score;
+      document.getElementById('lines').textContent = player.lines;
+      document.getElementById('level').textContent = player.level;
+    }
+
+    function playerReset() {
+      if (!nextPiece) {
+        nextPiece = Math.floor(Math.random() * 7) + 1;
+      }
+      player.matrix = PIECES[nextPiece].map(r => [...r]);
+      nextPiece = Math.floor(Math.random() * 7) + 1;
+      drawNext();
+
+      player.pos.y = 0;
+      player.pos.x = ((COLS / 2) | 0) - ((player.matrix[0].length / 2) | 0);
+
+      if (collide(arena, player)) {
+        isGameOver = true;
+        document.getElementById('finalScore').textContent = player.score;
+        document.getElementById('gameOverlay').style.display = 'flex';
+      }
+    }
+
+    function drawBlock(c, x, y, color) {
+      c.fillStyle = color;
+      c.fillRect(x * BLOCK, y * BLOCK, BLOCK, BLOCK);
+      c.strokeStyle = '#030712';
+      c.lineWidth = 1;
+      c.strokeRect(x * BLOCK, y * BLOCK, BLOCK, BLOCK);
+      // 입체 하이라이트
+      c.fillStyle = 'rgba(255,255,255,0.2)';
+      c.fillRect(x * BLOCK, y * BLOCK, BLOCK, 3);
+      c.fillRect(x * BLOCK, y * BLOCK, 3, BLOCK);
+    }
+
+    function draw() {
+      ctx.fillStyle = '#030712';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 격자 배경
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 0.5;
+      for (let x = 0; x < COLS; x++) {
+        ctx.beginPath(); ctx.moveTo(x * BLOCK, 0); ctx.lineTo(x * BLOCK, ROWS * BLOCK); ctx.stroke();
+      }
+      for (let y = 0; y < ROWS; y++) {
+        ctx.beginPath(); ctx.moveTo(0, y * BLOCK); ctx.lineTo(COLS * BLOCK, y * BLOCK); ctx.stroke();
+      }
+
+      // 쌓인 블록
+      arena.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) drawBlock(ctx, x, y, COLORS[value]);
+        });
+      });
+
+      // 현재 블록
+      if (player.matrix) {
+        player.matrix.forEach((row, y) => {
+          row.forEach((value, x) => {
+            if (value !== 0) drawBlock(ctx, x + player.pos.x, y + player.pos.y, COLORS[value]);
+          });
+        });
+      }
+    }
+
+    function drawNext() {
+      nextCtx.fillStyle = '#030712';
+      nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+      const m = PIECES[nextPiece];
+      const blockSize = 14;
+      const offsetX = (nextCanvas.width - m[0].length * blockSize) / 2;
+      const offsetY = (nextCanvas.height - m.length * blockSize) / 2;
+
+      m.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) {
+            nextCtx.fillStyle = COLORS[value];
+            nextCtx.fillRect(offsetX + x * blockSize, offsetY + y * blockSize, blockSize, blockSize);
+            nextCtx.strokeStyle = '#030712';
+            nextCtx.strokeRect(offsetX + x * blockSize, offsetY + y * blockSize, blockSize, blockSize);
+          }
+        });
+      });
+    }
+
+    function update(time = 0) {
+      if (!isPaused && !isGameOver) {
+        const deltaTime = time - lastTime;
+        lastTime = time;
+        dropCounter += deltaTime;
+        if (dropCounter > dropInterval) {
+          playerDrop();
+        }
+        draw();
+      }
+      requestAnimationFrame(update);
+    }
+
+    function startGame() {
+      arena.forEach(row => row.fill(0));
+      player.score = 0;
+      player.lines = 0;
+      player.level = 1;
+      dropInterval = 800;
+      isGameOver = false;
+      isPaused = false;
+      document.getElementById('score').textContent = '0';
+      document.getElementById('lines').textContent = '0';
+      document.getElementById('level').textContent = '1';
+      document.getElementById('gameOverlay').style.display = 'none';
+      document.getElementById('pauseBtn').textContent = '일시 정지';
+      nextPiece = null;
+      playerReset();
+    }
+
+    function togglePause() {
+      if (isGameOver) return;
+      isPaused = !isPaused;
+      document.getElementById('pauseBtn').textContent = isPaused ? '이어 하기' : '일시 정지';
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') { playerMove(-1); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { playerMove(1); e.preventDefault(); }
+      else if (e.key === 'ArrowDown') { playerDrop(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { playerRotate(); e.preventDefault(); }
+      else if (e.code === 'Space') { playerHardDrop(); e.preventDefault(); }
+    });
+
+    startGame();
+    update();
+  </script>
+</body>
+</html>
