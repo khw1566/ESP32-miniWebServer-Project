@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e141c">
+  <meta name="description" content="2.8인치 터치 화면을 갖춘 ESP32 보드에 웹서버, 클라우드 중계, SD 파일 관리를 담은 Mini WEB M1을 소개합니다.">
+  <title>Mini WEB M1 | 손바닥 위의 웹서버</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0e141c;--panel:#17202b;--panel2:#1d2834;--line:#2c3b4a;--text:#ecf1f5;--muted:#9aabb8;--blue:#78beff;--mint:#6ee1af;--amber:#e3b25a;--gold:#c4a034;--max:1120px}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:"Malgun Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.65;word-break:keep-all;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+    img{display:block;max-width:100%;height:auto}a{color:inherit}
+    .shell{width:min(var(--max),calc(100% - 32px));margin:auto}
+    .topbar{position:sticky;top:0;z-index:5;background:rgba(14,20,28,.88);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.07)}
+    .topbar .shell{height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:800}
+    .mark{width:30px;height:30px;border-radius:8px;background:var(--gold);display:grid;place-items:center;color:#1b1607;font-size:12px;font-weight:900}
+    .nav{display:flex;gap:22px;font-size:14px;color:var(--muted)}.nav a{text-decoration:none}.nav a:hover{color:var(--text)}
+    .btn{min-height:44px;padding:0 20px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:14px;border:1px solid transparent;cursor:pointer;font-family:inherit;transition:transform .2s,background .2s}
+    .btn:hover{transform:translateY(-1px)}.btn-p{background:var(--mint);color:#0b2219}.btn-p:hover{background:#8aeac1}
+    .btn-s{background:transparent;color:var(--text);border-color:var(--line)}.btn-s:hover{background:var(--panel)}
+    .btn-sm{min-height:36px;padding:0 14px;font-size:13px}
+    .hero{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;padding:64px 0 48px}
+    .eyebrow{color:var(--mint);font-size:12px;font-weight:800;letter-spacing:.14em}
+    h1{font-size:clamp(36px,5.6vw,64px);line-height:1.12;letter-spacing:-.04em;margin:16px 0 18px}h1 em{font-style:normal;color:var(--mint)}
+    .lead{color:#b9c6d0;font-size:17px;max-width:520px;margin:0}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
+    .price-hint{margin-top:18px;color:var(--muted);font-size:13px}.price-hint b{color:var(--text);font-size:18px}
+    .media{border-radius:16px;overflow:hidden;background:var(--bg)}
+    /* Animated scenes: a static WebP plus CSS layers in the image's own pixel space.
+       --w/--h are the scene size; each layer sets --x/--y/--lw/--lh in those pixels. */
+    .scene{position:relative;width:100%;aspect-ratio:var(--w)/var(--h);container-type:inline-size;--u:calc(100cqw / var(--w))}
+    .scene img,.float{position:absolute;inset:0;width:100%;height:100%}
+    .l{position:absolute;display:block;left:calc(var(--x)*100%/var(--w));top:calc(var(--y)*100%/var(--h));width:calc(var(--lw)*100%/var(--w));height:calc(var(--lh)*100%/var(--h))}
+    .scene:not(.run) .l,.scene:not(.run) .float,.scene:not(.run) .l b{animation-play-state:paused}
+    .hero-scene{background:radial-gradient(circle at 50% 50%,rgba(39,122,199,.22),transparent 62%)}
+    .ring{border:calc(2*var(--u)) solid rgba(120,190,255,.5);border-radius:50%;opacity:0;animation:ring 3.6s linear infinite}.ring.r2{animation-delay:-1.8s}
+    @keyframes ring{0%{transform:scale(.54);opacity:.6}100%{transform:scale(1);opacity:0}}
+    .float{animation:float 4s ease-in-out infinite alternate}
+    @keyframes float{from{transform:translateY(calc(-5*var(--u)))}to{transform:translateY(calc(5*var(--u)))}}
+    .bar{background:#398b63;border-radius:var(--u);animation:sig 2.4s infinite both}
+    .b1{animation-delay:.3s}.b2{animation-delay:.6s}.b3{animation-delay:.9s}
+    @keyframes sig{0%,8%{opacity:0}14%,80%{opacity:1}92%,100%{opacity:0}}
+    .ping{border:calc(1.5*var(--u)) solid #398b63;border-radius:50%;opacity:0;animation:ping 1.6s ease-out infinite}
+    @keyframes ping{0%{transform:scale(1);opacity:.9}100%{transform:scale(2.8);opacity:0}}
+    .ram{background:#277ac7;border-radius:calc(3*var(--u));transform-origin:left;animation:ram 4s ease-in-out infinite alternate}
+    @keyframes ram{from{transform:scaleX(.8)}to{transform:scaleX(1.12)}}
+    .tap{border:calc(2*var(--u)) solid #277ac7;border-radius:50%;opacity:0;animation:tap 2s ease-out infinite}
+    @keyframes tap{0%{transform:scale(.2);opacity:1}45%{transform:scale(1);opacity:0}100%{opacity:0}}
+    .led{background:#ff5a5a;border-radius:50%;box-shadow:0 0 calc(8*var(--u)) #ff5a5a;opacity:.6;animation:led 1.3s ease-in-out infinite alternate}
+    @keyframes led{from{opacity:.15}to{opacity:1}}
+    .pulse{border:calc(2*var(--u)) solid #78beff;border-radius:calc(8*var(--u));opacity:0;animation:pulse 2s ease-out infinite}
+    @keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.35,1.6);opacity:0}}
+    .row{background:#78beff;border-radius:calc(2*var(--u));opacity:0;animation:row 1.8s steps(1) infinite}
+    .w1{animation-delay:.6s}.w2{animation-delay:1.2s}
+    @keyframes row{0%{opacity:1}33%,100%{opacity:0}}
+    .track b{position:absolute;left:0;top:0;width:calc(10*var(--u));height:calc(10*var(--u));margin:calc(-5*var(--u));border-radius:50%;background:#78beff;animation:go 2s linear infinite}
+    .track b:nth-child(2){animation-delay:-.67s}.track b:nth-child(3){animation-delay:-1.33s}
+    .track.mint b{background:#6ee1af}
+    .track.back b{width:calc(6*var(--u));height:calc(6*var(--u));margin:calc(-3*var(--u));background:#d29932;animation:back 3s linear infinite}
+    .track.back b:nth-child(2){animation-delay:-1s}.track.back b:nth-child(3){animation-delay:-2s}
+    @keyframes go{from{left:0}to{left:100%}}
+    @keyframes back{from{left:100%}to{left:0}}
+    .wipe{background:#fafbfd;transform:scaleX(0);transform-origin:right;animation:wipe 5s ease-in-out infinite}
+    @keyframes wipe{0%{transform:scaleX(1);opacity:1}35%{transform:scaleX(0);opacity:1}88%{transform:scaleX(0);opacity:0}89%{transform:scaleX(1);opacity:0}100%{transform:scaleX(1);opacity:1}}
+    .scan{background:#6ee1af;box-shadow:0 0 calc(6*var(--u)) #6ee1af;opacity:0;animation:scan 5s ease-in-out infinite}
+    @keyframes scan{0%,40%{opacity:0;transform:none}45%{opacity:1;transform:none}62%{transform:translateY(calc(130*var(--u)))}78%{opacity:1;transform:none}80%,100%{opacity:0}}
+    .badge{display:grid;place-items:center;background:#398b63;color:#fff;border-radius:calc(6*var(--u));font-style:normal;font-weight:800;font-size:calc(12*var(--u));animation:badge 5s ease-out infinite}
+    @keyframes badge{0%,78%{opacity:0;transform:scale(.9)}83%,95%{opacity:1;transform:none}100%{opacity:0}}
+    @property --p{syntax:'<number>';inherits:false;initial-value:62}
+    @property --n{syntax:'<integer>';inherits:false;initial-value:62}
+    .arc{border-radius:50%;--p:62;background:conic-gradient(#277ac7 calc(var(--p)*1%),#30404e 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 10*var(--u)),#000 calc(100% - 10*var(--u) + 1px));mask:radial-gradient(farthest-side,transparent calc(100% - 10*var(--u)),#000 calc(100% - 10*var(--u) + 1px));animation:fill 5s ease-in-out infinite}
+    @keyframes fill{0%,15%{--p:0}55%,92%{--p:62}100%{--p:0}}
+    .pct{display:grid;place-items:center;font-style:normal;font-weight:800;font-size:calc(14*var(--u));--n:62;counter-reset:n var(--n);animation:count 5s ease-in-out infinite}
+    .pct:after{content:counter(n) "%"}
+    @keyframes count{0%,15%{--n:0}55%,92%{--n:62}100%{--n:0}}
+    .cover{background:#0e141c;opacity:0;animation:cover 5s ease-out infinite both}
+    .c1{animation-delay:.35s}.c2{animation-delay:.7s}.c3{animation-delay:1.05s}.c4{animation-delay:1.4s}
+    @keyframes cover{0%,20%{opacity:1;transform:none}30%,90%{opacity:0;transform:translateY(calc(-6*var(--u)))}96%,100%{opacity:1;transform:none}}
+    .dark{background:#06080b;border-radius:calc(3*var(--u));opacity:0;animation:dark 6s ease-in-out infinite}
+    @keyframes dark{0%,15%{opacity:0}35%,75%{opacity:1}90%,100%{opacity:0}}
+    .dot{background:#6ee1af;border-radius:50%;opacity:0;animation:dot 6s infinite}
+    @keyframes dot{0%,36%{opacity:0}42%{opacity:.8}50%{opacity:.15}58%{opacity:.8}66%{opacity:.15}72%{opacity:.6}76%,100%{opacity:0}}
+    .fill{background:#277ac7;border-radius:calc(6*var(--u));transform:scaleX(.42);transform-origin:left;animation:ramup 6s ease-in-out infinite}
+    @keyframes ramup{0%,15%{transform:scaleX(.42);background:#277ac7}35%,75%{transform:scaleX(.6);background:#6ee1af}90%,100%{transform:scaleX(.42);background:#277ac7}}
+    .state{font-style:normal;font-weight:800;font-size:calc(26*var(--u));line-height:calc(40*var(--u))}
+    .state span{position:absolute;inset:0}.state .on{color:#ecf1f5;animation:on 6s infinite}.state .off{color:#6ee1af;opacity:0;animation:off 6s infinite}
+    @keyframes on{0%,25%{opacity:1}30%,80%{opacity:0}85%,100%{opacity:1}}
+    @keyframes off{0%,25%{opacity:0}30%,80%{opacity:1}85%,100%{opacity:0}}
+    .sav-scene .tap{border-color:#fff;animation:wake 6s ease-out infinite}
+    @keyframes wake{0%,70%{transform:scale(.2);opacity:0}72%{transform:scale(.25);opacity:1}88%{transform:scale(1);opacity:0}100%{opacity:0}}
+    @media (prefers-reduced-motion:reduce){.scene .l,.scene .float,.scene .l b{animation:none!important}.track b{display:none}}
+    .hero .media{max-width:480px;justify-self:center;width:100%}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:88px}
+    .stat{background:var(--panel);padding:20px}.stat b{display:block;font-size:22px;letter-spacing:-.02em}.stat span{color:var(--muted);font-size:13px}
+    section{scroll-margin-top:72px}
+    .sec-head{max-width:640px;margin-bottom:36px}.sec-head h2{font-size:clamp(26px,3.6vw,38px);line-height:1.25;letter-spacing:-.03em;margin:10px 0}.sec-head p{color:var(--muted);margin:0}
+    .feature{display:grid;grid-template-columns:1.1fr .9fr;gap:44px;align-items:center;padding:36px 0;border-top:1px solid rgba(255,255,255,.06)}
+    .feature:nth-of-type(even) .media{order:2}
+    .feature h3{font-size:24px;letter-spacing:-.02em;margin:8px 0 12px}.feature p{color:#b9c6d0;margin:0 0 14px}
+    .tag{display:inline-block;font-size:12px;font-weight:800;color:var(--blue);letter-spacing:.08em}
+    .checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px;color:#c9d4dc}
+    .checks li{padding-left:20px;position:relative}.checks li:before{content:"";position:absolute;left:2px;top:9px;width:8px;height:8px;border-radius:2px;background:var(--mint)}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:56px 0 96px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+    .card h4{margin:0 0 6px;font-size:16px}.card p{margin:0;color:var(--muted);font-size:14px}
+    .card .ico{width:28px;height:28px;border-radius:7px;margin-bottom:14px;background:linear-gradient(135deg,var(--blue),#3b7fc0)}
+    .card:nth-child(2) .ico{background:linear-gradient(135deg,var(--mint),#3e9c75)}
+    .card:nth-child(3) .ico{background:linear-gradient(135deg,var(--amber),#b07b24)}
+    .card:nth-child(4) .ico{background:linear-gradient(135deg,#c9a4ff,#7d5bc4)}
+    .spec{width:100%;border-collapse:collapse;font-size:15px;margin-bottom:96px}
+    .spec th,.spec td{text-align:left;padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+    .spec th{width:30%;color:var(--muted);font-weight:600}
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;counter-reset:step;margin-bottom:96px}
+    .step{background:var(--panel);border-radius:12px;padding:22px;border:1px solid var(--line)}
+    .step:before{counter-increment:step;content:counter(step);display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--mint);font-weight:800;margin-bottom:12px}
+    .step h4{margin:0 0 6px}.step p{margin:0;color:var(--muted);font-size:14px}
+    .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:12px}
+    .plan{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px;display:flex;flex-direction:column}
+    .plan.best{border-color:var(--mint);box-shadow:0 0 0 1px var(--mint) inset}
+    .plan .badge{align-self:flex-start;font-size:12px;font-weight:800;color:#0b2219;background:var(--mint);border-radius:999px;padding:2px 10px;margin-bottom:10px}
+    .plan h3{margin:0;font-size:20px}.plan .won{font-size:30px;font-weight:800;letter-spacing:-.03em;margin:10px 0 4px}.plan .won small{font-size:14px;color:var(--muted);font-weight:500}
+    .plan ul{list-style:none;padding:0;margin:14px 0 22px;display:grid;gap:8px;color:#c9d4dc;font-size:14px;flex:1}
+    .plan li{padding-left:16px;position:relative}.plan li:before{content:"";position:absolute;left:0;top:10px;width:6px;height:6px;border-radius:50%;background:var(--blue)}
+    .note{color:var(--muted);font-size:13px;margin:0 0 96px}
+    details{border-bottom:1px solid var(--line);padding:16px 0}summary{cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;gap:12px}
+    summary::-webkit-details-marker{display:none}summary:after{content:"+";color:var(--mint);font-weight:800}details[open] summary:after{content:"-"}
+    details p{color:var(--muted);margin:10px 0 0}
+    .faq{max-width:760px;margin-bottom:96px}
+    .cta{background:linear-gradient(135deg,#17324a,#163a30);border:1px solid var(--line);border-radius:18px;padding:44px;text-align:center;margin-bottom:64px}
+    .cta h2{margin:0 0 10px;font-size:clamp(24px,3.4vw,34px);letter-spacing:-.03em}.cta p{color:#c3d0d9;margin:0 0 22px}
+    footer{border-top:1px solid var(--line);padding:28px 0 40px;color:var(--muted);font-size:13px}
+    .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 18px;font-size:14px;transition:.25s;pointer-events:none;max-width:calc(100% - 32px)}
+    .toast.show{opacity:1;transform:translate(-50%,0)}
+    .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s,transform .6s}.reveal.in{opacity:1;transform:none}
+    @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}.btn{transition:none}}
+    @media (max-width:900px){
+      .hero,.feature{grid-template-columns:1fr;gap:28px}.hero{padding-top:40px}
+      .feature:nth-of-type(even) .media{order:0}
+      .grid{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:repeat(2,1fr)}
+      .steps,.plans{grid-template-columns:1fr}
+    }
+    @media (max-width:560px){
+      .nav{display:none}.grid{grid-template-columns:1fr}
+      .spec th{width:38%}.spec th,.spec td{padding:12px 8px;font-size:14px}
+      .cta{padding:30px 20px}.stat{padding:16px}.stat b{font-size:19px}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell">
+      <a class="brand" href="#top"><span class="mark">M1</span>Mini WEB M1</a>
+      <nav class="nav" aria-label="페이지 메뉴">
+        <a href="#features">기능</a><a href="#spec">사양</a><a href="#start">시작하기</a><a href="#buy">구매</a><a href="#faq">자주 묻는 질문</a>
+      </nav>
+      <a class="btn btn-p btn-sm" href="#buy">구매하기</a>
+    </div>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">ESP32-2432S028 기반 로컬 웹서버</div>
+        <h1>손바닥 위의<br><em>웹서버</em>를 켜세요</h1>
+        <p class="lead">2.8인치 터치 화면이 달린 작은 보드 하나로 홈페이지를 띄우고, QR로 바로 접속시키고, SD카드의 파일까지 관리합니다. PC도, 호스팅 계약도 필요 없습니다.</p>
+        <div class="actions">
+          <a class="btn btn-p" href="#buy">패키지 보기</a>
+          <a class="btn btn-s" href="#features">어떻게 동작하나요</a>
+        </div>
+        <p class="price-hint">스타터 키트 <b>39,000원</b>부터</p>
+      </div>
+      <div class="media scene hero-scene" style="--w:480;--h:440" role="img" aria-label="보드 화면에 Wi-Fi 신호, 웹서버 상태, RAM 사용량이 실시간으로 바뀌는 대시보드">
+          <i class="l ring" style="--x:-20;--y:-40;--lw:520;--lh:520"></i><i class="l ring r2" style="--x:-20;--y:-40;--lw:520;--lh:520"></i>
+          <div class="float"><img src="hero.webp" width="480" height="440" alt="">
+            <i class="l bar b0" style="--x:141;--y:109;--lw:3;--lh:4"></i><i class="l bar b1" style="--x:146;--y:105;--lw:3;--lh:8"></i><i class="l bar b2" style="--x:151;--y:101;--lw:3;--lh:12"></i><i class="l bar b3" style="--x:156;--y:97;--lw:3;--lh:16"></i>
+            <i class="l ping" style="--x:250.8;--y:102.4;--lw:10.8;--lh:10.8"></i><i class="l ram" style="--x:195;--y:141.1;--lw:71.1;--lh:6.3"></i><i class="l tap" style="--x:154;--y:208;--lw:64;--lh:64"></i><i class="l led" style="--x:346;--y:384;--lw:10;--lh:10"></i>
+          </div>
+        </div>
+    </section>
+
+    <div class="stats reveal">
+      <div class="stat"><b>2.8인치</b><span>240 x 320 터치 LCD</span></div>
+      <div class="stat"><b>240 MHz</b><span>ESP32 듀얼코어</span></div>
+      <div class="stat"><b>4 MB</b><span>플래시 + microSD 확장</span></div>
+      <div class="stat"><b>USB 5V</b><span>전원 하나로 상시 운영</span></div>
+    </div>
+
+    <section id="features">
+      <div class="sec-head reveal">
+        <span class="tag">FEATURES</span>
+        <h2>화면에서 설정하고,<br>휴대전화로 바로 엽니다</h2>
+        <p>Wi-Fi 연결부터 접속 안내까지 보드의 터치 화면에서 끝납니다.</p>
+      </div>
+
+      <article class="feature reveal">
+        <div class="media scene net-scene" style="--w:560;--h:260" role="img" aria-label="스마트폰과 M1 보드, 외부 도메인 사이로 데이터가 오가는 흐름">
+          <img src="network.webp" width="560" height="260" loading="lazy" alt="">
+          <i class="l pulse" style="--x:236;--y:98;--lw:88;--lh:64"></i><i class="l row w0" style="--x:66;--y:100;--lw:28;--lh:10"></i><i class="l row w1" style="--x:66;--y:118;--lw:22;--lh:10"></i><i class="l row w2" style="--x:66;--y:136;--lw:16;--lh:10"></i>
+          <i class="l track" style="--x:110;--y:130;--lw:122;--lh:0"><b></b><b></b><b></b></i><i class="l track mint" style="--x:330;--y:130;--lw:86;--lh:0"><b></b><b></b><b></b></i>
+          <i class="l track back" style="--x:110;--y:142;--lw:122;--lh:0"><b></b><b></b><b></b></i><i class="l track back" style="--x:330;--y:142;--lw:86;--lh:0"><b></b><b></b><b></b></i>
+        </div>
+        <div>
+          <span class="tag">NETWORK</span>
+          <h3>집 Wi-Fi, 직접 연결, 외부 주소까지</h3>
+          <p>공유기에 연결해 같은 네트워크에서 쓰거나, 보드가 직접 SoftAP를 열어 공유기 없이도 접속할 수 있습니다. 클라우드 중계를 켜면 포트 개방 없이 외부 도메인으로 공개됩니다.</p>
+          <ul class="checks"><li>Wi-Fi 검색과 비밀번호 입력을 화면 키보드로</li><li>SoftAP 접속 시 설정 화면 자동 안내</li><li>IPv6 지원과 클라우드 중계 외부 주소</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="media scene qr-scene" style="--w:520;--h:300" role="img" aria-label="보드 화면에 접속 QR이 나타나고 휴대전화가 스캔해 접속되는 모습">
+          <img src="qr.webp" width="520" height="300" loading="lazy" alt="">
+          <i class="l wipe" style="--x:71;--y:86;--lw:128;--lh:128"></i><i class="l scan" style="--x:314;--y:80;--lw:82;--lh:2"></i><i class="l badge" style="--x:318;--y:128;--lw:74;--lh:32">접속됨</i>
+        </div>
+        <div>
+          <span class="tag">QR ACCESS</span>
+          <h3>주소를 몰라도 QR 한 번이면 접속</h3>
+          <p>보드 화면에 로컬, 외부, SoftAP 접속 QR이 표시됩니다. IP가 바뀌어도 같은 제품 고정 주소(mDNS)로 다시 찾아올 수 있습니다.</p>
+          <ul class="checks"><li>로컬 / 외부 / SoftAP 접속 QR</li><li>IP가 바뀌어도 유지되는 제품 고정 주소</li><li>관리자 페이지에서 파일별 QR 생성</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="media scene sto-scene" style="--w:520;--h:300" role="img" aria-label="SD카드 사용량 그래프가 차오르고 파일 목록이 차례로 나타나는 모습">
+          <img src="storage.webp" width="520" height="300" loading="lazy" alt="">
+          <i class="l arc" style="--x:60;--y:190;--lw:80;--lh:80"></i><i class="l pct" style="--x:60;--y:190;--lw:80;--lh:80"></i>
+          <i class="l cover c0" style="--x:209;--y:39;--lw:283;--lh:40"></i><i class="l cover c1" style="--x:209;--y:87;--lw:283;--lh:40"></i><i class="l cover c2" style="--x:209;--y:135;--lw:283;--lh:40"></i><i class="l cover c3" style="--x:209;--y:183;--lw:283;--lh:40"></i><i class="l cover c4" style="--x:209;--y:231;--lw:283;--lh:40"></i>
+        </div>
+        <div>
+          <span class="tag">STORAGE</span>
+          <h3>SD카드 하나로 넉넉한 웹 공간</h3>
+          <p>내부 플래시와 microSD를 함께 사용합니다. 브라우저 관리자 페이지에서 업로드, 삭제, 메인 페이지 지정을 하고, 보드 화면에서는 용량과 폴더를 바로 확인합니다.</p>
+          <ul class="checks"><li>이미지, 영상, WebP 등 미디어 파일 제공</li><li>폴더 탐색과 파일 정보 확인</li><li>원하는 HTML을 메인 페이지로 지정</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="media scene sav-scene" style="--w:520;--h:300" role="img" aria-label="보드 화면이 꺼지면서 내부 RAM 여유 막대가 늘어나고 터치하면 다시 켜지는 모습">
+          <img src="saver.webp" width="520" height="300" loading="lazy" alt="">
+          <i class="l dark" style="--x:55;--y:57;--lw:150;--lh:200"></i><i class="l dot" style="--x:127;--y:150;--lw:6;--lh:6"></i><i class="l fill" style="--x:274;--y:86;--lw:202;--lh:20"></i>
+          <i class="l state" style="--x:270;--y:120;--lw:210;--lh:40"><span class="on">화면 켬</span><span class="off">화면 끔</span></i><i class="l tap" style="--x:98;--y:168;--lw:64;--lh:64"></i>
+        </div>
+        <div>
+          <span class="tag">SCREEN OFF</span>
+          <h3>화면을 끄면 메모리가 늘어납니다</h3>
+          <p>화면 끄기 버튼을 누르면 화면 요소와 그리기 버퍼를 메모리에서 내려 웹서버가 쓸 RAM을 확보합니다. 웹서버와 Wi-Fi는 그대로 동작하고, 화면을 누르면 바로 돌아옵니다.</p>
+          <ul class="checks"><li>백라이트와 LCD 출력 차단</li><li>확보한 RAM은 TLS와 AI 요청에 활용</li><li>오작동을 막는 터치 압력 확인 후 복귀</li></ul>
+        </div>
+      </article>
+    </section>
+
+    <div class="grid">
+      <div class="card reveal"><div class="ico"></div><h4>브라우저 관리자</h4><p>네트워크 상태, 파일, 로그를 한 화면에서 확인합니다.</p></div>
+      <div class="card reveal"><div class="ico"></div><h4>AI 웹 편집</h4><p>Gemini API 키를 연결하면 대화로 페이지를 만들고 고칩니다.</p></div>
+      <div class="card reveal"><div class="ico"></div><h4>무선 펌웨어 업데이트</h4><p>관리자 페이지에서 새 펌웨어를 올리고 재부팅합니다.</p></div>
+      <div class="card reveal"><div class="ico"></div><h4>상시 메모리 점검</h4><p>여유 RAM과 태스크 스택을 주기적으로 기록합니다.</p></div>
+    </div>
+
+    <section id="spec">
+      <div class="sec-head reveal"><span class="tag">SPECIFICATIONS</span><h2>하드웨어 사양</h2></div>
+      <table class="spec reveal">
+        <tbody>
+          <tr><th>보드</th><td>ESP32-2432S028R</td></tr>
+          <tr><th>프로세서</th><td>ESP32 듀얼코어 Xtensa LX6, 최대 240 MHz</td></tr>
+          <tr><th>메모리</th><td>내부 SRAM 520 KB (PSRAM 없음)</td></tr>
+          <tr><th>저장 공간</th><td>플래시 4 MB (웹 파일 영역 1 MB), microSD 슬롯</td></tr>
+          <tr><th>디스플레이</th><td>2.8인치 TFT 240 x 320, ILI9341</td></tr>
+          <tr><th>터치</th><td>저항막 터치 XPT2046</td></tr>
+          <tr><th>무선</th><td>Wi-Fi 802.11 b/g/n 2.4 GHz, SoftAP 동시 지원</td></tr>
+          <tr><th>전원 / 연결</th><td>USB 5V, CH340 USB 시리얼</td></tr>
+          <tr><th>펌웨어</th><td>ESP-IDF 5.5, LVGL 8 화면 UI</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="start">
+      <div class="sec-head reveal"><span class="tag">GET STARTED</span><h2>세 단계면 첫 페이지가 열립니다</h2></div>
+      <div class="steps">
+        <div class="step reveal"><h4>전원 연결</h4><p>USB 케이블을 꽂으면 보드 화면에 대시보드가 나타납니다.</p></div>
+        <div class="step reveal"><h4>Wi-Fi 설정</h4><p>화면에서 네트워크를 고르고 비밀번호를 입력하거나 SoftAP로 바로 시작합니다.</p></div>
+        <div class="step reveal"><h4>QR로 접속</h4><p>접속 QR을 휴대전화로 스캔하고 관리자 페이지에서 파일을 올립니다.</p></div>
+      </div>
+    </section>
+
+    <section id="buy">
+      <div class="sec-head reveal"><span class="tag">PACKAGES</span><h2>필요에 맞게 고르세요</h2></div>
+      <div class="plans">
+        <div class="plan reveal">
+          <h3>보드 단품</h3>
+          <div class="won">29,000<small>원</small></div>
+          <ul><li>펌웨어가 설치된 M1 보드</li><li>USB 케이블</li><li>빠른 시작 안내 카드</li></ul>
+          <button class="btn btn-s" type="button" data-plan="보드 단품">선택</button>
+        </div>
+        <div class="plan best reveal">
+          <span class="badge">추천</span>
+          <h3>스타터 키트</h3>
+          <div class="won">39,000<small>원</small></div>
+          <ul><li>보드 단품 구성 전체</li><li>예제 웹사이트를 담은 microSD</li><li>보호 케이스와 받침대</li></ul>
+          <button class="btn btn-p" type="button" data-plan="스타터 키트">선택</button>
+        </div>
+        <div class="plan reveal">
+          <h3>교육용 10대 세트</h3>
+          <div class="won">350,000<small>원</small></div>
+          <ul><li>스타터 키트 10세트</li><li>수업용 예제와 실습 자료</li><li>교사용 관리 안내</li></ul>
+          <button class="btn btn-s" type="button" data-plan="교육용 10대 세트">문의하기</button>
+        </div>
+      </div>
+      <p class="note">이 페이지는 Mini WEB 예제입니다. 가격과 구성은 예시이며 실제 주문은 처리되지 않습니다.</p>
+    </section>
+
+    <section id="faq" class="faq">
+      <div class="sec-head reveal"><span class="tag">FAQ</span><h2>자주 묻는 질문</h2></div>
+      <details><summary>인터넷이 없어도 사용할 수 있나요?</summary><p>네. SoftAP 모드에서는 보드가 직접 Wi-Fi를 열어 휴대전화가 바로 접속합니다. 외부 도메인 공개와 AI 편집만 인터넷이 필요합니다.</p></details>
+      <details><summary>어떤 파일을 올릴 수 있나요?</summary><p>HTML, CSS, JavaScript, 이미지, WebP 애니메이션, 영상 등 정적 파일을 제공합니다. 큰 미디어는 microSD에 두는 것을 권장합니다.</p></details>
+      <details><summary>화면을 끄면 웹사이트도 멈추나요?</summary><p>아닙니다. 화면만 꺼지고 웹서버, Wi-Fi, 클라우드 중계는 계속 동작합니다. 화면을 누르면 대시보드가 다시 나타납니다.</p></details>
+      <details><summary>동시에 몇 명이 접속할 수 있나요?</summary><p>소규모 전시, 매장 메뉴, 수업 실습처럼 가벼운 용도에 맞춰져 있습니다. 동시 연결은 4개까지 처리하며, 대규모 트래픽용 서버는 아닙니다.</p></details>
+    </section>
+
+    <div class="cta reveal">
+      <h2>오늘 바로 나만의 웹서버를 켜세요</h2>
+      <p>USB 전원 하나로 매장 메뉴판, 전시 안내, 수업 실습 페이지를 운영합니다.</p>
+      <a class="btn btn-p" href="#buy">패키지 보기</a>
+    </div>
+  </main>
+
+  <footer><div class="shell">Mini WEB M1 예제 페이지. 이 보드에서 제공되는 파일입니다.</div></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function(){
+      var toast=document.getElementById('toast'),timer;
+      document.querySelectorAll('[data-plan]').forEach(function(b){
+        b.addEventListener('click',function(){
+          toast.textContent=b.dataset.plan+' 선택됨. 예제 페이지이므로 주문은 진행되지 않습니다.';
+          toast.classList.add('show');clearTimeout(timer);
+          timer=setTimeout(function(){toast.classList.remove('show');},2600);
+        });
+      });
+      var scenes=document.querySelectorAll('.scene');
+      if('IntersectionObserver' in window){
+        var so=new IntersectionObserver(function(entries){
+          entries.forEach(function(e){e.target.classList.toggle('run',e.isIntersecting);});
+        });
+        scenes.forEach(function(e){so.observe(e);});
+      } else scenes.forEach(function(e){e.classList.add('run');});
+      var items=document.querySelectorAll('.reveal');
+      if(!('IntersectionObserver' in window)){items.forEach(function(e){e.classList.add('in');});return;}
+      var io=new IntersectionObserver(function(entries){
+        entries.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});
+      },{rootMargin:'0px 0px -8% 0px'});
+      items.forEach(function(e){io.observe(e);});
+    })();
+  </script>
+</body>
+</html>

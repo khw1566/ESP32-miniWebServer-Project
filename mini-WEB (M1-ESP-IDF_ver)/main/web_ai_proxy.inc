@@ -32,9 +32,15 @@ static void ai_proxy_task(void *arg) {
     if (ai_record_read(&record) != ESP_OK || !ai_key_decrypt(&record, job->wrapping_key, api_key)) {
         status = "409 Conflict"; error = "먼저 유효한 API 키를 보드에 저장하세요."; goto done;
     }
-    body = ai_read_json_buffer(req, 48 * 1024, 512, &payload);
+    ai_json_error_t input_error = AI_JSON_OK;
+    body = ai_read_json_buffer_ex(req, 48 * 1024, 512, &payload, &input_error);
+    if (!body) {
+        status = ai_json_error_status(input_error); error = ai_json_error_message(input_error);
+        ESP_LOGW("AI_PROXY", "Request rejected: reason=%d, bytes=%d", (int)input_error, req->content_len);
+        goto done;
+    }
     if (!cJSON_IsObject(body) || !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(body, "contents"))) {
-        status = "400 Bad Request"; error = "AI 요청 형식이 올바르지 않거나 최대 48 KiB를 초과했습니다."; goto done;
+        status = "400 Bad Request"; error = "AI 요청에 contents 배열이 없습니다. 페이지를 새로고침한 뒤 다시 요청하세요."; goto done;
     }
     cJSON *config = cJSON_GetObjectItemCaseSensitive(body, "generationConfig");
     if (!cJSON_IsObject(config)) {
@@ -68,7 +74,8 @@ static void ai_proxy_task(void *arg) {
     }
     snprintf(url, sizeof(url), "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", job->model);
     esp_http_client_config_t options = {
-        .url = url, .method = HTTP_METHOD_POST, .timeout_ms = 45000,
+        /* Non-streaming generation sends headers only when a full page is written. */
+        .url = url, .method = HTTP_METHOD_POST, .timeout_ms = 90000,
         .crt_bundle_attach = esp_crt_bundle_attach, .disable_auto_redirect = true,
         .buffer_size = 1024, .buffer_size_tx = 1024
     };

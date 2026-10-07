@@ -1,4 +1,7 @@
 #include "web_server.h"
+#include "cloud_relay.h"
+#include "https_memory.h"
+#include "sd_media.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -38,6 +41,10 @@
 
 static const char *TAG = "WEB_SVR";
 static httpd_handle_t s_server = NULL;
+static atomic_bool s_server_running;
+bool web_server_is_running(void) { return atomic_load(&s_server_running); }
+static uint32_t s_home_requests;
+uint32_t web_server_home_requests(void) {return __atomic_load_n(&s_home_requests,__ATOMIC_RELAXED);}
 #define STORAGE_BASE_PATH "/spiffs"
 static void agent_recover_files(void);
 
@@ -930,7 +937,9 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
 
   char product_url[96] = {0};
   network_get_mdns_url(product_url, sizeof(product_url));
-  char json[1664];
+  char cloud_url[96] = {0};
+  cloud_relay_get_url(cloud_url, sizeof(cloud_url));
+  char json[1792];
   snprintf(
       json, sizeof(json),
       "{"
@@ -959,7 +968,8 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
       "\"system_reserved\":%lu,"
       "\"disk_total\":%lu,"
       "\"disk_used\":%lu,"
-      "\"tunnel_url\":\"https://motocross-unstitch-dreamboat.ngrok-free.dev\""
+      "\"tunnel_url\":\"%s\","
+      "\"cloud_status\":\"%s\""
       "}",
       (unsigned long)free_heap, (unsigned long)min_heap,
       (unsigned long)total_heap, (unsigned long)used_heap,
@@ -967,7 +977,7 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
       network_get_product_name(), network_get_product_revision(), network_get_product_serial(), saved_ssid, (int)rssi, (int)mode,
       running_label, app_ver, init_view, storage_valid ? "true" : "false",
       (unsigned long)flash_total, (unsigned long)(flash_total - disk_total),
-      (unsigned long)disk_total, (unsigned long)disk_used);
+      (unsigned long)disk_total, (unsigned long)disk_used, cloud_url, cloud_relay_status());
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
@@ -1396,6 +1406,8 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
   char init_page[128] = {0};
   bool init_page_requested = false;
   bool restore_defaults_requested = false;
+  char cloud_token[65] = {0};
+  bool cloud_token_requested = false;
 
   char *token = strtok(buf, "&");
   while (token != NULL) {
@@ -1405,6 +1417,15 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
       char *val = eq + 1;
       char decoded[768] = {0};
       url_decode(decoded, val);
+      if (strcmp(token, "cloud_token") == 0) {
+        cloud_token_requested = true;
+        if (strlen(decoded) != 64) {
+          httpd_resp_set_type(req, "application/json");
+          httpd_resp_set_status(req, "400 Bad Request");
+          return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Invalid device token\"}");
+        }
+        memcpy(cloud_token, decoded, 64);
+      }
       if ((strcmp(token, "cur_pw") == 0 || strcmp(token, "new_pw") == 0) && strlen(decoded) >= sizeof(pw_input)) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
@@ -1432,8 +1453,19 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     token = strtok(NULL, "&");
   }
 
+  /* A signed-in browser (session cookie) may omit the password, except for a
+   * password change or reset, which re-encrypt the stored AI key. */
+  bool sensitive = new_pw[0] || restore_defaults_requested;
+  bool signed_in = !pw_input[0] && ai_session_for(req) != NULL;
+  if (!pw_input[0] && (!signed_in || sensitive)) {
+    httpd_resp_set_status(req, "403 Forbidden");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, sensitive
+        ? "{\"status\":\"error\",\"message\":\"현재 관리자 비밀번호를 입력하세요.\"}"
+        : "{\"status\":\"error\",\"message\":\"로그인이 만료되었습니다. 다시 로그인하세요.\"}");
+  }
   /* Password checks also migrate old plaintext records to salted hashes. */
-  if (!verify_admin_password(pw_input)) {
+  if (!signed_in && !verify_admin_password(pw_input)) {
     ESP_LOGW(TAG, "[SETTINGS] Auth FAIL: Password mismatch");
     httpd_resp_set_status(req, "403 Forbidden");
     httpd_resp_set_type(req, "application/json");
@@ -1443,7 +1475,24 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
-  ESP_LOGI(TAG, "[SETTINGS] Auth SUCCESS: Admin password matched!");
+  ESP_LOGI(TAG, "[SETTINGS] Auth SUCCESS: %s", signed_in ? "session" : "admin password matched");
+  /* Remember this browser: a password login gets a session cookie. */
+  char auth_cookie[128] = {0};
+  if (!signed_in && ai_session_for(req) == NULL) {
+    ai_session_t *created = ai_session_create(pw_input);
+    if (created) { auth_cookie_header(auth_cookie, created->token); httpd_resp_set_hdr(req, "Set-Cookie", auth_cookie); }
+  }
+
+  if (cloud_token_requested) {
+    esp_err_t err = cloud_relay_provision(cloud_token);
+    memset(cloud_token, 0, sizeof(cloud_token));
+    httpd_resp_set_type(req, "application/json");
+    if (err != ESP_OK) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Cannot save device token\"}");
+    }
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Device registered. Reboot the board.\"}");
+  }
 
   if (restore_defaults_requested) {
     ai_security_record_t record = {0};
@@ -1486,6 +1535,13 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
       return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"비밀번호 또는 암호화된 API 키 변경에 실패했습니다.\"}");
     }
     ESP_LOGI(TAG, "[SETTINGS] Admin password updated successfully in NVS");
+    /* The change signed every session out; keep this browser signed in. */
+    bool cookie_set = auth_cookie[0] != 0;
+    ai_session_t *created = ai_session_create(new_pw);
+    if (created) {
+      auth_cookie_header(auth_cookie, created->token);
+      if (!cookie_set) httpd_resp_set_hdr(req, "Set-Cookie", auth_cookie);
+    }
   }
 
   // 첫 접속 화면 모드 변경 요청이 있는 경우
@@ -1554,6 +1610,8 @@ static esp_err_t ai_studio_get_handler(httpd_req_t *req) {
   return send_chunk_string(req, HTML_AI_STUDIO);
 }
 
+#include "web_public_stream.inc"
+
 esp_err_t web_server_start(void) {
   if (s_server) return ESP_OK;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -1561,6 +1619,8 @@ esp_err_t web_server_start(void) {
   config.stack_size = 8192;
   config.max_uri_handlers = 40;
   config.uri_match_fn = httpd_uri_match_wildcard;
+  /* Reserve descriptors for outbound TLS, mDNS, DNS and SNTP. */
+  config.max_open_sockets = 4;
   config.lru_purge_enable = true;
 
   if (httpd_start(&s_server, &config) == ESP_OK) {
@@ -1701,6 +1761,7 @@ esp_err_t web_server_start(void) {
     if (mdns_err != ESP_OK) ESP_LOGW(TAG, "mDNS unavailable; IP access remains available: %s", esp_err_to_name(mdns_err));
     ESP_LOGI(TAG, "HTTP Server started successfully (Admin, WebP & File "
                   "Manager Enabled)");
+    atomic_store(&s_server_running, true);
     return ESP_OK;
   }
   ESP_LOGE(TAG, "Failed to start HTTP Server");
@@ -1708,6 +1769,7 @@ esp_err_t web_server_start(void) {
 }
 
 void web_server_stop(void) {
+  atomic_store(&s_server_running, false);
   ai_sessions_clear();
   network_mdns_stop();
   if (s_server) {

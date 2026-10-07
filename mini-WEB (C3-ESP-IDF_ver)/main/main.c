@@ -10,6 +10,7 @@
 #include "network_manager.h"
 #include "dns_server.h"
 #include "web_server.h"
+#include "cloud_relay.h"
 #include "qr_printer.h"
 
 static const char *TAG = "MAIN_APP";
@@ -205,6 +206,7 @@ void app_main(void) {
 
     // 네트워크 드라이버 초기화
     ESP_ERROR_CHECK(network_init());
+    if (cloud_relay_start() != ESP_OK) ESP_LOGW(TAG, "Cloud relay task unavailable");
 
     char saved_ssid[64] = {0};
     char saved_pass[64] = {0};

@@ -12,7 +12,7 @@ test('factory credentials match registry and cannot be overwritten', () => {
   assert.ok(resolve(dir).startsWith(tempRoot + sep));
   try {
     const script = fileURLToPath(new URL('../provision.mjs', import.meta.url));
-    const run = serial => spawnSync(process.execPath, [script, serial], { cwd: dir, encoding: 'utf8' });
+    const run = (serial, product = 'm1') => spawnSync(process.execPath, [script, serial, product], { cwd: dir, encoding: 'utf8' });
     assert.notEqual(run('invalid').status, 0);
     const result = run('aabbccddeeff'); assert.equal(result.status, 0);
     const csv = readFileSync(resolve(dir, 'provisioned/m1-aabbccddeeff.csv'), 'utf8');
@@ -26,5 +26,17 @@ test('factory credentials match registry and cannot be overwritten', () => {
     assert.equal(result.stdout.includes(uploadToken),false);
     assert.notEqual(run('aabbccddeeff').status, 0);
     assert.equal(readFileSync(resolve(dir, 'provisioned/m1-aabbccddeeff.csv'), 'utf8'), csv);
+    assert.notEqual(run('aabbccddeeff', '../bad').status, 0);
+    assert.equal(run('aabbccddeeff', 's3').status, 0);
+    const s3csv = readFileSync(resolve(dir, 'provisioned/s3-aabbccddeeff.csv'), 'utf8');
+    const s3token = /token,data,string,([a-f0-9]{64})/.exec(s3csv)?.[1];
+    assert.ok(s3token); assert.notEqual(s3token, token);
+    const updated = JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'));
+    assert.equal(updated['s3-aabbccddeeff'].tokenHash, createHash('sha256').update(s3token).digest('hex'));
+    assert.notEqual(run('aabbccddeeff', 's3').status, 0);
+    assert.equal(readFileSync(resolve(dir, 'provisioned/m1-aabbccddeeff.csv'), 'utf8'), csv);
+    assert.equal(run('aabbccddeeff', 'c3').status, 0);
+    assert.ok(JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'))['c3-aabbccddeeff'].tokenHash);
+    assert.notEqual(run('aabbccddeeff', 'x9').status, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -3,12 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 #define STORAGE_VIEW_ROWS 3
+/* FATFS long names are capped at CONFIG_FATFS_MAX_LFN (128); SPIFFS at 32. */
+#define STORAGE_VIEW_NAME_MAX 129
 typedef struct {
     uint64_t total, used, reserved;
     esp_err_t error;
 } storage_capacity_t;
 typedef struct {
-    char name[256];
+    char name[STORAGE_VIEW_NAME_MAX];
     uint64_t bytes;
     bool directory;
 } storage_view_entry_t;

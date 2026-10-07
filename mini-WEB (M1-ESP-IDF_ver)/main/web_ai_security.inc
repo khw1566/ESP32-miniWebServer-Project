@@ -1,7 +1,12 @@
 /* Private AI authentication and password-wrapped credential storage. */
 #define AI_SECURITY_VERSION 1
 #define AI_KDF_ROUNDS 20000
-#define AI_SESSION_US (30LL * 60 * 1000000)
+/* Login persists in an HttpOnly cookie: renewed on each use for 12 hours of
+ * inactivity, at most 7 days after login. Sessions live in RAM only, so a
+ * reboot or a password change signs every browser out. */
+#define AI_SESSION_US (12LL * 60 * 60 * 1000000)
+#define AI_SESSION_MAX_US (7LL * 24 * 60 * 60 * 1000000)
+#define AUTH_COOKIE "mw_session"
 typedef struct {
     uint32_t version;
     unsigned char password_salt[16], password_hash[32], key_salt[16];
@@ -12,9 +17,10 @@ typedef struct {
 typedef struct {
     char token[65];
     unsigned char wrapping_key[32];
-    int64_t expires;
+    int64_t created, expires;
 } ai_session_t;
 static ai_session_t s_ai_sessions[4];
+static ai_session_t *ai_session_for(httpd_req_t *req);
 static unsigned s_ai_login_failures;
 static int64_t s_ai_login_blocked_until;
 
@@ -56,6 +62,7 @@ static esp_err_t api_auth_status_handler(httpd_req_t *req) {
     cJSON *value = cJSON_CreateObject();
     if (!value) return httpd_resp_send_500(req);
     cJSON_AddBoolToObject(value, "ok", true); auth_status_add(value);
+    cJSON_AddBoolToObject(value, "authenticated", ai_session_for(req) != NULL);
     char *body = cJSON_PrintUnformatted(value); cJSON_Delete(value);
     if (!body) return httpd_resp_send_500(req);
     httpd_resp_set_type(req, "application/json; charset=utf-8");
@@ -199,55 +206,55 @@ static esp_err_t ai_error(httpd_req_t *req, const char *status, const char *mess
     httpd_resp_set_hdr(req, "Cache-Control", "no-store"); httpd_resp_set_hdr(req, "Connection", "close");
     esp_err_t err = httpd_resp_sendstr(req, body); free(body); return err;
 }
-static cJSON *ai_read_json_buffer(httpd_req_t *req, size_t limit, size_t reserve, char **reuse) {
-    *reuse = NULL;
-    if (req->content_len <= 0 || (size_t)req->content_len > limit) return NULL;
-    char type[80];
-    if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
-        strncasecmp(type, "application/json", 16)) return NULL;
-    char *body = malloc((size_t)req->content_len + reserve + 1);
-    if (!body) return NULL;
-    int done = 0;
-    while (done < req->content_len) {
-        int count = httpd_req_recv(req, body + done, req->content_len - done);
-        if (count <= 0) { ai_wipe(body, req->content_len); free(body); return NULL; }
-        done += count;
-    }
-    body[done] = 0;
-    int depth = 0; size_t nodes = 1;
-    bool quoted = false, escape = false, valid = memchr(body, 0, done) == NULL;
-    for (int i = 0; i < done && valid; ++i) {
-        char c = body[i];
-        if (quoted) { if (escape) escape = false; else if (c == '\\') escape = true; else if (c == '"') quoted = false; }
-        else if (c == '"') quoted = true;
-        else if (c == '{' || c == '[') { ++nodes; if (++depth > 16) valid = false; }
-        else if (c == '}' || c == ']') { if (--depth < 0) valid = false; }
-        else if (c == ':' || c == ',') ++nodes;
-        if (nodes > 384) valid = false;
-    }
-    /* Bound cJSON's small allocations as well as the payload size. Raw input,
-     * decoded strings and nodes coexist only while parsing/serializing. */
-    size_t available = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (available < (size_t)done + nodes * (sizeof(cJSON) + 32) + 16 * 1024) valid = false;
-    cJSON *value = valid ? cJSON_ParseWithLengthOpts(body, done + 1, NULL, true) : NULL;
-    if (value && reserve) *reuse = body;
-    else { ai_wipe(body, done); free(body); }
-    return value;
-}
-static cJSON *ai_read_json(httpd_req_t *req, size_t limit) {
-    char *unused;
-    return ai_read_json_buffer(req, limit, 0, &unused);
-}
+#include "web_ai_request.inc"
+/* A Bearer header (AI studio) or the session cookie (any page of this board). */
 static ai_session_t *ai_session_for(httpd_req_t *req) {
-    char header[80] = {0};
-    if (httpd_req_get_hdr_value_str(req, "Authorization", header, sizeof(header)) != ESP_OK ||
-        strlen(header) != 71 || strncmp(header, "Bearer ", 7)) return NULL;
+    char header[80] = {0}, token[72] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", header, sizeof(header)) == ESP_OK &&
+        strlen(header) == 71 && !strncmp(header, "Bearer ", 7)) memcpy(token, header + 7, 64);
+    else {
+        size_t length = sizeof(token);
+        if (httpd_req_get_cookie_val(req, AUTH_COOKIE, token, &length) != ESP_OK || strlen(token) != 64) {
+            ai_wipe(token, sizeof(token)); return NULL;
+        }
+    }
+    ai_wipe(header, sizeof(header));
     int64_t now = esp_timer_get_time();
     for (unsigned i = 0; i < 4; ++i) {
         if (s_ai_sessions[i].expires <= now) { ai_wipe(&s_ai_sessions[i], sizeof(s_ai_sessions[i])); continue; }
-        if (ai_equal(header + 7, s_ai_sessions[i].token, 64)) return &s_ai_sessions[i];
+        if (ai_equal(token, s_ai_sessions[i].token, 64)) {
+            int64_t renewed = now + AI_SESSION_US, limit = s_ai_sessions[i].created + AI_SESSION_MAX_US;
+            s_ai_sessions[i].expires = renewed < limit ? renewed : limit;
+            ai_wipe(token, sizeof(token));
+            return &s_ai_sessions[i];
+        }
     }
+    ai_wipe(token, sizeof(token));
     return NULL;
+}
+/* Session for a verified password. When all four are in use, the least
+ * recently used one is replaced instead of refusing the login. */
+static ai_session_t *ai_session_create(const char *password) {
+    ai_security_record_t record = {0}; unsigned char wrapping[32] = {0};
+    bool ok = ai_record_read(&record) == ESP_OK && ai_derive(password, record.key_salt, wrapping);
+    ai_wipe(&record, sizeof(record));
+    if (!ok) { ai_wipe(wrapping, sizeof(wrapping)); return NULL; }
+    int64_t now = esp_timer_get_time();
+    ai_session_t *session = &s_ai_sessions[0];
+    for (unsigned i = 0; i < 4; ++i) {
+        if (s_ai_sessions[i].expires <= now) { session = &s_ai_sessions[i]; break; }
+        if (s_ai_sessions[i].expires < session->expires) session = &s_ai_sessions[i];
+    }
+    ai_wipe(session, sizeof(*session)); unsigned char random[32]; esp_fill_random(random, sizeof(random));
+    for (unsigned i = 0; i < 32; ++i) snprintf(session->token + i * 2, 3, "%02x", random[i]);
+    memcpy(session->wrapping_key, wrapping, 32); ai_wipe(wrapping, sizeof(wrapping)); ai_wipe(random, sizeof(random));
+    session->created = now; session->expires = now + AI_SESSION_US;
+    return session;
+}
+/* httpd keeps the pointer: the buffer must live until the response is sent. */
+static void auth_cookie_header(char out[128], const char *token) {
+    if (token) snprintf(out, 128, AUTH_COOKIE "=%.64s; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict", token);
+    else snprintf(out, 128, AUTH_COOKIE "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
 }
 static bool ai_require_auth(httpd_req_t *req) {
     if (ai_session_for(req)) return true;
@@ -269,25 +276,23 @@ static esp_err_t ai_login_post_handler(httpd_req_t *req) {
         ai_wipe(password->valuestring, strlen(password->valuestring)); cJSON_Delete(body);
         return ai_error(req, "403 Forbidden", "AI를 사용하려면 관리자 설정에서 비밀번호를 8자리 이상으로 변경하세요.");
     }
-    ai_security_record_t record = {0}; unsigned char wrapping[32] = {0};
-    bool ok = ai_record_read(&record) == ESP_OK && ai_derive(password->valuestring, record.key_salt, wrapping);
-    ai_wipe(password->valuestring, strlen(password->valuestring)); cJSON_Delete(body); ai_wipe(&record, sizeof(record));
-    if (!ok) { ai_wipe(wrapping, sizeof(wrapping)); return httpd_resp_send_500(req); }
-    ai_session_t *session = NULL;
-    for (unsigned i = 0; i < 4; ++i) if (s_ai_sessions[i].expires <= now) { session = &s_ai_sessions[i]; break; }
-    if (!session) { ai_wipe(wrapping, sizeof(wrapping)); return ai_error(req, "429 Too Many Requests", "AI 접속 4개가 사용 중입니다. 기존 화면에서 로그아웃하거나 세션 만료를 기다려주세요."); }
-    ai_wipe(session, sizeof(*session)); unsigned char random[32]; esp_fill_random(random, sizeof(random));
-    for (unsigned i = 0; i < 32; ++i) snprintf(session->token + i * 2, 3, "%02x", random[i]);
-    memcpy(session->wrapping_key, wrapping, 32); ai_wipe(wrapping, sizeof(wrapping)); ai_wipe(random, sizeof(random));
-    session->expires = esp_timer_get_time() + AI_SESSION_US; s_ai_login_failures = 0;
-    char response[160]; snprintf(response, sizeof(response), "{\"ok\":true,\"token\":\"%s\",\"expires_in\":1800}", session->token);
+    ai_session_t *session = ai_session_create(password->valuestring);
+    ai_wipe(password->valuestring, strlen(password->valuestring)); cJSON_Delete(body);
+    if (!session) return httpd_resp_send_500(req);
+    s_ai_login_failures = 0;
+    char response[160], cookie[128];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"token\":\"%s\",\"expires_in\":%d}", session->token, (int)(AI_SESSION_US / 1000000));
+    auth_cookie_header(cookie, session->token);
     httpd_resp_set_type(req, "application/json"); httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Set-Cookie", cookie);
     return httpd_resp_sendstr(req, response);
 }
 static esp_err_t ai_logout_post_handler(httpd_req_t *req) {
     ai_session_t *session = ai_session_for(req);
     if (session) ai_wipe(session, sizeof(*session));
+    char cookie[128]; auth_cookie_header(cookie, NULL);
     httpd_resp_set_type(req, "application/json"); httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Set-Cookie", cookie);
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 static esp_err_t ai_key_get_handler(httpd_req_t *req) {

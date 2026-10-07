@@ -50,6 +50,7 @@ ESP_EVENT_DEFINE_BASE(NET_RECOVERY_EVENT);
 static EventGroupHandle_t s_wifi_event_group;
 
 #include "network_mdns.inc"
+#include "network_router.inc"
 
 /* Recovery runs on the Wi-Fi event loop, not on the display or timer task. */
 static void recovery_tick(void *arg) {
@@ -247,6 +248,7 @@ esp_err_t network_start_softap(void) {
     s_sta_connect_requested = false;
     s_sta_link_up = false;
     s_net_mode = NET_MODE_IDLE;
+    router_teardown();
     network_mdns_stop();
     esp_err_t err = esp_wifi_stop();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) return err;
@@ -323,6 +325,7 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
     if (cur_mode != WIFI_MODE_NULL) {
         ESP_LOGI(TAG, "기존 Wi-Fi 정지 후 재구성 (현재 모드: %d)", cur_mode);
         s_sta_connect_requested = false;
+        router_teardown();
         esp_wifi_stop();
         vTaskDelay(pdMS_TO_TICKS(300));
     }

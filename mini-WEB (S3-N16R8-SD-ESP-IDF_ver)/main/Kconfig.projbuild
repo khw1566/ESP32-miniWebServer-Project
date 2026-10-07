@@ -1,0 +1,14 @@
+menu "Mini WEB automatic cloud connection"
+config MINI_WEB_RELAY_URL
+    string "Factory cloud relay HTTPS endpoint"
+    default "https://relay.audreaming.com"
+config MINI_WEB_PUBLIC_DOMAIN
+    string "Factory public domain"
+    default "audreaming.com"
+config MINI_WEB_PUBLIC_HOST
+    string "Optional factory hostname (demo.audreaming.com for competition)"
+    default ""
+    help
+        Empty uses s3-<board MAC>.PUBLIC_DOMAIN. Configure the matching Worker
+        domain before shipment. Device token comes from factory NVS, never Wi-Fi UI.
+endmenu

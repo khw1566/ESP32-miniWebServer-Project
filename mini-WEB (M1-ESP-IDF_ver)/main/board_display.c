@@ -19,6 +19,8 @@ static esp_lcd_panel_handle_t panel;
 #if !LV_COLOR_16_SWAP
 static uint16_t *wire_pixels;
 #endif
+static lv_color_t *draw_pixels;
+static bool display_asleep;
 /* Values from the supplied TFT_eSPI ILI9341_2_DRIVER example.
  * Do not use the registry's init_cmds_2 header: it is a different sequence.
  * Direction and inversion are applied explicitly after initialization.
@@ -136,6 +138,25 @@ static void read_touch(lv_indev_drv_t *d, lv_indev_data_t *data) {
     data->state=LV_INDEV_STATE_PR;
 }
 static void tick(void *arg) {lv_tick_inc(2);}
+static esp_err_t alloc_draw_buffers(void) {
+    const size_t count=M1_LCD_WIDTH*M1_LCD_BUFFER_LINES;
+    /* LVGL renders directly into DMA memory in LCD byte order. flush() waits
+     * for SPI completion before this single buffer can be reused. */
+    draw_pixels=heap_caps_malloc(count*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
+    if(!draw_pixels) return ESP_ERR_NO_MEM;
+#if !LV_COLOR_16_SWAP
+    wire_pixels=heap_caps_malloc(count*sizeof(uint16_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
+    if(!wire_pixels) {heap_caps_free(draw_pixels);draw_pixels=NULL;return ESP_ERR_NO_MEM;}
+#endif
+    lv_disp_draw_buf_init(&draw_buf,draw_pixels,NULL,count);
+    return ESP_OK;
+}
+static void free_draw_buffers(void) {
+    heap_caps_free(draw_pixels);draw_pixels=NULL;
+#if !LV_COLOR_16_SWAP
+    heap_caps_free(wire_pixels);wire_pixels=NULL;
+#endif
+}
 esp_err_t board_display_init(void) {
     transfer_done=xSemaphoreCreateBinary();
     if(!transfer_done) return ESP_ERR_NO_MEM;
@@ -163,16 +184,7 @@ esp_err_t board_display_init(void) {
     gpio_config_t in={.pin_bit_mask=(1ULL<<M1_TOUCH_IRQ)|(1ULL<<M1_TOUCH_MISO),.mode=GPIO_MODE_INPUT};
     ESP_RETURN_ON_ERROR(gpio_config(&in),"LCD","touch gpio");
     lv_init();
-    const size_t count=M1_LCD_WIDTH*M1_LCD_BUFFER_LINES;
-    /* LVGL renders directly into DMA memory in LCD byte order. flush() waits
-     * for SPI completion before this single buffer can be reused. */
-    lv_color_t *buf=heap_caps_malloc(count*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
-    if(!buf) return ESP_ERR_NO_MEM;
-#if !LV_COLOR_16_SWAP
-    wire_pixels=heap_caps_malloc(count*sizeof(uint16_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
-    if(!wire_pixels) {heap_caps_free(buf);return ESP_ERR_NO_MEM;}
-#endif
-    lv_disp_draw_buf_init(&draw_buf,buf,NULL,count);
+    ESP_RETURN_ON_ERROR(alloc_draw_buffers(),"LCD","draw buffer");
     lv_disp_drv_init(&disp); disp.hor_res=M1_LCD_WIDTH;disp.ver_res=M1_LCD_HEIGHT;disp.draw_buf=&draw_buf;disp.flush_cb=flush;
     if(!lv_disp_drv_register(&disp)) return ESP_ERR_NO_MEM;
     lv_indev_drv_init(&touch);touch.type=LV_INDEV_TYPE_POINTER;touch.read_cb=read_touch;
@@ -181,4 +193,29 @@ esp_err_t board_display_init(void) {
     esp_timer_create_args_t args={.callback=tick,.name="lv_tick"};
     ESP_RETURN_ON_ERROR(esp_timer_create(&args,&timer),"LCD","timer");
     return esp_timer_start_periodic(timer,2000);
+}
+/* Caller must not run lv_timer_handler() while asleep: the draw buffer is freed. */
+esp_err_t board_display_sleep(void) {
+    if(display_asleep) return ESP_OK;
+    gpio_set_level(M1_LCD_BL,0);
+    esp_lcd_panel_disp_on_off(panel,false);
+    free_draw_buffers();
+    display_asleep=true;
+    return ESP_OK;
+}
+/* Restores the draw buffer and panel output. The backlight stays off until the
+ * caller has rendered a fresh frame, so the stale panel image is not shown. */
+esp_err_t board_display_wake(void) {
+    if(!display_asleep) return ESP_OK;
+    ESP_RETURN_ON_ERROR(alloc_draw_buffers(),"LCD","draw buffer");
+    esp_lcd_panel_disp_on_off(panel,true);
+    lv_obj_invalidate(lv_scr_act());
+    display_asleep=false;
+    return ESP_OK;
+}
+void board_display_backlight(bool on) {gpio_set_level(M1_LCD_BL,on?1:0);}
+/* Same pressure gate as read_touch(): PENIRQ alone also drops on noise. */
+bool board_display_touch_down(void) {
+    if(gpio_get_level(M1_TOUCH_IRQ)) return false;
+    return sample(0xb0)+4095-sample(0xc0)>=200;
 }

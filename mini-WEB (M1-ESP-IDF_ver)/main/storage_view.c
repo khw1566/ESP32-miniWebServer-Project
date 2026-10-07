@@ -54,6 +54,9 @@ void storage_view_read(bool sd, const char *folder, unsigned offset, storage_vie
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        /* A truncated name could not be opened again, so it is not listed. */
+        size_t name_length = strnlen(entry->d_name, STORAGE_VIEW_NAME_MAX);
+        if (name_length >= STORAGE_VIEW_NAME_MAX) continue;
         char path[sizeof(directory) + 257];
         length = snprintf(path, sizeof(path), "%s/%.255s", directory, entry->d_name);
         if (length < 0 || (size_t)length >= sizeof(path)) continue;
@@ -62,7 +65,7 @@ void storage_view_read(bool sd, const char *folder, unsigned offset, storage_vie
         unsigned index = view->count++;
         if (index < offset || view->shown == STORAGE_VIEW_ROWS) continue;
         storage_view_entry_t *item = &view->entries[view->shown++];
-        snprintf(item->name, sizeof(item->name), "%.255s", entry->d_name);
+        memcpy(item->name, entry->d_name, name_length + 1);
         item->directory = S_ISDIR(st.st_mode);
         item->bytes = item->directory ? 0 : (uint64_t)st.st_size;
     }

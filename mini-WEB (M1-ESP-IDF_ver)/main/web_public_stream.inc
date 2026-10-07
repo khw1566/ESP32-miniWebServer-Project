@@ -14,6 +14,8 @@ static const char *public_mime(const char *path) {
     for(unsigned i=0;ext&&i<sizeof(types)/sizeof(types[0]);++i) if(!strcasecmp(ext,types[i][0])) return types[i][1];
     return "text/plain; charset=utf-8";
 }
+/* Shown through the domain for a missing public file. */
+static const char PUBLIC_NOT_FOUND[]="<!doctype html><html lang='ko'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>페이지를 찾을 수 없음</title><style>:root{color-scheme:light dark;--bg:#f5f7fa;--card:#fff;--text:#1f2a37;--muted:#5b6b7b;--line:#dde3ea;--accent:#2563eb}@media(prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18212c;--text:#e6edf3;--muted:#9aa8b6;--line:#2a3644;--accent:#78a9ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;line-height:1.7;word-break:keep-all}.card{max-width:440px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px 28px;text-align:center}.mark{width:48px;height:48px;margin:0 auto 16px;border-radius:12px;background:var(--accent);opacity:.9}h1{font-size:22px;margin:0 0 8px}p{margin:0;color:var(--muted);font-size:15px}</style></head><body><main class='card'><div class='mark' aria-hidden='true'></div><h1>페이지를 찾을 수 없습니다</h1><p>주소가 바뀌었거나 삭제된 파일입니다.<br><a href='/' style='color:var(--accent)'>첫 화면으로 이동</a></p></main></body></html>";
 static void public_stream_message(web_public_stream_t *s,int status,const char *message) {
     if(s->file) fclose(s->file);
     s->file=NULL;s->body=message;s->length=strlen(message);s->offset=0;
@@ -46,7 +48,15 @@ bool web_server_public_open(const char *path,const char *range,web_public_stream
         } else snprintf(filename,sizeof(filename),"%s%s",STORAGE_BASE_PATH,path);
         if(stat(filename,&st)==0 && S_ISREG(st.st_mode)) s->file=fopen(filename,"rb");
     }
-    if(!s->file) {public_stream_message(s,404,"Public web file not found");return true;}
+    if(!s->file) {
+        /* Nothing published yet: the same built-in page as the local home
+         * (showcase when selected, otherwise the start guide). The admin
+         * redirect choice is not public, so it also gets the guide. */
+        bool home=!strcmp(path,"/") || !strcmp(path,"/index.html");
+        if(home) public_stream_message(s,200,get_initial_view_mode()==1?HTML_MAIN:HTML_HELP_GUIDE);
+        else public_stream_message(s,404,PUBLIC_NOT_FOUND);
+        s->mime="text/html; charset=utf-8";return true;
+    }
     if(fseek(s->file,0,SEEK_END)!=0) {public_stream_message(s,503,"Cannot read file");return true;}
     long size=ftell(s->file),start=0,end=size-1;
     if(size<0) {public_stream_message(s,503,"Cannot read file size");return true;}

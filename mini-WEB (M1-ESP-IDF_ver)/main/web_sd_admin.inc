@@ -2,7 +2,9 @@
 /* Local administrator API. Public relay paths exclude /api/. */
 static bool sd_admin_auth(httpd_req_t *req) {
     char password[64] = {0};
-    bool ok = httpd_req_get_hdr_value_str(req,"X-Admin-Password",password,sizeof(password)) == ESP_OK && verify_admin_password(password);
+    /* A typed password wins; otherwise the browser's session cookie. */
+    bool typed = httpd_req_get_hdr_value_str(req,"X-Admin-Password",password,sizeof(password)) == ESP_OK && password[0];
+    bool ok = typed ? verify_admin_password(password) : ai_session_for(req) != NULL;
     memset(password,0,sizeof(password));
     if (!ok) httpd_resp_send_err(req,HTTPD_401_UNAUTHORIZED,"Administrator authentication required");
     return ok;

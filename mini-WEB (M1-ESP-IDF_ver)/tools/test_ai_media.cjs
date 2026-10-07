@@ -1,7 +1,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
 const main=path.resolve(__dirname,'../main');
 const media=fs.readFileSync(path.join(main,'ai_media.js'),'utf8');
-const script=fs.readFileSync(path.join(main,'ai_studio.html'),'utf8').match(/<script>([\s\S]*?)<\/script>/g).at(-1).slice(8,-9).replace('/* AI_MEDIA_SCRIPT */',media).replace('loadSettings();refreshAiKeyStatus();','');
+const script=fs.readFileSync(path.join(main,'ai_studio.html'),'utf8').match(/<script>([\s\S]*?)<\/script>/g).at(-1).slice(8,-9).replace('/* AI_MEDIA_SCRIPT */',media).replace('/* AI_ROUTER_SCRIPT */',fs.readFileSync(path.join(main,'ai_router.js'),'utf8')).replace('loadSettings();refreshAiKeyStatus();','');
 class Element{
  constructor(tag){this.tagName=tag;this.children=[];this.value='';this.checked=true;this.style={};this.events={};this.classList={add(){},remove(){},toggle(){}};this.duration=100;this.videoWidth=1280;this.videoHeight=720;this.naturalWidth=1000;this.naturalHeight=750;this.time=0;}
  appendChild(e){this.children.push(e);return e;}append(...e){this.children.push(...e);}setAttribute(){}focus(){}
@@ -14,7 +14,7 @@ class Element{
 function setup(fetch){
  const elements={},el=id=>elements[id]||(elements[id]=new Element('div'));let revoked=0;
  const c={fetch,Blob,AbortController,TextEncoder,URL:{createObjectURL:()=> 'blob:test',revokeObjectURL(){revoked++;}},Image:class extends Element{constructor(){super('image');}},queueMicrotask,setTimeout,clearTimeout,innerWidth:1000,window:{g_aiToken:'session',addEventListener(){}},location:{replace(){}},document:{documentElement:{dataset:{},style:{setProperty(){}}},querySelector:()=>({offsetHeight:40}),getElementById:el,createElement:t=>new Element(t),createTextNode:t=>{const e=new Element('text');e.textContent=t;return e;}},alert:m=>{throw Error(m);}};
- vm.createContext(c);vm.runInContext(script,c);c.g_keyConfigured=true;el('modelPreset').value='test-model';el('userPrompt').value='이미지와 영상 및 보드를 진단해줘';
+ vm.createContext(c);vm.runInContext(script,c);vm.runInContext(`AiRequestRouter.prototype.request=(function(original){return function(contents){this.activate({category:'all'});return original.call(this,contents);};})(AiRequestRouter.prototype.request);`,c);c.g_keyConfigured=true;el('modelPreset').value='test-model';el('userPrompt').value='이미지와 영상 및 보드를 진단해줘';
  return {c,el,revoked:()=>revoked};
 }
 const json=data=>({ok:true,status:200,json:async()=>data});

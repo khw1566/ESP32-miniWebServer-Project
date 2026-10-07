@@ -1504,8 +1504,19 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     token = strtok(NULL, "&");
   }
 
+  /* A signed-in browser (session cookie) may omit the password, except for a
+   * password change or reset, which re-encrypt the stored AI key. */
+  bool sensitive = new_pw[0] || restore_defaults_requested;
+  bool signed_in = !pw_input[0] && ai_session_for(req) != NULL;
+  if (!pw_input[0] && (!signed_in || sensitive)) {
+    httpd_resp_set_status(req, "403 Forbidden");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, sensitive
+        ? "{\"status\":\"error\",\"message\":\"현재 관리자 비밀번호를 입력하세요.\"}"
+        : "{\"status\":\"error\",\"message\":\"로그인이 만료되었습니다. 다시 로그인하세요.\"}");
+  }
   /* Password checks also migrate old plaintext records to salted hashes. */
-  if (!verify_admin_password(pw_input)) {
+  if (!signed_in && !verify_admin_password(pw_input)) {
     ESP_LOGW(TAG, "[SETTINGS] Auth FAIL: Password mismatch");
     httpd_resp_set_status(req, "403 Forbidden");
     httpd_resp_set_type(req, "application/json");
@@ -1515,7 +1526,13 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
-  ESP_LOGI(TAG, "[SETTINGS] Auth SUCCESS: Admin password matched!");
+  ESP_LOGI(TAG, "[SETTINGS] Auth SUCCESS: %s", signed_in ? "session" : "admin password matched");
+  /* Remember this browser: a password login gets a session cookie. */
+  char auth_cookie[128] = {0};
+  if (!signed_in && ai_session_for(req) == NULL) {
+    ai_session_t *created = ai_session_create(pw_input);
+    if (created) { auth_cookie_header(auth_cookie, created->token); httpd_resp_set_hdr(req, "Set-Cookie", auth_cookie); }
+  }
 
   if (cloud_token_requested) {
     esp_err_t err = cloud_relay_provision(cloud_token);
@@ -1569,6 +1586,13 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
       return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"비밀번호 또는 암호화된 API 키 변경에 실패했습니다.\"}");
     }
     ESP_LOGI(TAG, "[SETTINGS] Admin password updated successfully in NVS");
+    /* The change signed every session out; keep this browser signed in. */
+    bool cookie_set = auth_cookie[0] != 0;
+    ai_session_t *created = ai_session_create(new_pw);
+    if (created) {
+      auth_cookie_header(auth_cookie, created->token);
+      if (!cookie_set) httpd_resp_set_hdr(req, "Set-Cookie", auth_cookie);
+    }
   }
 
   // 첫 접속 화면 모드 변경 요청이 있는 경우

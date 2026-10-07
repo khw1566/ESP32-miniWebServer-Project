@@ -1,5 +1,6 @@
 #include "board_display.h"
 #include "cloud_relay.h"
+#include "memory_monitor.h"
 #include "sd_media.h"
 #include "network_manager.h"
 #include "web_server.h"
@@ -21,4 +22,6 @@ void app_main(void) {
     if(err!=ESP_OK) ESP_LOGW("M1","Cloud task unavailable: %s",esp_err_to_name(err));
     ESP_ERROR_CHECK(board_display_init());
     onboard_ui_start();
+    err=memory_monitor_start(60);
+    if(err!=ESP_OK) ESP_LOGW("M1","Memory monitor unavailable: %s",esp_err_to_name(err));
 }

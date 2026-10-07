@@ -34,5 +34,10 @@
 #define M1_TOUCH_INVERT_X 1
 #define M1_TOUCH_INVERT_Y 0
 esp_err_t board_display_init(void);
+/* Screen saver support: panel off, backlight off, LVGL draw buffer freed. */
+esp_err_t board_display_sleep(void);
+esp_err_t board_display_wake(void);
+void board_display_backlight(bool on);
+bool board_display_touch_down(void);
 void onboard_ui_start(void);
 extern const lv_font_t font_m1;

@@ -5,6 +5,7 @@ ESP-IDF 기반 ESP32 웹 서버와 온보드 UI 프로젝트입니다.
 ## 펌웨어
 
 - `mini-WEB (S3-ESP-IDF_ver)`: ESP32-S3용 웹 서버, AI Assistant 및 파일 관리 기능.
+- `mini-WEB (S3-N16R8-SD-ESP-IDF_ver)`: 16MB 플래시·8MB PSRAM 및 SDMMC 슬롯용 S3 펌웨어. M1의 SD 관리자와 클라우드 기능을 이식했으며 카메라는 사용하지 않습니다.
 - `mini-WEB (C3-ESP-IDF_ver)`: ESP32-C3용 펌웨어.
 - `mini-WEB (M1-ESP-IDF_ver)`: ESP32-2432S028용 LCD·터치 UI, 가상 키보드, Wi-Fi 및 SoftAP 접속과 QR 안내. 자세한 사용법은 폴더 내부 README를 참고하세요.
 
@@ -19,6 +20,8 @@ ESP-IDF 개발 환경에서 해당 펌웨어 폴더를 열어 사용합니다. �
 키 저장 실패 시 입력값 유지, 중복 저장 방지, 저장 상태 조회 경쟁 방지 및 형식·암호화·NVS 오류 구분을 반영했습니다. `node "mini-WEB (S3-ESP-IDF_ver)/tools/test_ai_key.cjs"`로 관련 호스트 테스트를 실행할 수 있습니다. 실제 보드 검증은 별도로 필요합니다.
 
 ## AI 미디어와 진단
+
+AI Assistant의 일반 대화와 보드 작업 분기는 [AI_ROUTER.md](AI_ROUTER.md)에 설명되어 있습니다. 인사·질문에는 자연어로 답하고, 실제 작업에 필요한 도구만 활성화합니다. M1·S3·C3·S3-N16R8-SD에 적용했습니다.
 
 S3·C3·M1에서 보드의 JPG 이미지와 MP4 화면 표본을 AI로 분석하고, 하드웨어·메모리·네트워크·최근 로그를 조회할 수 있습니다. MP4는 최대 3개 시점의 화면을 분석하며 음성은 포함하지 않습니다. 사용법과 제한은 [AI_MEDIA_DIAGNOSTICS.md](AI_MEDIA_DIAGNOSTICS.md)를 참고하세요.
 

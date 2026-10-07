@@ -5,12 +5,12 @@ class Element {
  setAttribute(k,v){this.attributes[k]=v;} addEventListener(){} focus(){} click(){} remove(){}
  set textContent(x){this.text=String(x);this.children=[];} get textContent(){return (this.text||'')+this.children.map(x=>x.textContent).join('');}
 }
-const main=path.resolve(__dirname,'../main'),script=fs.readFileSync(path.join(main,'ai_studio.html'),'utf8').match(/<script>([\s\S]*?)<\/script>/g).at(-1).slice(8,-9).replace('/* AI_MEDIA_SCRIPT */',fs.readFileSync(path.join(main,'ai_media.js'),'utf8')).replace('loadSettings();refreshAiKeyStatus();','');
+const main=path.resolve(__dirname,'../main'),script=fs.readFileSync(path.join(main,'ai_studio.html'),'utf8').match(/<script>([\s\S]*?)<\/script>/g).at(-1).slice(8,-9).replace('/* AI_MEDIA_SCRIPT */',fs.readFileSync(path.join(main,'ai_media.js'),'utf8')).replace('/* AI_ROUTER_SCRIPT */',fs.readFileSync(path.join(main,'ai_router.js'),'utf8')).replace('loadSettings();refreshAiKeyStatus();','');
 function setup(fetch){
  const elements={},el=id=>elements[id]||(elements[id]=new Element('div'));
  const context={document:{documentElement:{dataset:{},style:{setProperty(){}}},querySelector:()=>({offsetHeight:40}),getElementById:el,createElement:t=>new Element(t),createElementNS:(ns,t)=>{const e=new Element(t);e.namespaceURI=ns;return e;},createTextNode:t=>{const e=new Element('#text');e.textContent=t;return e;}},
   window:{g_aiToken:'test-session',addEventListener(){}},innerWidth:1000,location:{href:'http://[fd00::1]/ai'},localStorage:{getItem:()=>null,removeItem(){},setItem(){}},sessionStorage:{getItem:()=>null,removeItem(){}},URL,TextEncoder,console,fetch,setTimeout(){},alert:m=>{throw Error(m);}};
- vm.createContext(context);vm.runInContext(script,context);
+ vm.createContext(context);vm.runInContext(script,context);vm.runInContext(`AiRequestRouter.prototype.request=(function(original){return function(contents){this.activate({category:'all'});return original.call(this,contents);};})(AiRequestRouter.prototype.request);`,context);
  context.g_keyConfigured=true;el('modelPreset').value='test-model';el('apiKeyInput').value='';el('adminPassword').value='관리자-secret';el('agentEnabled').checked=true;el('userPrompt').value='기존 파일을 읽고 제목을 바꾸고 메인으로 지정해줘';
  return {context,el};
 }

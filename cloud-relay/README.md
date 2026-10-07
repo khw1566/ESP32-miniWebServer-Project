@@ -16,6 +16,24 @@ node provision.mjs aabbccddeeff
 
 `wrangler.toml`의 `DEMO_DEVICE`에 생성된 ID(`m1-실제MAC`)를 넣습니다. 현재 시연 보드는 `m1-b0cbd899de80`이며 `audreaming.com`과 `demo.audreaming.com`도 이 보드로 연결됩니다. 보드의 기본 QR은 MAC별 주소 `m1-실제MAC.audreaming.com`을 표시합니다. 여러 보드에서는 각 주소별 Custom Domain을 추가합니다. 주소와 토큰은 Wi-Fi가 바뀌어도 같습니다. 실제 Cloudflare 계정에서 구매 도메인을 확인하여 기존 문서의 `audeaming.com` 오기를 수정했습니다.
 
+## 다른 보드 연결 (S3, S3-N16R8, C3)
+
+모든 펌웨어가 같은 중계 서버를 사용합니다. 보드 ID와 주소만 제품 접두사가 다릅니다.
+
+| 펌웨어 | 제품 | 외부 주소 | SD 업로드 |
+| --- | --- | --- | --- |
+| M1 | `m1` | `m1-MAC.audreaming.com` | 지원 |
+| S3-N16R8-SD | `s3` | `s3-MAC.audreaming.com` | 지원 |
+| S3 | `s3` | `s3-MAC.audreaming.com` | 없음 (내부 플래시 웹 파일만 제공) |
+| C3 | `c3` | `c3-MAC.audreaming.com` | 없음 (내부 플래시 웹 파일만 제공) |
+
+1. 새 펌웨어를 설치하고 로컬 관리자 시스템 정보에서 시리얼(MAC 12자리)을 확인합니다.
+2. `node provision.mjs 실제MAC 제품` (예: `node provision.mjs a1b2c3d4e5f6 c3`). 출력되는 `[[routes]]` 세 줄을 `wrangler.toml`에 추가합니다.
+3. registry secret을 다시 등록하고 `npm run deploy`로 배포합니다 (아래 2장).
+4. `./Register-Board.ps1 -BoardUrl http://보드주소 -Serial 실제MAC -Product 제품`으로 연결 키를 보드에 저장하고 재부팅합니다.
+
+SD가 없는 보드에 SD 업로드를 요청하면 보드가 `503 This board has no SD card slot`으로 거절합니다. AI 요청 중에는 M1과 같이 중계 연결을 잠시 내려 메모리를 확보합니다.
+
 ## 2. 제작자: Cloudflare에 무료 배포
 
 Cloudflare 계정에서 Workers Free를 사용합니다. Durable Objects는 무료 플랜의 SQLite 형태로 구성했습니다. 기존 도메인에 웹사이트가 있다면 apex 도메인의 경로를 덮어쓰지 말고 `wrangler.toml`의 `audreaming.com` route를 제거한 뒤 demo 주소만 사용합니다.

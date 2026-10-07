@@ -7,6 +7,8 @@
 #define SOFTAP_PASS_DEFAULT ""
 #define SOFTAP_CHANNEL      1
 #define SOFTAP_MAX_CONN     4
+#define ROUTER_MAX_CONN     4
+#define ROUTER_PASS_LEN     10
 
 #define NVS_NAMESPACE       "mini_web"
 #define NVS_KEY_SSID        "wifi_ssid"
@@ -57,6 +59,18 @@ esp_err_t network_get_mdns_url(char *out, size_t length);
 esp_err_t network_mdns_start(void);
 void network_mdns_stop(void);
 bool network_mdns_is_ready(void);
+
+// Router mode: shares the STA internet connection through a WPA2 AP (NAPT).
+// Requires NET_MODE_STA_CONNECTED. remember=true persists the choice in NVS
+// so it is restored after the next successful STA connection.
+esp_err_t network_router_start(bool remember);
+esp_err_t network_router_stop(bool remember);
+bool network_router_active(void);
+bool network_router_saved(void);
+const char *network_router_ssid(void);
+const char *network_router_ip(void);
+esp_err_t network_router_password(char *out, size_t length);
+int network_router_clients(void);
 
 // Diagnostic event counters since boot; reason 0 means no recorded disconnect.
 unsigned network_get_disconnect_count(void);

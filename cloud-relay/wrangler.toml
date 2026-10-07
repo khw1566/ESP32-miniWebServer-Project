@@ -26,6 +26,10 @@ custom_domain = true
 pattern = "m1-b0cbd899de80.audreaming.com"
 custom_domain = true
 
+[[routes]]
+pattern = "m1-20500d34b5f0.audreaming.com"
+custom_domain = true
+
 [[durable_objects.bindings]]
 name = "DEVICES"
 class_name = "RelayDevice"
@@ -33,3 +37,13 @@ class_name = "RelayDevice"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RelayDevice"]
+
+# v2 added a name directory (RelayDirectory) that was rolled back on 2026-10-07.
+# Keep both entries: deployed migrations must stay in order.
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RelayDirectory"]
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["RelayDirectory"]
