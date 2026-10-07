@@ -1,0 +1,35 @@
+name = "mini-web-relay"
+account_id = "60bbc5ec2b671498c5f12537cd46e65a"
+main = "worker.mjs"
+compatibility_date = "2026-10-06"
+workers_dev = false
+
+[vars]
+PUBLIC_DOMAIN = "audreaming.com"
+# Set to the provisioned board ID, e.g. m1-aabbccddeeff, before deployment.
+DEMO_DEVICE = "m1-b0cbd899de80"
+
+# Demo: relay endpoint plus one board hostname. Add a board route at provisioning.
+[[routes]]
+pattern = "relay.audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "demo.audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "m1-b0cbd899de80.audreaming.com"
+custom_domain = true
+
+[[durable_objects.bindings]]
+name = "DEVICES"
+class_name = "RelayDevice"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDevice"]

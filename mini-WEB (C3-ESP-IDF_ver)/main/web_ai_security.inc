@@ -295,12 +295,27 @@ static esp_err_t ai_key_post_handler(httpd_req_t *req) {
     bool valid = deleting || (cJSON_IsString(value) && strlen(value->valuestring) >= 16 && strlen(value->valuestring) < 256);
     if (valid && !deleting) for (const char *p = value->valuestring; *p; ++p) if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_')) valid = false;
     ai_security_record_t record = {0};
-    bool ok = valid && ai_record_read(&record) == ESP_OK;
+    const char *failure = "키 형식 오류: 16~255자의 영문, 숫자, 하이픈, 밑줄로 된 키 원문을 입력하세요.";
+    esp_err_t storage_error = ESP_OK;
+    bool ok = valid;
+    if (ok) {
+        storage_error = ai_record_read(&record);
+        ok = storage_error == ESP_OK;
+        if (!ok) failure = "키 저장 실패: 보드의 인증 저장정보를 읽지 못했습니다. 다시 로그인하고 재시도하세요.";
+    }
     if (ok && deleting) { record.key_len = 0; ai_wipe(record.ciphertext, sizeof(record.ciphertext)); ai_wipe(record.iv, sizeof(record.iv)); ai_wipe(record.tag, sizeof(record.tag)); }
-    else if (ok) ok = ai_key_encrypt(&record, session->wrapping_key, value->valuestring);
-    if (ok) ok = ai_record_write(&record) == ESP_OK;
+    else if (ok) {
+        ok = ai_key_encrypt(&record, session->wrapping_key, value->valuestring);
+        if (!ok) failure = "키 저장 실패: 보드의 AES-GCM 암호화에 실패했습니다.";
+    }
+    if (ok) {
+        storage_error = ai_record_write(&record);
+        ok = storage_error == ESP_OK;
+        if (!ok) failure = "키 저장 실패: NVS 저장공간에 기록하지 못했습니다. 보드 로그를 확인하세요.";
+    }
+    if (!ok && storage_error != ESP_OK) ESP_LOGW(TAG, "AI key storage failed: %s", esp_err_to_name(storage_error));
     if (cJSON_IsString(value)) ai_wipe(value->valuestring, strlen(value->valuestring));
     cJSON_Delete(body); ai_wipe(&record, sizeof(record));
-    if (!ok) return ai_error(req, valid ? "500 Internal Server Error" : "400 Bad Request", "키를 저장하지 못했습니다. API 키 형식과 저장공간을 확인하세요.");
+    if (!ok) return ai_error(req, valid ? "500 Internal Server Error" : "400 Bad Request", failure);
     return ai_key_get_handler(req);
 }

@@ -1,6 +1,7 @@
 #include "network_manager.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -20,6 +21,10 @@ static net_mode_t s_net_mode = NET_MODE_IDLE;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static int s_retry_num = 0;
+static atomic_uint s_diagnostic_disconnects;
+static atomic_uint s_diagnostic_last_reason;
+unsigned network_get_disconnect_count(void) { return atomic_load(&s_diagnostic_disconnects); }
+unsigned network_get_last_disconnect_reason(void) { return atomic_load(&s_diagnostic_last_reason); }
 static char s_current_ip[32] = "0.0.0.0";
 static bool s_sta_link_up = false;
 ESP_EVENT_DEFINE_BASE(NET_IPV6_EVENT);
@@ -110,6 +115,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        atomic_fetch_add(&s_diagnostic_disconnects, 1);
+        if (event_data) atomic_store(&s_diagnostic_last_reason, ((wifi_event_sta_disconnected_t *)event_data)->reason);
         s_sta_link_up = false;
         s_net_mode = NET_MODE_STA_CONNECTING;
         wifi_event_sta_disconnected_t *dc = (wifi_event_sta_disconnected_t *)event_data;

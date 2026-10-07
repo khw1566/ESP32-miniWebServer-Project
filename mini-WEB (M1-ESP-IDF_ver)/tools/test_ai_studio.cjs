@@ -5,13 +5,13 @@ class Element {
  setAttribute(k,v){this.attributes[k]=v;} addEventListener(){} focus(){} click(){} remove(){}
  set textContent(x){this.text=String(x);this.children=[];} get textContent(){return (this.text||'')+this.children.map(x=>x.textContent).join('');}
 }
-const main=path.resolve(__dirname,'../main'),script=fs.readFileSync(path.join(main,'ai_studio.js'),'utf8');
+const main=path.resolve(__dirname,'../main'),script=fs.readFileSync(path.join(main,'ai_studio.html'),'utf8').match(/<script>([\s\S]*?)<\/script>/g).at(-1).slice(8,-9).replace('/* AI_MEDIA_SCRIPT */',fs.readFileSync(path.join(main,'ai_media.js'),'utf8')).replace('loadSettings();refreshAiKeyStatus();','');
 function setup(fetch){
  const elements={},el=id=>elements[id]||(elements[id]=new Element('div'));
- const context={document:{getElementById:el,createElement:t=>new Element(t),createElementNS:(ns,t)=>{const e=new Element(t);e.namespaceURI=ns;return e;},createTextNode:t=>{const e=new Element('#text');e.textContent=t;return e;}},
-  window:{addEventListener(){}},innerWidth:1000,location:{href:'http://[fd00::1]/ai'},localStorage:{getItem:()=>null,removeItem(){},setItem(){}},sessionStorage:{getItem:()=>null},URL,TextEncoder,console,fetch,setTimeout(){},alert:m=>{throw Error(m);}};
+ const context={document:{documentElement:{dataset:{},style:{setProperty(){}}},querySelector:()=>({offsetHeight:40}),getElementById:el,createElement:t=>new Element(t),createElementNS:(ns,t)=>{const e=new Element(t);e.namespaceURI=ns;return e;},createTextNode:t=>{const e=new Element('#text');e.textContent=t;return e;}},
+  window:{g_aiToken:'test-session',addEventListener(){}},innerWidth:1000,location:{href:'http://[fd00::1]/ai'},localStorage:{getItem:()=>null,removeItem(){},setItem(){}},sessionStorage:{getItem:()=>null,removeItem(){}},URL,TextEncoder,console,fetch,setTimeout(){},alert:m=>{throw Error(m);}};
  vm.createContext(context);vm.runInContext(script,context);
- el('apiKeyInput').value='provider-secret';el('adminPassword').value='관리자-secret';el('agentEnabled').checked=true;el('userPrompt').value='기존 파일을 읽고 제목을 바꾸고 메인으로 지정해줘';
+ context.g_keyConfigured=true;el('modelPreset').value='test-model';el('apiKeyInput').value='';el('adminPassword').value='관리자-secret';el('agentEnabled').checked=true;el('userPrompt').value='기존 파일을 읽고 제목을 바꾸고 메인으로 지정해줘';
  return {context,el};
 }
 function all(e,tag){return (e.tagName===tag?[e]:[]).concat(e.children.flatMap(x=>all(x,tag)));}
@@ -33,11 +33,11 @@ async function run(){
  ];
  const env=setup(async(url,options)=>{
   if(url==='/api/agent'){
-   assert.equal(options.headers['X-Admin-Password'],encodeURIComponent('관리자-secret'));assert(!JSON.stringify(options).includes('provider-secret'));
+   assert.equal(options.headers.Authorization,'Bearer test-session');assert(!JSON.stringify(options).includes('provider-secret'));
    const b=JSON.parse(options.body);operations.push(b.name);
    return {ok:true,json:async()=>b.name==='read_file'?{ok:true,content:'<h1>기존</h1>',version:'v1'}:{ok:true,bytes:30}};
   }
-  const body=JSON.parse(options.body);bodies.push(body);assert(!options.body.includes('관리자-secret'));assert(!JSON.stringify(options.headers).includes(encodeURIComponent('관리자-secret')));
+  assert(url.startsWith('/api/ai/chat?model='));const body=JSON.parse(options.body);bodies.push(body);assert(!options.body.includes('관리자-secret'));assert(!JSON.stringify(options.headers).includes(encodeURIComponent('관리자-secret')));
   return {ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:responses[aiCalls++]}]})};
  });
  await env.context.sendMessage();
@@ -57,7 +57,7 @@ async function run(){
  const generated=fs.readFileSync(path.join(main,'web_page_ai.c'),'utf8');
  const html=[...generated.slice(generated.indexOf('const char HTML_AI_STUDIO')).matchAll(/"(?:\\.|[^"\\])*"/g)].map(m=>JSON.parse(m[0])).join('');
  assert(html.includes("sandbox='allow-scripts'"));assert(!html.includes('AI_STUDIO_SCRIPT'));
- const inline=html.match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(inline);
+ for(const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(match[1]);
  console.log('PASS: embedded script syntax, headings/bold/lists/tables/code, inert HTML/unsafe links, 3 chart types, read/write/home tool loop, thought signatures/call IDs, credential isolation, disabled tools, conflict handling.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

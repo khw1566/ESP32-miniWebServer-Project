@@ -199,12 +199,13 @@ static esp_err_t ai_error(httpd_req_t *req, const char *status, const char *mess
     httpd_resp_set_hdr(req, "Cache-Control", "no-store"); httpd_resp_set_hdr(req, "Connection", "close");
     esp_err_t err = httpd_resp_sendstr(req, body); free(body); return err;
 }
-static cJSON *ai_read_json(httpd_req_t *req, size_t limit) {
+static cJSON *ai_read_json_buffer(httpd_req_t *req, size_t limit, size_t reserve, char **reuse) {
+    *reuse = NULL;
     if (req->content_len <= 0 || (size_t)req->content_len > limit) return NULL;
     char type[80];
     if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
         strncasecmp(type, "application/json", 16)) return NULL;
-    char *body = malloc((size_t)req->content_len + 1);
+    char *body = malloc((size_t)req->content_len + reserve + 1);
     if (!body) return NULL;
     int done = 0;
     while (done < req->content_len) {
@@ -213,17 +214,29 @@ static cJSON *ai_read_json(httpd_req_t *req, size_t limit) {
         done += count;
     }
     body[done] = 0;
-    int depth = 0; bool quoted = false, escape = false, valid = true;
+    int depth = 0; size_t nodes = 1;
+    bool quoted = false, escape = false, valid = memchr(body, 0, done) == NULL;
     for (int i = 0; i < done && valid; ++i) {
         char c = body[i];
         if (quoted) { if (escape) escape = false; else if (c == '\\') escape = true; else if (c == '"') quoted = false; }
         else if (c == '"') quoted = true;
-        else if (c == '{' || c == '[') { if (++depth > 16) valid = false; }
+        else if (c == '{' || c == '[') { ++nodes; if (++depth > 16) valid = false; }
         else if (c == '}' || c == ']') { if (--depth < 0) valid = false; }
+        else if (c == ':' || c == ',') ++nodes;
+        if (nodes > 384) valid = false;
     }
+    /* Bound cJSON's small allocations as well as the payload size. Raw input,
+     * decoded strings and nodes coexist only while parsing/serializing. */
+    size_t available = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (available < (size_t)done + nodes * (sizeof(cJSON) + 32) + 16 * 1024) valid = false;
     cJSON *value = valid ? cJSON_ParseWithLengthOpts(body, done + 1, NULL, true) : NULL;
-    ai_wipe(body, done); free(body);
+    if (value && reserve) *reuse = body;
+    else { ai_wipe(body, done); free(body); }
     return value;
+}
+static cJSON *ai_read_json(httpd_req_t *req, size_t limit) {
+    char *unused;
+    return ai_read_json_buffer(req, limit, 0, &unused);
 }
 static ai_session_t *ai_session_for(httpd_req_t *req) {
     char header[80] = {0};
@@ -292,15 +305,47 @@ static esp_err_t ai_key_post_handler(httpd_req_t *req) {
     cJSON *value = body ? cJSON_GetObjectItemCaseSensitive(body, "key") : NULL;
     cJSON *remove = body ? cJSON_GetObjectItemCaseSensitive(body, "remove") : NULL;
     bool deleting = cJSON_IsTrue(remove);
+    if (cJSON_IsString(value)) {
+        char *key=value->valuestring;size_t length=strlen(key),original_length=length,start=0;
+        while(start<length && isspace((unsigned char)key[start])) ++start;
+        while(length>start && isspace((unsigned char)key[length-1])) --length;
+        memmove(key,key+start,length-start);key[length-start]=0;
+        length=strlen(key);
+        if(length>=2 && (key[0]=='\"' || key[0]=='\'' || key[0]=='`') && key[length-1]==key[0]) {
+            memmove(key,key+1,length-2);key[length-2]=0;
+            length=strlen(key);start=0;
+            while(start<length && isspace((unsigned char)key[start])) ++start;
+            while(length>start && isspace((unsigned char)key[length-1])) --length;
+            memmove(key,key+start,length-start);key[length-start]=0;
+        }
+        size_t normalized_length=strlen(key);
+        ai_wipe(key+normalized_length+1,original_length-normalized_length);
+    }
     bool valid = deleting || (cJSON_IsString(value) && strlen(value->valuestring) >= 16 && strlen(value->valuestring) < 256);
-    if (valid && !deleting) for (const char *p = value->valuestring; *p; ++p) if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_')) valid = false;
+    if (valid && !deleting) for (const char *p = value->valuestring; *p; ++p)
+        if (!((*p>='A' && *p<='Z') || (*p>='a' && *p<='z') || (*p>='0' && *p<='9') || strchr("-_.~+/=",*p))) valid = false;
     ai_security_record_t record = {0};
-    bool ok = valid && ai_record_read(&record) == ESP_OK;
+    const char *failure = "키 형식 오류: 키 원문 16~255자를 입력하세요. 키 내부 공백이나 URL·명령문은 지원하지 않습니다.";
+    esp_err_t storage_error = ESP_OK;
+    bool ok = valid;
+    if (ok) {
+        storage_error = ai_record_read(&record);
+        ok = storage_error == ESP_OK;
+        if (!ok) failure = "키 저장 실패: 보드의 인증 저장정보를 읽지 못했습니다. 다시 로그인하고 재시도하세요.";
+    }
     if (ok && deleting) { record.key_len = 0; ai_wipe(record.ciphertext, sizeof(record.ciphertext)); ai_wipe(record.iv, sizeof(record.iv)); ai_wipe(record.tag, sizeof(record.tag)); }
-    else if (ok) ok = ai_key_encrypt(&record, session->wrapping_key, value->valuestring);
-    if (ok) ok = ai_record_write(&record) == ESP_OK;
+    else if (ok) {
+        ok = ai_key_encrypt(&record, session->wrapping_key, value->valuestring);
+        if (!ok) failure = "키 저장 실패: 보드의 AES-GCM 암호화에 실패했습니다.";
+    }
+    if (ok) {
+        storage_error = ai_record_write(&record);
+        ok = storage_error == ESP_OK;
+        if (!ok) failure = "키 저장 실패: NVS 저장공간에 기록하지 못했습니다. 보드 로그를 확인하세요.";
+    }
+    if (!ok && storage_error != ESP_OK) ESP_LOGW(TAG, "AI key storage failed: %s", esp_err_to_name(storage_error));
     if (cJSON_IsString(value)) ai_wipe(value->valuestring, strlen(value->valuestring));
     cJSON_Delete(body); ai_wipe(&record, sizeof(record));
-    if (!ok) return ai_error(req, valid ? "500 Internal Server Error" : "400 Bad Request", "키를 저장하지 못했습니다. API 키 형식과 저장공간을 확인하세요.");
+    if (!ok) return ai_error(req, valid ? "500 Internal Server Error" : "400 Bad Request", failure);
     return ai_key_get_handler(req);
 }

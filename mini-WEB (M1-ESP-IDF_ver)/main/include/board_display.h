@@ -14,12 +14,16 @@
 #define M1_LCD_SPI_HZ 26000000
 #define M1_LCD_WIDTH 240
 #define M1_LCD_HEIGHT 320
-#define M1_LCD_BUFFER_LINES 20
+#define M1_LCD_BUFFER_LINES 8
 #define M1_TOUCH_MOSI 32
 #define M1_TOUCH_MISO 39
 #define M1_TOUCH_CLK 25
 #define M1_TOUCH_CS 33
 #define M1_TOUCH_IRQ 36
+#define M1_SD_MOSI 23
+#define M1_SD_MISO 19
+#define M1_SD_CLK 18
+#define M1_SD_CS 5
 /* Portrait raw axes. Tune against the physical board. */
 #define M1_TOUCH_X_MIN 200
 #define M1_TOUCH_X_MAX 3900

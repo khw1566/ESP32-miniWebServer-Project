@@ -70,7 +70,12 @@ static void agent_recover_files(void) {
     unlink(AGENT_STAGE);
 }
 
+#include "web_agent_diagnostics.inc"
+
 static esp_err_t agent_execute(httpd_req_t *req, const char *tool, cJSON *args) {
+    if (!strcmp(tool, "get_diagnostics")) return agent_diagnostics(req);
+    if (!strcmp(tool, "get_logs")) return agent_logs(req);
+    if (!strcmp(tool, "inspect_media")) return agent_media_info(req, args);
     if (!strcmp(tool, "get_settings")) {
         char page[128] = {0};
         get_initial_page(page, sizeof(page));

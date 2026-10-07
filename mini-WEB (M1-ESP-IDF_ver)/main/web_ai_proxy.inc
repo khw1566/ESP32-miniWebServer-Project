@@ -15,13 +15,24 @@ static void ai_proxy_task(void *arg) {
     char *payload = NULL;
     cJSON *body = NULL;
     esp_http_client_handle_t client = NULL;
-    bool response_started = false, completed = false;
+    bool response_started = false, completed = false, memory_lease = false;
+    size_t payload_capacity = (size_t)req->content_len + 513;
     const char *error = "AI 요청을 처리하지 못했습니다.";
     const char *status = "502 Bad Gateway";
+    /* Wait in the asynchronous task. The local HTTP server remains available,
+     * and the relay finishes its current poll before releasing TLS memory. */
+    memory_lease = https_memory_exclusive_begin(65000);
+    if (!memory_lease) {
+        status = "503 Service Unavailable"; error = "클라우드 연결 정리를 기다리는 중입니다. 잠시 후 다시 요청하세요."; goto done;
+    }
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < (size_t)req->content_len * 2 + 32 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < payload_capacity) {
+        status = "503 Service Unavailable"; error = "보드 메모리가 부족합니다. 대화를 줄이거나 새 대화를 시작하세요."; goto done;
+    }
     if (ai_record_read(&record) != ESP_OK || !ai_key_decrypt(&record, job->wrapping_key, api_key)) {
         status = "409 Conflict"; error = "먼저 유효한 API 키를 보드에 저장하세요."; goto done;
     }
-    body = ai_read_json(req, 48 * 1024);
+    body = ai_read_json_buffer(req, 48 * 1024, 512, &payload);
     if (!cJSON_IsObject(body) || !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(body, "contents"))) {
         status = "400 Bad Request"; error = "AI 요청 형식이 올바르지 않거나 최대 48 KiB를 초과했습니다."; goto done;
     }
@@ -32,9 +43,15 @@ static void ai_proxy_task(void *arg) {
     }
     if (!config) goto done;
     cJSON_DeleteItemFromObjectCaseSensitive(config, "maxOutputTokens");
-    cJSON_AddNumberToObject(config, "maxOutputTokens", 8192);
-    payload = cJSON_PrintUnformatted(body); cJSON_Delete(body); body = NULL;
-    if (!payload) { status = "503 Service Unavailable"; error = "메모리가 부족합니다. 새 대화를 시작하거나 요청을 짧게 줄이세요."; goto done; }
+    if (!cJSON_AddNumberToObject(config, "maxOutputTokens", 8192) ||
+        !cJSON_PrintPreallocated(body, payload, (int)payload_capacity, false)) {
+        status = "503 Service Unavailable"; error = "메모리가 부족합니다. 새 대화를 시작하거나 요청을 짧게 줄이세요."; goto done;
+    }
+    cJSON_Delete(body); body = NULL;
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 24 * 1024) {
+        status = "503 Service Unavailable"; error = "HTTPS 연결에 필요한 메모리가 부족합니다. 대화를 줄여 다시 요청하세요."; goto done;
+    }
     /* The SDK debug logger can print the complete outgoing headers. */
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_WARN);
     esp_log_level_set("HTTP_HEADER", ESP_LOG_WARN);
@@ -69,7 +86,7 @@ static void ai_proxy_task(void *arg) {
         if (count <= 0) goto done;
         sent += count;
     }
-    ai_wipe(payload, length); free(payload); payload = NULL;
+    ai_wipe(payload, payload_capacity); free(payload); payload = NULL;
     if (esp_http_client_fetch_headers(client) < 0) goto done;
     int provider_status = esp_http_client_get_status_code(client);
     if (provider_status < 200 || provider_status >= 300) {
@@ -98,16 +115,22 @@ static void ai_proxy_task(void *arg) {
     }
 done:
     if (client) { esp_http_client_close(client); esp_http_client_cleanup(client); }
-    if (payload) { ai_wipe(payload, strlen(payload)); free(payload); }
+    if (payload) { ai_wipe(payload, payload_capacity); free(payload); }
     cJSON_Delete(body);
     ai_wipe(api_key, sizeof(api_key)); ai_wipe(&record, sizeof(record));
+    ESP_LOGI(TAG, "[AI] Complete: free=%u, largest=%u, stack_min=%u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if (!response_started && !completed) ai_error(req, status, error);
     /* A truncated response must not be reused as complete JSON. */
     bool close_socket = response_started && !completed;
     int sockfd = httpd_req_to_sockfd(req);
     httpd_req_async_handler_complete(req);
     if (close_socket && s_server) httpd_sess_trigger_close(s_server, sockfd);
-    ai_wipe(job, sizeof(*job)); free(job); atomic_store(&s_ai_proxy_busy, false);
+    ai_wipe(job, sizeof(*job)); free(job);
+    if (memory_lease) https_memory_exclusive_end();
+    atomic_store(&s_ai_proxy_busy, false);
     vTaskDelete(NULL);
 }
 
@@ -117,8 +140,9 @@ static esp_err_t ai_chat_post_handler(httpd_req_t *req) {
     if (atomic_load(&s_ai_proxy_busy)) return ai_error(req, "429 Too Many Requests", "다른 AI 요청을 처리 중입니다. 완료 후 다시 요청하세요.");
     if (req->content_len <= 0 || req->content_len > 48 * 1024)
         return ai_error(req, "413 Payload Too Large", "대화가 48 KiB를 초과했습니다. 새 대화를 시작하세요.");
-    if (heap_caps_get_free_size(MALLOC_CAP_8BIT) < (size_t)req->content_len * 3 + 64 * 1024)
-        return ai_error(req, "503 Service Unavailable", "보드 메모리가 부족합니다. 대화를 줄이거나 새 대화를 시작하세요.");
+    /* Payload admission happens after the relay releases its connection. */
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 20 * 1024)
+        return ai_error(req, "503 Service Unavailable", "보드 메모리가 부족합니다. 잠시 후 다시 요청하세요.");
     char query[128] = {0}, model[81] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, "model", model, sizeof(model)) != ESP_OK || !*model)

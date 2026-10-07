@@ -1,4 +1,5 @@
 **/build/
+**/build.*/
 **/managed_components/
 **/.pio/
 **/.cache/
@@ -37,5 +38,6 @@
 /보고서 초안.md
 /ngrok_qrcode.png
 /sample.webp
+/sites/
 /Setup_nrok.bat
 /Serve_Opera_2021_ngrok.bat

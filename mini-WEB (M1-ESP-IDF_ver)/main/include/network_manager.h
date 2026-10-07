@@ -57,3 +57,7 @@ esp_err_t network_get_mdns_url(char *out, size_t length);
 esp_err_t network_mdns_start(void);
 void network_mdns_stop(void);
 bool network_mdns_is_ready(void);
+
+// Diagnostic event counters since boot; reason 0 means no recorded disconnect.
+unsigned network_get_disconnect_count(void);
+unsigned network_get_last_disconnect_reason(void);

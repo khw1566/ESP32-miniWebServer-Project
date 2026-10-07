@@ -48,6 +48,54 @@ static uint32_t agent_hash(const unsigned char *data, size_t size) {
     return hash;
 }
 
+/* Hash/edit validation and JSON responses never keep a whole file in RAM. */
+static bool agent_file_version(const char *path, size_t expected, char version[16]) {
+    FILE *file=fopen(path,"rb");if(!file) return false;
+    unsigned char chunk[512];size_t n,total=0;uint32_t hash=2166136261U;bool valid=true;
+    while((n=fread(chunk,1,sizeof(chunk),file))>0) {
+        if(memchr(chunk,0,n)) {valid=false;break;}
+        for(size_t i=0;i<n;++i) hash=(hash^chunk[i])*16777619U;
+        total+=n;
+    }
+    if(ferror(file)||total!=expected) valid=false;
+    fclose(file);
+    if(valid) snprintf(version,16,"%08lx",(unsigned long)hash);
+    return valid;
+}
+static size_t agent_json_escape(unsigned char ch, char out[6]) {
+    if(ch=='"'||ch=='\\') {out[0]='\\';out[1]=ch;return 2;}
+    if(ch<32) {
+        const char *hex="0123456789abcdef";
+        out[0]='\\';out[1]='u';out[2]='0';out[3]='0';
+        out[4]=hex[ch>>4];out[5]=hex[ch&15];return 6;
+    }
+    out[0]=ch;return 1;
+}
+static esp_err_t agent_read_file_stream(httpd_req_t *req,const char *path,const char *name,const char *version,size_t expected) {
+    FILE *file=fopen(path,"rb");
+    if(!file) return agent_error(req,"500 Internal Server Error","파일을 읽지 못했습니다.");
+    char out[1024];unsigned char chunk[512];size_t used=0,total=0,n;
+    snprintf(out,sizeof(out),"{\"ok\":true,\"name\":\"%s\",\"version\":\"%s\",\"content\":\"",name,version);
+    httpd_resp_set_type(req,"application/json; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    esp_err_t result=httpd_resp_sendstr_chunk(req,out);
+    while(result==ESP_OK && (n=fread(chunk,1,sizeof(chunk),file))>0) {
+        total+=n;
+        for(size_t i=0;i<n;++i) {
+            unsigned char ch=chunk[i];
+            if(used+6>sizeof(out)) {result=httpd_resp_send_chunk(req,out,used);used=0;if(result!=ESP_OK) break;}
+            char escaped[6];size_t length=agent_json_escape(ch,escaped);
+            memcpy(out+used,escaped,length);used+=length;
+        }
+    }
+    if(result==ESP_OK && (ferror(file)||total!=expected)) result=ESP_FAIL;
+    fclose(file);
+    if(result==ESP_OK && used) result=httpd_resp_send_chunk(req,out,used);
+    if(result==ESP_OK) result=httpd_resp_sendstr_chunk(req,"\"}");
+    if(result==ESP_OK) result=httpd_resp_send_chunk(req,NULL,0);
+    return result;
+}
+
 static void agent_recover_files(void) {
     DIR *dir = opendir(STORAGE_BASE_PATH);
     if (!dir) return;
@@ -70,7 +118,12 @@ static void agent_recover_files(void) {
     unlink(AGENT_STAGE);
 }
 
+#include "web_agent_diagnostics.inc"
+
 static esp_err_t agent_execute(httpd_req_t *req, const char *tool, cJSON *args) {
+    if (!strcmp(tool, "get_diagnostics")) return agent_diagnostics(req);
+    if (!strcmp(tool, "get_logs")) return agent_logs(req);
+    if (!strcmp(tool, "inspect_media")) return agent_media_info(req, args);
     if (!strcmp(tool, "get_settings")) {
         char page[128] = {0};
         get_initial_page(page, sizeof(page));
@@ -86,30 +139,35 @@ static esp_err_t agent_execute(httpd_req_t *req, const char *tool, cJSON *args) 
     if (!strcmp(tool, "list_files")) {
         DIR *dir = opendir(STORAGE_BASE_PATH);
         if (!dir) return agent_error(req, "503 Service Unavailable", "저장소를 사용할 수 없습니다.");
-        cJSON *out = cJSON_CreateObject(), *files = cJSON_CreateArray();
-        if (!out || !files) { closedir(dir); cJSON_Delete(out); cJSON_Delete(files); return httpd_resp_send_500(req); }
-        cJSON_AddBoolToObject(out, "ok", true);
-        cJSON_AddItemToObject(out, "files", files);
+        httpd_resp_set_type(req,"application/json; charset=utf-8");
+        httpd_resp_set_hdr(req,"Cache-Control","no-store");
+        esp_err_t result=httpd_resp_sendstr_chunk(req,"{\"ok\":true,\"files\":[");
         struct dirent *ent;
-        int count = 0;
-        while ((ent = readdir(dir))) {
+        int count = 0;bool truncated=false;
+        while (result==ESP_OK && (ent = readdir(dir))) {
             if (ent->d_name[0] == '.' || strstr(ent->d_name, ".aibak")) continue;
-            if (count++ >= 128) { cJSON_AddBoolToObject(out, "truncated", true); break; }
+            if (count >= 128) {truncated=true;break;}
             char path[280]; struct stat st;
             snprintf(path, sizeof(path), "%s/%s", STORAGE_BASE_PATH, ent->d_name);
             if (stat(path, &st) != 0) continue;
             cJSON *file = cJSON_CreateObject();
-            if (!file) { closedir(dir); cJSON_Delete(out); return httpd_resp_send_500(req); }
+            if (!file) {result=ESP_ERR_NO_MEM;break;}
             cJSON_AddStringToObject(file, "name", ent->d_name);
             cJSON_AddNumberToObject(file, "bytes", st.st_size);
             int64_t modified = file_date_read(ent->d_name);
             if (modified) cJSON_AddNumberToObject(file, "modified_at", (double)modified);
             else cJSON_AddNullToObject(file, "modified_at");
             cJSON_AddBoolToObject(file, "editable", agent_filename(ent->d_name) && st.st_size <= AGENT_MAX_FILE);
-            cJSON_AddItemToArray(files, file);
+            char *json=cJSON_PrintUnformatted(file);cJSON_Delete(file);
+            if(!json) {result=ESP_ERR_NO_MEM;break;}
+            if(count) result=httpd_resp_sendstr_chunk(req,",");
+            if(result==ESP_OK) result=httpd_resp_sendstr_chunk(req,json);
+            free(json);++count;
         }
         closedir(dir);
-        return agent_json(req, "200 OK", out);
+        if(result==ESP_OK) result=httpd_resp_sendstr_chunk(req,truncated?"],\"truncated\":true}":"]}");
+        if(result==ESP_OK) result=httpd_resp_send_chunk(req,NULL,0);
+        return result;
     }
     bool reading = !strcmp(tool, "read_file"), writing = !strcmp(tool, "write_file");
     bool setting_home = !strcmp(tool, "set_home");
@@ -132,33 +190,12 @@ static esp_err_t agent_execute(httpd_req_t *req, const char *tool, cJSON *args) 
     bool exists = stat(path, &st) == 0;
     if (reading && !exists) return agent_error(req, "404 Not Found", "파일을 찾을 수 없습니다.");
     char version[16] = "new";
-    char *old = NULL;
     if (exists) {
         if (st.st_size < 0 || st.st_size > AGENT_MAX_FILE) return agent_error(req, "413 Payload Too Large", "파일이 도구의 최대 크기인 24 KiB를 초과했습니다.");
-        old = malloc((size_t)st.st_size + 1);
-        if (!old) return httpd_resp_send_500(req);
-        FILE *file = fopen(path, "rb");
-        if (!file) { free(old); return agent_error(req, "500 Internal Server Error", "파일을 읽지 못했습니다."); }
-        size_t n = fread(old, 1, st.st_size, file);
-        bool failed = ferror(file) || n != (size_t)st.st_size;
-        fclose(file);
-        if (failed || memchr(old, 0, n)) { free(old); return agent_error(req, "400 Bad Request", "텍스트로 읽을 수 없는 파일입니다."); }
-        old[n] = 0;
-        snprintf(version, sizeof(version), "%08lx", (unsigned long)agent_hash((unsigned char *)old, n));
+        if(!agent_file_version(path,(size_t)st.st_size,version))
+            return agent_error(req,"400 Bad Request","텍스트로 읽을 수 없는 파일입니다.");
     }
-    if (reading) {
-        cJSON *out = cJSON_CreateObject();
-        if (!out) { free(old); return httpd_resp_send_500(req); }
-        cJSON_AddBoolToObject(out, "ok", true);
-        cJSON_AddStringToObject(out, "name", name);
-        cJSON_AddStringToObject(out, "version", version);
-        if (!cJSON_AddStringToObject(out, "content", old)) {
-            free(old); cJSON_Delete(out); return httpd_resp_send_500(req);
-        }
-        free(old);
-        return agent_json(req, "200 OK", out);
-    }
-    free(old);
+    if (reading) return agent_read_file_stream(req,path,name,version,(size_t)st.st_size);
     const char *expected = agent_string(args, "expected_version"), *content = agent_string(args, "content");
     if (!expected || strcmp(expected, version)) return agent_error(req, "409 Conflict", "파일이 변경되었거나 이미 존재합니다. 파일을 다시 읽은 뒤 수정하세요. 새 파일 표시는 실제로 없는 파일에만 사용할 수 있습니다.");
     if (!content || strlen(content) > AGENT_MAX_FILE) return agent_error(req, "413 Payload Too Large", "파일 내용은 24 KiB 이하의 텍스트여야 합니다.");
@@ -194,6 +231,8 @@ static esp_err_t agent_execute(httpd_req_t *req, const char *tool, cJSON *args) 
 static esp_err_t api_agent_post_handler(httpd_req_t *req) {
     if (!ai_require_auth(req)) return ESP_OK;
     if (req->content_len <= 0 || req->content_len > AGENT_MAX_REQUEST) return agent_error(req, "413 Payload Too Large", "도구 요청이 최대 크기인 48 KiB를 초과했습니다.");
+    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)<(size_t)req->content_len*2+24*1024)
+        return agent_error(req,"503 Service Unavailable","메모리가 부족합니다. 요청을 줄이거나 잠시 후 다시 시도하세요.");
     char *body = malloc(req->content_len + 1);
     if (!body) return httpd_resp_send_500(req);
     size_t received = 0;
@@ -204,7 +243,7 @@ static esp_err_t api_agent_post_handler(httpd_req_t *req) {
     }
     body[received] = 0;
     // Bound parser recursion before cJSON touches the HTTP task stack.
-    int depth = 0;
+    int depth = 0;size_t nodes=1;
     bool quoted = false, escaped = false, valid = memchr(body, 0, received) == NULL;
     for (size_t i = 0; valid && i < received; i++) {
         char ch = body[i];
@@ -215,8 +254,13 @@ static esp_err_t api_agent_post_handler(httpd_req_t *req) {
                 if (i + 5 < received && !strncmp(body + i, "\\u0000", 6)) valid = false;
             } else if (ch == '"') quoted = false;
         } else if (ch == '"') quoted = true;
-        else if (ch == '{' || ch == '[') { if (++depth > 8) valid = false; }
+        else if (ch == '{' || ch == '[') {++nodes; if (++depth > 8) valid = false; }
         else if (ch == '}' || ch == ']') { if (--depth < 0) valid = false; }
+        else if (ch == ':' || ch == ',') ++nodes;
+        if(nodes>384) valid=false;
+    }
+    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)<received+nodes*(sizeof(cJSON)+32)+16*1024) {
+        free(body);return agent_error(req,"503 Service Unavailable","메모리가 부족합니다. 요청을 줄여 다시 시도하세요.");
     }
     cJSON *request = valid ? cJSON_ParseWithLengthOpts(body, received + 1, NULL, true) : NULL;
     free(body);

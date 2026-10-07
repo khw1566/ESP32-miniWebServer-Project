@@ -2,7 +2,7 @@
 param([string]$FontName='Malgun Gothic')
 Add-Type -AssemblyName System.Drawing
 $root=Split-Path $PSScriptRoot -Parent
-$source=Get-Content -Raw -Encoding utf8 (Join-Path $root 'main/onboard_ui.c')
+$source=(Get-Content -Raw -Encoding utf8 (Join-Path $root 'main/onboard_ui.c')) + (Get-Content -Raw -Encoding utf8 (Join-Path $root 'main/m1_keyboard.c')) + (Get-Content -Raw -Encoding utf8 (Join-Path $root 'main/m1_dashboard.c'))
 $codes=@($source.ToCharArray() | Where-Object {[int]$_ -ge 0xAC00 -and [int]$_ -le 0xD7A3} | ForEach-Object {[int]$_} | Sort-Object -Unique)
 $image=[System.Drawing.Bitmap]::new(16,20)
 $graphics=[System.Drawing.Graphics]::FromImage($image)

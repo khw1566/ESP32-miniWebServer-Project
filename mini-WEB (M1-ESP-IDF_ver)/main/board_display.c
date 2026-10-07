@@ -16,7 +16,9 @@
 #error "M1 LCD requires LVGL RGB565 (16-bit color)"
 #endif
 static esp_lcd_panel_handle_t panel;
+#if !LV_COLOR_16_SWAP
 static uint16_t *wire_pixels;
+#endif
 /* Values from the supplied TFT_eSPI ILI9341_2_DRIVER example.
  * Do not use the registry's init_cmds_2 header: it is a different sequence.
  * Direction and inversion are applied explicitly after initialization.
@@ -56,11 +58,12 @@ static void flush(lv_disp_drv_t *d, const lv_area_t *a, lv_color_t *pixels) {
      * LV_COLOR_16_SWAP may already have put LVGL pixels in wire order.
      */
 #if LV_COLOR_16_SWAP
-    memcpy(wire_pixels,pixels,n*sizeof(uint16_t));
+    const void *wire = pixels;
 #else
     for (size_t i=0; i<n; ++i) wire_pixels[i]=__builtin_bswap16(pixels[i].full);
+    const void *wire = wire_pixels;
 #endif
-    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, a->x1,a->y1,a->x2+1,a->y2+1,wire_pixels));
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, a->x1,a->y1,a->x2+1,a->y2+1,wire));
     xSemaphoreTake(transfer_done, portMAX_DELAY);
     lv_disp_flush_ready(d);
 }
@@ -161,9 +164,14 @@ esp_err_t board_display_init(void) {
     ESP_RETURN_ON_ERROR(gpio_config(&in),"LCD","touch gpio");
     lv_init();
     const size_t count=M1_LCD_WIDTH*M1_LCD_BUFFER_LINES;
-    lv_color_t *buf=heap_caps_malloc(count*sizeof(lv_color_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    /* LVGL renders directly into DMA memory in LCD byte order. flush() waits
+     * for SPI completion before this single buffer can be reused. */
+    lv_color_t *buf=heap_caps_malloc(count*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
+    if(!buf) return ESP_ERR_NO_MEM;
+#if !LV_COLOR_16_SWAP
     wire_pixels=heap_caps_malloc(count*sizeof(uint16_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
-    if(!buf || !wire_pixels) {heap_caps_free(buf);heap_caps_free(wire_pixels);return ESP_ERR_NO_MEM;}
+    if(!wire_pixels) {heap_caps_free(buf);return ESP_ERR_NO_MEM;}
+#endif
     lv_disp_draw_buf_init(&draw_buf,buf,NULL,count);
     lv_disp_drv_init(&disp); disp.hor_res=M1_LCD_WIDTH;disp.ver_res=M1_LCD_HEIGHT;disp.draw_buf=&draw_buf;disp.flush_cb=flush;
     if(!lv_disp_drv_register(&disp)) return ESP_ERR_NO_MEM;

@@ -1,4 +1,7 @@
 #include "web_server.h"
+#include "cloud_relay.h"
+#include "https_memory.h"
+#include "sd_media.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -38,6 +41,8 @@
 
 static const char *TAG = "WEB_SVR";
 static httpd_handle_t s_server = NULL;
+static atomic_bool s_server_running;
+bool web_server_is_running(void) { return atomic_load(&s_server_running); }
 #define STORAGE_BASE_PATH "/spiffs"
 static void agent_recover_files(void);
 
@@ -46,7 +51,7 @@ esp_err_t web_server_storage_init(void) {
       .base_path = STORAGE_BASE_PATH,
       .partition_label =
           "littlefs", // Storage capacity comes from the board partition table.
-      .max_files = 10,
+      .max_files = 6,
       .format_if_mount_failed = true};
 
   esp_err_t ret = esp_vfs_spiffs_register(&conf);
@@ -74,7 +79,7 @@ esp_err_t web_server_storage_init(void) {
   return ESP_OK;
 }
 
-#define LOG_BUFFER_SIZE 4096
+#define LOG_BUFFER_SIZE 2048
 static char s_log_buffer[LOG_BUFFER_SIZE];
 static size_t s_log_head = 0;
 static SemaphoreHandle_t s_log_mutex = NULL;
@@ -606,6 +611,8 @@ static esp_err_t send_spiffs_file(httpd_req_t *req, const char *filepath) {
   if (ext && strcasecmp(ext, ".mp3") == 0) return send_media_file(req, f, "audio/mpeg");
   if (ext && strcasecmp(ext, ".mp4") == 0) return send_media_file(req, f, "video/mp4");
   if (ext && strcasecmp(ext, ".m4a") == 0) return send_media_file(req, f, "audio/mp4");
+  if (ext && strcasecmp(ext, ".webm") == 0) return send_media_file(req, f, "video/webm");
+  if (ext && strcasecmp(ext, ".wav") == 0) return send_media_file(req, f, "audio/wav");
 
   if (ext) {
     if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
@@ -624,6 +631,22 @@ static esp_err_t send_spiffs_file(httpd_req_t *req, const char *filepath) {
       httpd_resp_set_type(req, "image/svg+xml");
     } else if (strcasecmp(ext, ".json") == 0) {
       httpd_resp_set_type(req, "application/json");
+    } else if (strcasecmp(ext, ".gif") == 0) {
+      httpd_resp_set_type(req, "image/gif");
+    } else if (strcasecmp(ext, ".ico") == 0) {
+      httpd_resp_set_type(req, "image/x-icon");
+    } else if (strcasecmp(ext, ".pdf") == 0) {
+      httpd_resp_set_type(req, "application/pdf");
+    } else if (strcasecmp(ext, ".woff") == 0) {
+      httpd_resp_set_type(req, "font/woff");
+    } else if (strcasecmp(ext, ".woff2") == 0) {
+      httpd_resp_set_type(req, "font/woff2");
+    } else if (strcasecmp(ext, ".ttf") == 0) {
+      httpd_resp_set_type(req, "font/ttf");
+    } else if (strcasecmp(ext, ".webm") == 0) {
+      httpd_resp_set_type(req, "video/webm");
+    } else if (strcasecmp(ext, ".wav") == 0) {
+      httpd_resp_set_type(req, "audio/wav");
     } else {
       httpd_resp_set_type(req, "text/plain; charset=utf-8");
     }
@@ -636,14 +659,11 @@ static esp_err_t send_spiffs_file(httpd_req_t *req, const char *filepath) {
   while ((read_bytes = fread(chunk, 1, sizeof(chunk), f)) > 0) {
     if (httpd_resp_send_chunk(req, chunk, read_bytes) != ESP_OK) {
       fclose(f);
-      httpd_resp_sendstr_chunk(req, NULL);
-      httpd_resp_send_500(req);
       return ESP_FAIL;
     }
   }
   fclose(f);
-  httpd_resp_send_chunk(req, NULL, 0);
-  return ESP_OK;
+  return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t send_chunk_string(httpd_req_t *req, const char *str) {
@@ -659,13 +679,11 @@ static esp_err_t send_chunk_string(httpd_req_t *req, const char *str) {
     if (httpd_resp_send_chunk(req, str + sent, cur_len) != ESP_OK) {
       ESP_LOGE(TAG, "[CHUNK] Send failed at offset %d/%d", (int)sent,
                (int)total_len);
-      httpd_resp_sendstr_chunk(req, NULL);
       return ESP_FAIL;
     }
     sent += cur_len;
   }
-  httpd_resp_send_chunk(req, NULL, 0);
-  return ESP_OK;
+  return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t help_get_handler(httpd_req_t *req) {
@@ -675,6 +693,19 @@ static esp_err_t help_get_handler(httpd_req_t *req) {
 
 static uint32_t s_home_requests;
 uint32_t web_server_home_requests(void) {return __atomic_load_n(&s_home_requests,__ATOMIC_RELAXED);}
+static esp_err_t try_sd_public_file(httpd_req_t *req, const char *path) {
+  if (!strcmp(path,"/media/catalog.json")) {
+    cJSON *catalog=sd_media_catalog();char *json=catalog?cJSON_PrintUnformatted(catalog):NULL;cJSON_Delete(catalog);
+    if(!json) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req,"application/json");httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    esp_err_t err=httpd_resp_sendstr(req,json);free(json);return err;
+  }
+  if(!sd_media_ready()||!cloud_relay_public_path(path)) return ESP_ERR_NOT_FOUND;
+  if(!strncmp(path,"/media/",7)&&!sd_media_name_valid(path+7)) return ESP_ERR_NOT_FOUND;
+  char filename[256];snprintf(filename,sizeof(filename),"%s%s",SD_MEDIA_ROOT,!strcmp(path,"/")?"/index.html":path);
+  struct stat st;if(stat(filename,&st)!=0||!S_ISREG(st.st_mode)) return ESP_ERR_NOT_FOUND;
+  return send_spiffs_file(req,filename);
+}
 static esp_err_t root_get_handler(httpd_req_t *req) {
   __atomic_fetch_add(&s_home_requests,1,__ATOMIC_RELAXED);
   if (network_get_mode() == NET_MODE_AP_CAPTIVE) {
@@ -698,6 +729,8 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
 
   // 관리자가 지정한 업로드 HTML을 IPv4/IPv6 루트 접속 화면으로 우선 제공
+  esp_err_t sd_result=try_sd_public_file(req,"/");
+  if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
   char initial_page[128] = {0};
   if (get_initial_page(initial_page, sizeof(initial_page)) &&
       is_valid_initial_page(initial_page)) {
@@ -903,6 +936,8 @@ static esp_err_t api_logs_get_handler(httpd_req_t *req) {
 static esp_err_t api_system_get_handler(httpd_req_t *req) {
   uint32_t free_heap = esp_get_free_heap_size();
   uint32_t min_heap = esp_get_minimum_free_heap_size();
+  uint32_t largest_heap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  uint32_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
   uint32_t used_heap = (total_heap > free_heap) ? (total_heap - free_heap) : 0;
   int64_t uptime_sec = esp_timer_get_time() / 1000000;
@@ -945,12 +980,17 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
 
   char product_url[96] = {0};
   network_get_mdns_url(product_url, sizeof(product_url));
-  char json[1664];
+  char cloud_url[96] = {0};
+  cloud_relay_get_url(cloud_url, sizeof(cloud_url));
+  char json[1792];
   snprintf(
       json, sizeof(json),
       "{"
       "\"free_heap\":%lu,"
       "\"min_heap\":%lu,"
+      "\"largest_free_block\":%lu,"
+      "\"internal_free_heap\":%lu,"
+      "\"ai_busy\":%s,"
       "\"total_heap\":%lu,"
       "\"used_heap\":%lu,"
       "\"uptime_sec\":%lld,"
@@ -974,15 +1014,19 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
       "\"system_reserved\":%lu,"
       "\"disk_total\":%lu,"
       "\"disk_used\":%lu,"
-      "\"tunnel_url\":\"https://motocross-unstitch-dreamboat.ngrok-free.dev\""
+      "\"tunnel_url\":\"%s\","
+      "\"cloud_status\":\"%s\","
+      "\"sd_ready\":%s"
       "}",
       (unsigned long)free_heap, (unsigned long)min_heap,
+      (unsigned long)largest_heap, (unsigned long)internal_free,
+      atomic_load(&s_ai_proxy_busy) ? "true" : "false",
       (unsigned long)total_heap, (unsigned long)used_heap,
       (long long)uptime_sec, ip_str, ip6_str, ip6_linklocal_str, network_get_ipv6_status(), product_url, network_mdns_is_ready() ? "true" : "false",
       network_get_product_name(), network_get_product_revision(), network_get_product_serial(), saved_ssid, (int)rssi, (int)mode,
       running_label, app_ver, init_view, storage_valid ? "true" : "false",
       (unsigned long)flash_total, (unsigned long)(flash_total - disk_total),
-      (unsigned long)disk_total, (unsigned long)disk_used);
+      (unsigned long)disk_total, (unsigned long)disk_used, cloud_url, cloud_relay_status(), sd_media_ready()?"true":"false");
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
@@ -1341,6 +1385,8 @@ static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
   }
 
   char filepath[280];
+  esp_err_t sd_result=try_sd_public_file(req,clean_name);
+  if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
   snprintf(filepath, sizeof(filepath), "%s%s", STORAGE_BASE_PATH, clean_name);
 
   if (send_spiffs_file(req, filepath) == ESP_OK) {
@@ -1407,6 +1453,8 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
 
   char pw_input[64] = {0};
   char new_pw[64] = {0};
+  char cloud_token[65] = {0};
+  bool cloud_token_requested = false;
   char init_view_str[16] = {0};
   char init_page[128] = {0};
   bool init_page_requested = false;
@@ -1420,6 +1468,15 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
       char *val = eq + 1;
       char decoded[768] = {0};
       url_decode(decoded, val);
+      if (strcmp(token, "cloud_token") == 0) {
+        cloud_token_requested = true;
+        if (strlen(decoded) != 64) {
+          httpd_resp_set_type(req, "application/json");
+          httpd_resp_set_status(req, "400 Bad Request");
+          return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Invalid device token\"}");
+        }
+        memcpy(cloud_token, decoded, 64);
+      }
       if ((strcmp(token, "cur_pw") == 0 || strcmp(token, "new_pw") == 0) && strlen(decoded) >= sizeof(pw_input)) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
@@ -1459,6 +1516,17 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
   }
 
   ESP_LOGI(TAG, "[SETTINGS] Auth SUCCESS: Admin password matched!");
+
+  if (cloud_token_requested) {
+    esp_err_t err = cloud_relay_provision(cloud_token);
+    memset(cloud_token, 0, sizeof(cloud_token));
+    httpd_resp_set_type(req, "application/json");
+    if (err != ESP_OK) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Cannot save device token\"}");
+    }
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Device registered. Reboot the board.\"}");
+  }
 
   if (restore_defaults_requested) {
     ai_security_record_t record = {0};
@@ -1537,6 +1605,8 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+#include "web_sd_admin.inc"
+
 static esp_err_t admin_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   ESP_LOGI(
@@ -1569,16 +1639,55 @@ static esp_err_t ai_studio_get_handler(httpd_req_t *req) {
   return send_chunk_string(req, HTML_AI_STUDIO);
 }
 
+/* Separate public static-file route: never forwards setup, admin or AI endpoints. */
+static esp_err_t relay_file_get_handler(httpd_req_t *req) {
+  if (network_get_mode() != NET_MODE_STA_CONNECTED) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return httpd_resp_sendstr(req, "Board is not connected to Wi-Fi");
+  }
+  const char *path = req->uri + strlen("/__relay");
+  if (!cloud_relay_public_path(path))
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Public file not found");
+  if(!strcmp(path,"/")) __atomic_fetch_add(&s_home_requests,1,__ATOMIC_RELAXED);
+  esp_err_t sd_result=try_sd_public_file(req,path);
+  if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
+  char filepath[280];
+  if (!strcmp(path, "/")) {
+    char initial[128] = {0};
+    if (get_initial_page(initial, sizeof(initial)) && is_valid_initial_page(initial)) {
+      snprintf(filepath, sizeof(filepath), "%s%s", STORAGE_BASE_PATH, initial);
+      struct stat st;
+      if (stat(filepath, &st) == 0) return send_spiffs_file(req, filepath);
+    }
+    snprintf(filepath, sizeof(filepath), "%s/index.html", STORAGE_BASE_PATH);
+  } else snprintf(filepath, sizeof(filepath), "%s%s", STORAGE_BASE_PATH, path);
+  struct stat st;
+  if (stat(filepath, &st) != 0) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(req, "웹 파일이 없습니다. 로컬 관리자에서 index.html을 업로드하세요.");
+  }
+  return send_spiffs_file(req, filepath);
+}
+
+#include "web_public_stream.inc"
+
 esp_err_t web_server_start(void) {
   if (s_server) return ESP_OK;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   // Setup rendering, Wi-Fi scanning and formatted logging share this stack.
   config.stack_size = 8192;
+  /* Reserve descriptors for outbound TLS, mDNS, DNS and SNTP. */
+  config.max_open_sockets = 4;
   config.max_uri_handlers = 40;
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.lru_purge_enable = true;
 
   if (httpd_start(&s_server, &config) == ESP_OK) {
+    httpd_uri_t relay_uri = {.uri = "/__relay/*", .method = HTTP_GET, .handler = relay_file_get_handler};
+    if (httpd_register_uri_handler(s_server, &relay_uri) != ESP_OK) {
+      httpd_stop(s_server); s_server = NULL; return ESP_FAIL;
+    }
     const httpd_uri_t ai_routes[] = {
       {.uri="/api/auth/status", .method=HTTP_GET, .handler=api_auth_status_handler},
       {.uri="/api/ai/login", .method=HTTP_POST, .handler=ai_login_post_handler},
@@ -1656,6 +1765,16 @@ esp_err_t web_server_start(void) {
                                  .user_ctx = NULL};
     httpd_register_uri_handler(s_server, &api_files_uri);
 
+    const httpd_uri_t sd_routes[] = {
+      {.uri="/api/sd/files", .method=HTTP_GET, .handler=sd_admin_get},
+      {.uri="/api/sd/files", .method=HTTP_POST, .handler=sd_admin_upload},
+      {.uri="/api/sd/files", .method=HTTP_DELETE, .handler=sd_admin_delete}
+    };
+    for (unsigned i=0;i<sizeof(sd_routes)/sizeof(sd_routes[0]);++i) {
+      if (httpd_register_uri_handler(s_server,&sd_routes[i])!=ESP_OK) {
+        httpd_stop(s_server); s_server=NULL; return ESP_FAIL;
+      }
+    }
     httpd_uri_t api_upload_uri = {.uri = "/api/upload",
                                   .method = HTTP_POST,
                                   .handler = api_upload_post_handler,
@@ -1716,6 +1835,7 @@ esp_err_t web_server_start(void) {
     if (mdns_err != ESP_OK) ESP_LOGW(TAG, "mDNS unavailable; IP access remains available: %s", esp_err_to_name(mdns_err));
     ESP_LOGI(TAG, "HTTP Server started successfully (Admin, WebP & File "
                   "Manager Enabled)");
+    atomic_store(&s_server_running, true);
     return ESP_OK;
   }
   ESP_LOGE(TAG, "Failed to start HTTP Server");
@@ -1723,6 +1843,7 @@ esp_err_t web_server_start(void) {
 }
 
 void web_server_stop(void) {
+  atomic_store(&s_server_running, false);
   ai_sessions_clear();
   network_mdns_stop();
   if (s_server) {

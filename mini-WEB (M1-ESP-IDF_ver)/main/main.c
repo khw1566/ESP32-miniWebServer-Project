@@ -1,4 +1,6 @@
 #include "board_display.h"
+#include "cloud_relay.h"
+#include "sd_media.h"
 #include "network_manager.h"
 #include "web_server.h"
 #include "nvs_flash.h"
@@ -13,6 +15,10 @@ void app_main(void) {
     err=web_server_storage_init();
     if(err!=ESP_OK) ESP_LOGW("M1","Storage unavailable: %s",esp_err_to_name(err));
     ESP_ERROR_CHECK(network_init());
+    err=sd_media_init();
+    if(err!=ESP_OK) ESP_LOGW("M1","SD card unavailable: %s",esp_err_to_name(err));
+    err=cloud_relay_start();
+    if(err!=ESP_OK) ESP_LOGW("M1","Cloud task unavailable: %s",esp_err_to_name(err));
     ESP_ERROR_CHECK(board_display_init());
     onboard_ui_start();
 }

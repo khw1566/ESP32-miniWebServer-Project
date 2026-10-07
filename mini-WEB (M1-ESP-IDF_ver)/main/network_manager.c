@@ -6,6 +6,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "lwip/netif.h"
@@ -21,6 +22,10 @@ static _Atomic net_mode_t s_net_mode = NET_MODE_IDLE;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static int s_retry_num = 0;
+static atomic_uint s_diagnostic_disconnects;
+static atomic_uint s_diagnostic_last_reason;
+unsigned network_get_disconnect_count(void) { return atomic_load(&s_diagnostic_disconnects); }
+unsigned network_get_last_disconnect_reason(void) { return atomic_load(&s_diagnostic_last_reason); }
 static char s_current_ip[32] = "0.0.0.0";
 static bool s_sta_link_up = false;
 ESP_EVENT_DEFINE_BASE(NET_IPV6_EVENT);
@@ -34,6 +39,9 @@ static char s_static_mask[32] = {0};
 // STA 연결 시도 활성화 여부 플래그
 // (SoftAP 모드에서 STA_START 이벤트 발생 시 자동 connect 차단)
 static atomic_bool s_sta_connect_requested = false;
+static atomic_bool s_auto_retry;
+static esp_timer_handle_t s_recovery_timer;
+ESP_EVENT_DEFINE_BASE(NET_RECOVERY_EVENT);
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
@@ -42,6 +50,18 @@ static atomic_bool s_sta_connect_requested = false;
 static EventGroupHandle_t s_wifi_event_group;
 
 #include "network_mdns.inc"
+
+/* Recovery runs on the Wi-Fi event loop, not on the display or timer task. */
+static void recovery_tick(void *arg) {
+    esp_event_post(NET_RECOVERY_EVENT, 0, NULL, 0, 0);
+}
+static void recovery_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    if (!s_auto_retry || !s_sta_connect_requested || s_sta_link_up ||
+        s_net_mode != NET_MODE_STA_CONNECTING || s_retry_num < WIFI_MAX_RETRY) return;
+    s_retry_num = 0;
+    xEventGroupClearBits(s_wifi_event_group, WIFI_FAIL_BIT);
+    if (esp_wifi_connect() != ESP_OK) s_retry_num = WIFI_MAX_RETRY;
+}
 
 /* Run all lwIP mutations in the TCP/IP task, after default Wi-Fi handlers. */
 static esp_err_t ipv6_start_tcpip(void *ctx) {
@@ -116,6 +136,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        atomic_fetch_add(&s_diagnostic_disconnects, 1);
+        if (event_data) atomic_store(&s_diagnostic_last_reason, ((wifi_event_sta_disconnected_t *)event_data)->reason);
         s_sta_link_up = false;
         /* Deliberate STA stop during SoftAP handover is not a connection failure. */
         if (!s_sta_connect_requested) return;
@@ -129,7 +151,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "재연결 시도 (%d/%d)...", s_retry_num, WIFI_MAX_RETRY);
             esp_wifi_connect();
         } else {
-            s_sta_connect_requested = false;
+            if (!s_auto_retry) s_sta_connect_requested = false;
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             ESP_LOGE(TAG, "연결 최종 실패. FAIL_BIT 설정.");
         }
@@ -141,6 +163,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "[EVT] IP 할당 완료: %s", s_current_ip);
         s_retry_num = 0;
         s_net_mode = NET_MODE_STA_CONNECTED;
+        s_auto_retry = true;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_GOT_IP6) {
@@ -163,6 +186,11 @@ esp_err_t network_init(void) {
     s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        NET_RECOVERY_EVENT, ESP_EVENT_ANY_ID, &recovery_event, NULL, NULL));
+    const esp_timer_create_args_t recovery_args = {.callback = recovery_tick, .name = "wifi_recovery"};
+    ESP_ERROR_CHECK(esp_timer_create(&recovery_args, &s_recovery_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_recovery_timer, 30ULL * 1000000));
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -215,6 +243,7 @@ esp_err_t network_start_softap(void) {
     };
 
     // STA 연결 요청 비활성화: SoftAP 모드에서 STA_START 이벤트 발생해도 connect 차단
+    s_auto_retry = false;
     s_sta_connect_requested = false;
     s_sta_link_up = false;
     s_net_mode = NET_MODE_IDLE;
@@ -256,6 +285,10 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         if (hostname_err != ESP_OK) ESP_LOGW(TAG, "DHCP hostname setup failed: %s", esp_err_to_name(hostname_err));
     }
 
+    char saved_ssid[33] = {0}, saved_pass[65] = {0};
+    s_auto_retry = network_has_saved_credentials(saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass)) &&
+        !strcmp(saved_ssid, ssid) && !strcmp(saved_pass, pass ? pass : "");
+    memset(saved_pass, 0, sizeof(saved_pass));
     s_sta_link_up = false;
 
     // 정적 IP 여부 확인 및 캐시 저장 (실제 적용은 STA_CONNECTED 이벤트에서)
@@ -327,7 +360,8 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         ESP_LOGI(TAG, "연결 성공: %s (IP: %s)", ssid, s_current_ip);
         return ESP_OK;
     } else {
-        s_sta_connect_requested = false;
+        if (!s_auto_retry) s_sta_connect_requested = false;
+        else s_retry_num = WIFI_MAX_RETRY;
         ESP_LOGW(TAG, "연결 실패 또는 타임아웃");
         esp_wifi_disconnect();
         return ESP_FAIL;

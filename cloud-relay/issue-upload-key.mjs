@@ -1,0 +1,12 @@
+import { randomBytes,createHash } from 'node:crypto';
+import { readFileSync,writeFileSync,existsSync } from 'node:fs';
+const serial=(process.argv[2]||'').toLowerCase();
+if(!/^[a-f0-9]{12}$/.test(serial)) throw new Error('Usage: node issue-upload-key.mjs <12-digit board MAC>');
+const id=`m1-${serial}`,file=`provisioned/${id}-upload-key.txt`;
+const registry=JSON.parse(readFileSync('provisioned/registry.json','utf8'));
+if(!registry[id]||registry[id].uploadTokenHash||existsSync(file)) throw new Error('Unknown device or upload key already exists');
+const token=randomBytes(32).toString('hex');
+registry[id].uploadTokenHash=createHash('sha256').update(token).digest('hex');
+writeFileSync(file,token+'\n',{flag:'wx',mode:0o600});
+writeFileSync('provisioned/registry.json',JSON.stringify(registry,null,2)+'\n',{mode:0o600});
+console.log('Upload key issued. Device NVS token is unchanged. Update the Worker registry secret.');
