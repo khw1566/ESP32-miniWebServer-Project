@@ -1,4 +1,5 @@
 #include "storage_view.h"
+#include "web_sd_index.inc"
 /* Local administrator API. Public relay paths exclude /api/. */
 static bool sd_admin_auth(httpd_req_t *req) {
     char password[64] = {0};
@@ -33,12 +34,13 @@ static esp_err_t sd_admin_get(httpd_req_t *req) {
     httpd_req_get_url_query_str(req,query,sizeof(query));
     httpd_query_key_value(query,"action",action,sizeof(action));
     esp_err_t sent=ESP_OK;
-    if (!strcmp(action,"download")) {
+    if (!strcmp(action,"download") || !strcmp(action,"preview")) {
         char full[272];snprintf(full,sizeof(full),"%s%s",SD_MEDIA_ROOT,path);
         struct stat st;FILE *file=NULL;
         if (stat(full,&st)!=0 || !S_ISREG(st.st_mode) || !(file=fopen(full,"rb"))) {
             sd_media_admin_unlock();return httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"File not found");
         }
+        if(!strcmp(action,"preview") && st.st_size>1024*1024) {fclose(file);sd_media_admin_unlock();return sd_admin_error(req,"413 Content Too Large","Preview is limited to 1 MiB");}
         httpd_resp_set_type(req,"application/octet-stream");
         httpd_resp_set_hdr(req,"X-Content-Type-Options","nosniff");
         httpd_resp_set_hdr(req,"Content-Disposition","attachment");
@@ -54,22 +56,7 @@ static esp_err_t sd_admin_get(httpd_req_t *req) {
             if (!offset_text[0] || *end || value>100000) {sd_media_admin_unlock();return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid offset");}
             offset=(unsigned)value;
         }
-        storage_view_t view;storage_view_read(true,!strcmp(path,"/")?"":path,offset,&view);
-        if (view.error!=ESP_OK) {sd_media_admin_unlock();return sd_admin_error(req,"500 Internal Server Error","Cannot read SD directory");}
-        cJSON *root=cJSON_CreateObject(),*files=cJSON_CreateArray();
-        if (!root || !files) {cJSON_Delete(root);cJSON_Delete(files);sd_media_admin_unlock();return httpd_resp_send_500(req);}
-        cJSON_AddItemToObject(root,"files",files);cJSON_AddBoolToObject(root,"ready",true);
-        cJSON_AddNumberToObject(root,"total",(double)view.total);cJSON_AddNumberToObject(root,"used",(double)view.used);
-        cJSON_AddNumberToObject(root,"count",view.count);cJSON_AddNumberToObject(root,"offset",offset);
-        cJSON_AddNumberToObject(root,"page_size",STORAGE_VIEW_ROWS);
-        for(unsigned i=0;i<view.shown;++i) {
-            cJSON *entry=cJSON_CreateObject();if(!entry) continue;
-            cJSON_AddStringToObject(entry,"name",view.entries[i].name);
-            cJSON_AddNumberToObject(entry,"size",(double)view.entries[i].bytes);
-            cJSON_AddBoolToObject(entry,"directory",view.entries[i].directory);cJSON_AddItemToArray(files,entry);
-        }
-        char *json=cJSON_PrintUnformatted(root);cJSON_Delete(root);
-        httpd_resp_set_type(req,"application/json");sent=json?httpd_resp_sendstr(req,json):httpd_resp_send_500(req);free(json);
+        sent=sd_web_list(req,path,offset);
     }
     sd_media_admin_unlock();return sent;
 }
@@ -98,6 +85,7 @@ static esp_err_t sd_admin_upload(httpd_req_t *req) {
     if(fclose(file)!=0) ok=false;
     if(ok && rename(temp,full)!=0) ok=false;
     if(!ok) unlink(temp);
+    if(ok) sd_media_changed();
     sd_media_admin_unlock();
     if(!ok) return sd_admin_error(req,"500 Internal Server Error","SD upload failed; incomplete file removed");
     httpd_resp_set_type(req,"application/json");return httpd_resp_sendstr(req,"{\"status\":\"ok\"}");
@@ -110,6 +98,7 @@ static esp_err_t sd_admin_delete(httpd_req_t *req) {
     if(!sd_media_admin_lock()) return sd_admin_error(req,"409 Conflict","SD storage is busy");
     char full[272];snprintf(full,sizeof(full),"%s%s",SD_MEDIA_ROOT,path);struct stat st;
     bool exists=stat(full,&st)==0 && S_ISREG(st.st_mode);bool ok=exists && unlink(full)==0;
+    if(ok) sd_media_changed();
     sd_media_admin_unlock();
     if(!exists) return httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"File not found");
     if(!ok) return httpd_resp_send_500(req);

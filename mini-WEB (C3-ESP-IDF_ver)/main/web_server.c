@@ -1317,6 +1317,28 @@ static esp_err_t api_ipv6_retry_post_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"STA 연결과 IPv6 자동 구성 설정을 확인하세요.\"}");
 }
 
+/* Download from SPIFFS directly, even when an SD file has the same name. */
+static esp_err_t api_file_download_handler(httpd_req_t *req) {
+  char query[384], encoded[384], name[128], full[280];
+  if (httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK ||
+      httpd_query_key_value(query,"filename",encoded,sizeof(encoded))!=ESP_OK ||
+      !decode_file_url(name,sizeof(name),encoded,true) || !name[0] || name[0]=='.' ||
+      strchr(name,'/') || strchr(name,'\\') || strstr(name,".."))
+    return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid filename");
+  snprintf(full,sizeof(full),"%s/%s",STORAGE_BASE_PATH,name);
+  FILE *file=fopen(full,"rb");
+  if(!file) return httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"File not found");
+  httpd_resp_set_type(req,"application/octet-stream");
+  httpd_resp_set_hdr(req,"Content-Disposition","attachment");
+  httpd_resp_set_hdr(req,"Cache-Control","no-store");
+  httpd_resp_set_hdr(req,"X-Content-Type-Options","nosniff");
+  char buffer[1024];size_t n;esp_err_t result=ESP_OK;
+  while(result==ESP_OK && (n=fread(buffer,1,sizeof(buffer),file))>0) result=httpd_resp_send_chunk(req,buffer,n);
+  if(ferror(file)) result=ESP_FAIL;
+  fclose(file);
+  return result==ESP_OK?httpd_resp_sendstr_chunk(req,NULL):result;
+}
+
 static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
   const char *uri = req->uri;
   // 쿼리 스트링 제거
@@ -1695,6 +1717,8 @@ esp_err_t web_server_start(void) {
                               .user_ctx = NULL};
     httpd_register_uri_handler(s_server, &api_qr_uri);
 
+    const httpd_uri_t file_download_uri={.uri="/api/files/download",.method=HTTP_GET,.handler=api_file_download_handler};
+    httpd_register_uri_handler(s_server,&file_download_uri);
     httpd_uri_t api_files_uri = {.uri = "/api/files",
                                  .method = HTTP_GET,
                                  .handler = api_files_get_handler,

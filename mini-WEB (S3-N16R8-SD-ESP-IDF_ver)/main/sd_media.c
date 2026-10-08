@@ -17,6 +17,10 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stdatomic.h>
+static atomic_uint sd_revision;
+uint32_t sd_media_revision(void) { return atomic_load(&sd_revision); }
+void sd_media_changed(void) { atomic_fetch_add(&sd_revision,1); }
 static sdmmc_card_t *card;
 static esp_err_t mount_error = ESP_ERR_INVALID_STATE;
 static const char *mount_stage = "not_initialized";
@@ -170,7 +174,7 @@ cJSON *sd_media_command(const cJSON *cmd) {
             if(!flushed||closed!=0||stat(target,&st)==0||rename(temporary,target)!=0) {
                 unlink(temporary);session[0]=0;status=507;message="Cannot publish SD file";goto done;
             }
-            session[0]=0;status=200;message="Upload complete";
+            sd_media_changed();session[0]=0;status=200;message="Upload complete";
         }
     }
     last_activity=esp_timer_get_time();
