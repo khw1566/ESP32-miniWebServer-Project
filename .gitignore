@@ -37,7 +37,7 @@
 /*.ipt
 /보고서 초안.md
 /ngrok_qrcode.png
-/sample.webp
+/web_examples/14_webp_showcase/sample.webp
 /sites/
-/Setup_nrok.bat
-/Serve_Opera_2021_ngrok.bat
+/scripts/Setup_nrok.bat
+/scripts/Serve_Opera_2021_ngrok.bat

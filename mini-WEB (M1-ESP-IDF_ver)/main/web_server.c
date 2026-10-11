@@ -46,6 +46,7 @@ bool web_server_is_running(void) { return atomic_load(&s_server_running); }
 #define STORAGE_BASE_PATH "/spiffs"
 static void agent_recover_files(void);
 
+static void web_factory_seed(bool force);
 esp_err_t web_server_storage_init(void) {
   esp_vfs_spiffs_conf_t conf = {
       .base_path = STORAGE_BASE_PATH,
@@ -76,6 +77,7 @@ esp_err_t web_server_storage_init(void) {
     ESP_LOGI(TAG, "SPIFFS Partition size: total: %d KB, used: %d KB",
              (int)(total / 1024), (int)(used / 1024));
   }
+  web_factory_seed(false);
   return ESP_OK;
 }
 
@@ -133,6 +135,37 @@ esp_err_t web_server_log_init(void) {
 #define DEFAULT_ADMIN_PW "00000000"
 
 #include "web_ai_security.inc"
+
+/* First boot: the product home page becomes the editable /spiffs/index.html.
+ * Deleting or replacing it is remembered (NVS flag); a storage reset brings
+ * it back. Generated from web_examples/00_product_home by tools/embed_factory_page.cjs. */
+static void web_factory_seed(bool force) {
+  nvs_handle_t h;
+  uint8_t seeded = 0;
+  if (!force && nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "factory_seed", &seeded);
+    nvs_close(h);
+  }
+  if (seeded) return;
+  const char *path = STORAGE_BASE_PATH "/index.html";
+  struct stat st;
+  if (force || stat(path, &st) != 0) {
+    FILE *f = fopen(path, "wb");
+    size_t written = f ? fwrite(FACTORY_INDEX_HTML, 1, FACTORY_INDEX_HTML_LEN, f) : 0;
+    if (f) fclose(f);
+    if (written != FACTORY_INDEX_HTML_LEN) {
+      unlink(path);
+      ESP_LOGW(TAG, "Factory home page could not be written");
+      return;
+    }
+    ESP_LOGI(TAG, "Factory home page installed (%u bytes)", (unsigned)written);
+  }
+  if (nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+    nvs_set_u8(h, "factory_seed", 1);
+    nvs_commit(h);
+    nvs_close(h);
+  }
+}
 
 static int get_initial_view_mode(void) {
   int mode = 0; // 0: 도움말/가이드 화면(기본값), 1: 메인 쇼케이스(HTML_MAIN),
@@ -231,371 +264,12 @@ static bool is_valid_initial_page(const char *page) {
 #include "web_ai_proxy.inc"
 #include "web_ai_login.inc"
 
+static esp_err_t send_chunk_string(httpd_req_t *req, const char *str);
+#include "web_wifi_setup_html.inc"
 static esp_err_t render_setup_page(httpd_req_t *req) {
-  ESP_LOGI(TAG, "[SETUP] begin, heap=%lu, stack_free_min=%u",
-           (unsigned long)esp_get_free_heap_size(),
-           (unsigned)uxTaskGetStackHighWaterMark(NULL));
   httpd_resp_set_type(req, "text/html; charset=utf-8");
-
-  // 저장되어 있던 SSID와 비밀번호 가져오기
-  char saved_ssid[64] = {0};
-  char saved_pass[64] = {0};
-  bool has_saved = network_has_saved_credentials(
-      saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass));
-
-  // Part 1: HTML Head & Responsive CSS
-  const char *html_head =
-      "<!DOCTYPE html>"
-      "<html lang='ko'>"
-      "<head>"
-      "<meta charset='UTF-8'>"
-      "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-      "<title>Mini WebServer - Wi-Fi 설정</title>"
-      "<style>"
-      "*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,"
-      "BlinkMacSystemFont,sans-serif;}"
-      "body{background:#0f172a;color:#f8fafc;display:flex;justify-content:"
-      "center;align-items:flex-start;min-height:100vh;padding:20px 16px;}"
-      ".container{width:100%;max-width:480px;margin:auto;}"
-      ".card{background:#1e293b;border:1px solid "
-      "#334155;border-radius:16px;padding:24px;box-shadow:0 10px 25px "
-      "rgba(0,0,0,0.5);}"
-      "h1{font-size:22px;margin-bottom:6px;color:#38bdf8;text-align:center;}"
-      ".sub-desc{font-size:13px;color:#94a3b8;margin-bottom:18px;text-align:"
-      "center;}"
-      ".saved-banner{background:#0369a1;color:#e0f2fe;font-size:12px;padding:"
-      "10px 14px;border-radius:8px;margin-bottom:16px;line-height:1.5;}"
-      ".saved-banner b{color:#ffffff;}"
-      ".list-title{font-size:13px;font-weight:600;color:#cbd5e1;margin-bottom:"
-      "10px;display:flex;justify-content:space-between;align-items:center;}"
-      ".wifi-list{display:flex;flex-direction:column;gap:10px;margin-bottom:"
-      "18px;max-height:360px;overflow-y:auto;padding-right:4px;}"
-      ".wifi-list::-webkit-scrollbar{width:6px;}"
-      ".wifi-list::-webkit-scrollbar-thumb{background:#475569;border-radius:"
-      "3px;}"
-      ".wifi-item{background:#0f172a;border:1px solid "
-      "#334155;border-radius:10px;padding:14px;display:flex;justify-content:"
-      "space-between;align-items:center;cursor:pointer;transition:all "
-      "0.2s;text-align:left;width:100%;color:#f8fafc;}"
-      ".wifi-item:hover{background:#1e293b;border-color:#38bdf8;transform:"
-      "translateY(-1px);}"
-      ".wifi-info{display:flex;flex-direction:column;gap:4px;overflow:hidden;"
-      "padding-right:8px;}"
-      ".wifi-name{font-size:15px;font-weight:600;color:#f1f5f9;white-space:"
-      "nowrap;overflow:hidden;text-overflow:ellipsis;}"
-      ".wifi-meta{font-size:12px;color:#94a3b8;display:flex;gap:8px;align-"
-      "items:center;}"
-      ".tag-saved{background:#0284c7;color:#fff;font-size:11px;padding:2px "
-      "6px;border-radius:4px;font-weight:600;}"
-      ".tag-open{color:#34d399;}"
-      ".tag-secure{color:#94a3b8;}"
-      ".wifi-action{font-size:13px;font-weight:600;color:#38bdf8;flex-shrink:0;"
-      "padding-left:4px;}"
-      ".btn-rescan{display:block;text-align:center;padding:10px;color:#38bdf8;"
-      "font-size:13px;text-decoration:none;border-radius:6px;border:1px dashed "
-      "#334155;margin-bottom:12px;transition:0.2s;}"
-      ".btn-rescan:hover{background:#334155;}"
-      ".footer{text-align:center;font-size:12px;color:#64748b;margin-top:14px;}"
-      "/* Modal Styles */"
-      ".modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:"
-      "rgba(15,23,42,0.8);backdrop-filter:blur(4px);display:none;justify-"
-      "content:center;align-items:center;padding:16px;z-index:99;}"
-      ".modal-overlay.active{display:flex;}"
-      ".modal-box{background:#1e293b;border:1px solid "
-      "#475569;border-radius:14px;padding:24px;width:100%;max-width:380px;box-"
-      "shadow:0 20px 30px rgba(0,0,0,0.6);animation:popIn 0.2s ease-out;}"
-      "@keyframes "
-      "popIn{from{opacity:0;transform:scale(0.95);}to{opacity:1;transform:"
-      "scale(1);}}"
-      ".modal-title{font-size:17px;font-weight:bold;color:#f8fafc;margin-"
-      "bottom:4px;word-break:break-all;}"
-      ".modal-desc{font-size:12px;color:#94a3b8;margin-bottom:16px;}"
-      ".form-group{margin-bottom:16px;}"
-      ".form-group "
-      "label{display:block;font-size:12px;color:#cbd5e1;margin-bottom:6px;}"
-      ".form-group input{width:100%;padding:11px "
-      "12px;border-radius:8px;border:1px solid "
-      "#475569;background:#0f172a;color:#fff;font-size:14px;outline:none;}"
-      ".form-group input:focus{border-color:#38bdf8;}"
-      ".pw-box{position:relative;display:flex;align-items:center;}"
-      ".pw-box input{padding-right:50px;}"
-      ".toggle-btn{position:absolute;right:8px;background:none;border:none;"
-      "color:#94a3b8;font-size:12px;font-weight:600;padding:6px;cursor:pointer;"
-      "}"
-      ".toggle-btn:hover{color:#38bdf8;}"
-      ".modal-actions{display:flex;gap:10px;margin-top:20px;}"
-      ".btn-modal{flex:1;padding:12px;border-radius:8px;border:none;font-size:"
-      "14px;font-weight:bold;cursor:pointer;transition:0.2s;}"
-      ".btn-modal-cancel{background:#334155;color:#f8fafc;}"
-      ".btn-modal-cancel:hover{background:#475569;}"
-      ".btn-modal-submit{background:#0284c7;color:#fff;}"
-      ".btn-modal-submit:hover{background:#0369a1;}"
-      ".spin-loader{display:inline-block;width:14px;height:14px;border:2px "
-      "solid "
-      "rgba(255,255,255,0.3);border-radius:50%;border-top-color:#fff;animation:"
-      "spin 0.75s linear infinite;vertical-align:middle;margin-right:6px;}"
-      "@keyframes spin{to{transform:rotate(360deg);}}"
-      ".btn-loading{opacity:0.75;pointer-events:none;cursor:wait !important;}"
-      "</style>"
-      "</head>"
-      "<body>"
-      "<div class='container'>"
-      "<div class='card'>"
-      "<h1>Mini WebServer</h1>"
-      "<p class='sub-desc'>주변 Wi-Fi 네트워크를 선택하여 연결하십시오.</p>";
-
-  httpd_resp_send_chunk(req, html_head, HTTPD_RESP_USE_STRLEN);
-  char product_url[96], product_banner[600];
-  if (network_get_mdns_url(product_url, sizeof(product_url)) == ESP_OK) {
-    snprintf(product_banner, sizeof(product_banner),
-             "<section style='margin:16px 0;padding:12px;border:1px solid #666;border-radius:6px;'>"
-             "<b>이 제품의 고정 접속 주소</b><p style='overflow-wrap:anywhere;margin:8px 0;'>%s</p>"
-             "<p style='font-size:12px;'>설정 후 휴대전화를 같은 공유기 Wi-Fi에 연결하고 이 주소로 접속하세요.</p>"
-             "<a href='/api/qr?dl=1' style='display:inline-block;margin-top:8px;color:#5b9bdf;'>접속 QR 저장</a></section>", product_url);
-    httpd_resp_sendstr_chunk(req, product_banner);
-  }
-
-
-  if (has_saved) {
-    char banner[256];
-    snprintf(banner, sizeof(banner),
-             "<div class='saved-banner'>최근 저장된 Wi-Fi: <b>%s</b></div>",
-             saved_ssid);
-    httpd_resp_send_chunk(req, banner, HTTPD_RESP_USE_STRLEN);
-  }
-
-  const char *list_start =
-      "<div class='list-title'><span>검색된 Wi-Fi 목록</span><a href='/setup' "
-      "style='color:#38bdf8;text-decoration:none;font-size:12px;'>새로고침</"
-      "a></div>"
-      "<div class='wifi-list'>";
-  httpd_resp_send_chunk(req, list_start, HTTPD_RESP_USE_STRLEN);
-
-  // Part 2: Scan Wi-Fi APs
-  wifi_scan_item_t scan_list[15];
-  int found = network_scan_wifi(scan_list, 15);
-  bool saved_matched = false;
-
-  if (found > 0) {
-    char item_buf[768];
-    for (int i = 0; i < found; i++) {
-      bool is_saved = (has_saved && strcmp(scan_list[i].ssid, saved_ssid) == 0);
-      if (is_saved)
-        saved_matched = true;
-      bool is_open = (scan_list[i].authmode == WIFI_AUTH_OPEN);
-
-      // XSS 방지 및 JS 인자 처리용 이스케이프
-      // Each of the 32 SSID bytes can expand to six bytes (e.g. &quot;).
-      char esc_ssid[6 * (sizeof(scan_list[0].ssid) - 1) + 1] = {0};
-      int esc_idx = 0;
-      for (int s = 0;
-           scan_list[i].ssid[s] != '\0' && esc_idx + 6 < sizeof(esc_ssid);
-           s++) {
-        if (scan_list[i].ssid[s] == '\'') {
-          esc_ssid[esc_idx++] = '\\';
-          esc_ssid[esc_idx++] = '\'';
-        } else if (scan_list[i].ssid[s] == '\"') {
-          esc_ssid[esc_idx++] = '&';
-          esc_ssid[esc_idx++] = 'q';
-          esc_ssid[esc_idx++] = 'u';
-          esc_ssid[esc_idx++] = 'o';
-          esc_ssid[esc_idx++] = 't';
-          esc_ssid[esc_idx++] = ';';
-        } else {
-          esc_ssid[esc_idx++] = scan_list[i].ssid[s];
-        }
-      }
-
-      snprintf(
-          item_buf, sizeof(item_buf),
-          "<div class='wifi-item' onclick=\"openConnectModal('%s', %s, %s)\">"
-          "<div class='wifi-info'>"
-          "<div class='wifi-name'>%s</div>"
-          "<div class='wifi-meta'>"
-          "<span>신호: %ddBm</span>"
-          "<span class='%s'>%s</span>"
-          "%s"
-          "</div>"
-          "</div>"
-          "<div class='wifi-action'>선택</div>"
-          "</div>",
-          esc_ssid, is_saved ? "true" : "false", is_open ? "true" : "false",
-          scan_list[i].ssid, scan_list[i].rssi,
-          is_open ? "tag-open" : "tag-secure",
-          is_open ? "개방 네트워크" : "보안 네트워크",
-          is_saved ? "<span class='tag-saved'>저장됨</span>" : "");
-      httpd_resp_send_chunk(req, item_buf, HTTPD_RESP_USE_STRLEN);
-    }
-  } else if (found < 0) {
-    char error_html[256];
-    snprintf(error_html,sizeof(error_html),
-             "<div style='text-align:center;padding:24px;color:#94a3b8;'>"
-             "Wi-Fi 검색 실패: %s (0x%x)<br>잠시 후 다시 시도하세요.</div>",
-             esp_err_to_name(-found),(unsigned)(-found));
-    httpd_resp_send_chunk(req,error_html,HTTPD_RESP_USE_STRLEN);
-  } else {
-    const char *none_html =
-        "<div style='text-align:center;padding:24px "
-        "10px;color:#94a3b8;font-size:13px;'>검색된 Wi-Fi가 없습니다.<br>직접 "
-        "입력하거나 새로고침하세요.</div>";
-    httpd_resp_send_chunk(req, none_html, HTTPD_RESP_USE_STRLEN);
-  }
-
-  // 목록에 없지만 저장된 SSID가 있는 경우 표시
-  if (has_saved && !saved_matched) {
-    char prev_item[512];
-    snprintf(prev_item, sizeof(prev_item),
-             "<div class='wifi-item' onclick=\"openConnectModal('%s', true, "
-             "false)\">"
-             "<div class='wifi-info'>"
-             "<div class='wifi-name'>%s</div>"
-             "<div class='wifi-meta'>"
-             "<span>최근 저장된 네트워크</span>"
-             "<span class='tag-saved'>저장됨</span>"
-             "</div>"
-             "</div>"
-             "<div class='wifi-action'>선택</div>"
-             "</div>",
-             saved_ssid, saved_ssid);
-    httpd_resp_send_chunk(req, prev_item, HTTPD_RESP_USE_STRLEN);
-  }
-
-  // 직접 입력 항목
-  const char *custom_item =
-      "<div class='wifi-item' onclick=\"openCustomModal()\" "
-      "style='border-style:dashed;'>"
-      "<div class='wifi-info'>"
-      "<div class='wifi-name' style='color:#38bdf8;'>+ 네트워크 직접 "
-      "입력...</div>"
-      "<div class='wifi-meta'><span>SSID 및 비밀번호 직접 지정</span></div>"
-      "</div>"
-      "<div class='wifi-action'>입력</div>"
-      "</div>"
-      "</div>"; // .wifi-list 끝
-  httpd_resp_send_chunk(req, custom_item, HTTPD_RESP_USE_STRLEN);
-
-  // Part 3: Modal HTML & Client Logic
-  const char *modal_and_script =
-      "<div class='footer'>ESP-IDF Native C Architecture</div>"
-      "</div>" // .card 끝
-      "</div>" // .container 끝
-      "<!-- Modal Dialog -->"
-      "<div class='modal-overlay' id='modalOverlay' "
-      "onclick='handleOverlayClick(event)'>"
-      "<div class='modal-box'>"
-      "<div class='modal-title' id='modalTitle'>Wi-Fi 연결</div>"
-      "<div class='modal-desc' id='modalDesc'>비밀번호를 입력하여 "
-      "연결하십시오.</div>"
-      "<form action='/api/wifi' method='POST' id='wifiForm'>"
-      "<div class='form-group' id='modalCustomSsidGroup' style='display:none;'>"
-      "<label>네트워크 이름 (SSID)</label>"
-      "<input type='text' id='modalCustomSsid' placeholder='SSID 직접 입력'>"
-      "</div>"
-      "<input type='hidden' id='modalHiddenSsid' name='ssid' value=''>"
-      "<div class='form-group'>"
-      "<label>비밀번호 (Password)</label>"
-      "<div class='pw-box'>"
-      "<input type='password' id='modalPassword' name='pass' "
-      "placeholder='비밀번호 입력'>"
-      "<button type='button' class='toggle-btn' id='togglePwBtn' "
-      "onclick='togglePassword()'>보기</button>"
-      "</div>"
-      "</div>"
-      "<div class='modal-actions'>"
-      "<button type='button' class='btn-modal btn-modal-cancel' "
-      "onclick='closeModal()'>취소</button>"
-      "<button type='submit' id='btnWifiSubmit' class='btn-modal "
-      "btn-modal-submit'>연결</button>"
-      "</div>"
-      "</form>"
-      "</div>"
-      "</div>"
-      "<script>"
-      "var savedDefaultPass = \"";
-  httpd_resp_send_chunk(req, modal_and_script, HTTPD_RESP_USE_STRLEN);
-
-  if (has_saved && strlen(saved_pass) > 0) {
-    httpd_resp_send_chunk(req, saved_pass, HTTPD_RESP_USE_STRLEN);
-  }
-
-  const char *script_tail =
-      "\";\n"
-      "function openConnectModal(ssid, isSaved, isOpen) {\n"
-      "  document.getElementById('modalTitle').textContent = ssid;\n"
-      "  document.getElementById('modalDesc').textContent = isOpen ? '개방형 "
-      "네트워크입니다. 비밀번호 없이 연결할 수 있습니다.' : '네트워크 "
-      "비밀번호를 입력하십시오.';\n"
-      "  document.getElementById('modalCustomSsidGroup').style.display = "
-      "'none';\n"
-      "  document.getElementById('modalCustomSsid').required = false;\n"
-      "  document.getElementById('modalCustomSsid').removeAttribute('name');\n"
-      "  var hiddenSsid = document.getElementById('modalHiddenSsid');\n"
-      "  hiddenSsid.setAttribute('name', 'ssid');\n"
-      "  hiddenSsid.value = ssid;\n"
-      "  var pwInput = document.getElementById('modalPassword');\n"
-      "  if (isSaved && savedDefaultPass) {\n"
-      "    pwInput.value = savedDefaultPass;\n"
-      "  } else {\n"
-      "    pwInput.value = '';\n"
-      "  }\n"
-      "  pwInput.type = 'password';\n"
-      "  document.getElementById('togglePwBtn').textContent = '보기';\n"
-      "  document.getElementById('modalOverlay').classList.add('active');\n"
-      "  setTimeout(function(){ if(!isOpen) pwInput.focus(); }, 100);\n"
-      "}\n"
-      "function openCustomModal() {\n"
-      "  document.getElementById('modalTitle').textContent = '직접 네트워크 "
-      "입력';\n"
-      "  document.getElementById('modalDesc').textContent = '연결할 SSID와 "
-      "비밀번호를 입력하십시오.';\n"
-      "  var customGroup = document.getElementById('modalCustomSsidGroup');\n"
-      "  var customInput = document.getElementById('modalCustomSsid');\n"
-      "  var hiddenSsid = document.getElementById('modalHiddenSsid');\n"
-      "  customGroup.style.display = 'block';\n"
-      "  customInput.required = true;\n"
-      "  customInput.setAttribute('name', 'ssid');\n"
-      "  customInput.value = '';\n"
-      "  hiddenSsid.removeAttribute('name');\n"
-      "  var pwInput = document.getElementById('modalPassword');\n"
-      "  pwInput.value = '';\n"
-      "  pwInput.type = 'password';\n"
-      "  document.getElementById('togglePwBtn').textContent = '보기';\n"
-      "  document.getElementById('modalOverlay').classList.add('active');\n"
-      "  setTimeout(function(){ customInput.focus(); }, 100);\n"
-      "}\n"
-      "function closeModal() {\n"
-      "  document.getElementById('modalOverlay').classList.remove('active');\n"
-      "}\n"
-      "function handleOverlayClick(e) {\n"
-      "  if (e.target.id === 'modalOverlay') {\n"
-      "    closeModal();\n"
-      "  }\n"
-      "}\n"
-      "function togglePassword() {\n"
-      "  var pw = document.getElementById('modalPassword');\n"
-      "  var btn = document.getElementById('togglePwBtn');\n"
-      "  if (pw.type === 'password') {\n"
-      "    pw.type = 'text';\n"
-      "    btn.textContent = '숨기기';\n"
-      "  } else {\n"
-      "    pw.type = 'password';\n"
-      "    btn.textContent = '보기';\n"
-      "  }\n"
-      "}\n"
-      "document.getElementById('wifiForm').onsubmit = function() {\n"
-      "  var b = document.getElementById('btnWifiSubmit');\n"
-      "  if (b) {\n"
-      "    b.classList.add('btn-loading');\n"
-      "    b.innerHTML = '<span class=\"spin-loader\"></span> 연결 시도 "
-      "중...';\n"
-      "  }\n"
-      "};\n"
-      "</script>"
-      "</body>"
-      "</html>";
-  httpd_resp_send_chunk(req, script_tail, HTTPD_RESP_USE_STRLEN);
-  httpd_resp_send_chunk(req, NULL, 0); // 전송 완료 (EOF)
-  return ESP_OK;
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return send_chunk_string(req, HTML_WIFI_SETUP);
 }
 
 #include "web_media_range.inc"
@@ -864,62 +538,7 @@ static bool decode_wifi_field(char *out,size_t capacity,const char *encoded) {
   }
   out[used]=0;return true;
 }
-static esp_err_t wifi_post_handler(httpd_req_t *req) {
-  char content[384] = {0};
-  int total_len = req->content_len;
-  int cur_len = 0;
-  int received = 0;
-
-  if (total_len >= sizeof(content)) {
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  while (cur_len < total_len) {
-    received = httpd_req_recv(req, content + cur_len, total_len - cur_len);
-    if (received <= 0) {
-      httpd_resp_send_500(req);
-      return ESP_FAIL;
-    }
-    cur_len += received;
-  }
-  content[total_len] = '\0';
-
-  char ssid[33] = {0},pass[64] = {0},encoded[384];
-  if(httpd_query_key_value(content,"ssid",encoded,sizeof(encoded))!=ESP_OK ||
-     !decode_wifi_field(ssid,sizeof(ssid),encoded) || !ssid[0])
-    return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"SSID must be 1-32 bytes");
-  esp_err_t field=httpd_query_key_value(content,"pass",encoded,sizeof(encoded));
-  if(field!=ESP_ERR_NOT_FOUND && (field!=ESP_OK || !decode_wifi_field(pass,sizeof(pass),encoded)))
-    return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid Wi-Fi password encoding or length");
-  if(pass[0] && strlen(pass)<8)
-    return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Password must be empty or 8-63 bytes");
-
-  ESP_LOGI(TAG, "Received Wi-Fi Config - SSID: %s", ssid);
-  if (!ssid[0]) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID is required");
-  if (network_save_credentials(ssid, pass) != ESP_OK) return httpd_resp_send_500(req);
-
-  char product_url[96] = {0}, response[1500];
-  network_get_mdns_url(product_url, sizeof(product_url));
-  snprintf(response, sizeof(response),
-      "<!DOCTYPE html><html lang='ko'><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-      "<title>제품 연결 안내</title><body style='background:#f4f4f4;color:#242424;font-family:sans-serif;margin:0;padding:24px;'>"
-      "<main style='max-width:480px;margin:auto;background:white;border:1px solid #d1d1d1;border-radius:6px;padding:24px;'>"
-      "<h2>Wi-Fi 설정을 저장했습니다.</h2><p>제품이 재시작해 공유기에 연결합니다.</p>"
-      "<ol><li>휴대전화도 설정한 공유기 Wi-Fi에 연결하세요.</li><li>아래 주소로 제품 웹페이지를 여세요.</li></ol>"
-      "<a href='%s' style='display:block;color:#2463ad;overflow-wrap:anywhere;margin:20px 0;'>%s</a>"
-      "<p>IP가 바뀌어도 이 주소를 사용합니다. 주소 또는 아래 QR을 저장해 두세요.</p>", product_url, product_url);
-  httpd_resp_set_type(req, "text/html; charset=utf-8");
-  esp_err_t sent = httpd_resp_sendstr_chunk(req, response);
-  if (sent == ESP_OK) sent = send_product_qr_inline(req, product_url);
-  if (sent == ESP_OK) sent = httpd_resp_sendstr_chunk(req, "<p style='font-size:12px;color:#666;'>같은 Wi-Fi 안에서 사용합니다. 연결이 완료되기까지 잠시 기다려 주세요.</p></main></body></html>");
-  if (sent == ESP_OK) sent = httpd_resp_send_chunk(req, NULL, 0);
-  if (sent != ESP_OK) return sent;
-
-  // HTTP 응답이 완전히 전송된 후 안전하게 재부팅
-  xTaskCreate(restart_task, "rst_task", 2048, NULL, 5, NULL);
-  return ESP_OK;
-}
+#include "web_network_setup.inc"
 
 static esp_err_t api_logs_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/plain; charset=utf-8");
@@ -1577,6 +1196,7 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     if (reset_err == ESP_OK) reset_err = set_initial_page("");
     if (reset_err == ESP_OK) reset_err = esp_spiffs_format("littlefs");
     if (reset_err == ESP_OK) reset_err = file_dates_clear();
+    if (reset_err == ESP_OK) web_factory_seed(true);
     if (reset_err != ESP_OK) {
       ESP_LOGE(TAG, "Storage/default restore failed: %s", esp_err_to_name(reset_err));
       httpd_resp_set_status(req, "500 Internal Server Error");
@@ -1860,6 +1480,10 @@ esp_err_t web_server_start(void) {
                                  .handler = wifi_post_handler,
                                  .user_ctx = NULL};
     httpd_register_uri_handler(s_server, &wifi_post_uri);
+    httpd_uri_t network_get_uri = {.uri="/api/network", .method=HTTP_GET, .handler=api_network_get_handler};
+    httpd_uri_t wifi_scan_uri = {.uri="/api/wifi/scan", .method=HTTP_GET, .handler=api_wifi_scan_handler};
+    httpd_register_uri_handler(s_server, &network_get_uri);
+    httpd_register_uri_handler(s_server, &wifi_scan_uri);
 
     httpd_uri_t hotplug_uri = {.uri = "/hotspot-detect.html",
                                .method = HTTP_GET,

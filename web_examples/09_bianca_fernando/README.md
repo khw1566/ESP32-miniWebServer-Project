@@ -2,11 +2,11 @@
 
 ## PC에서 ngrok으로 공개하기
 
-작업 폴더 최상위의 `Serve_Bianca_ngrok.bat`를 더블클릭합니다. Python 로컬 서버와 설치된 ngrok을 함께 실행합니다. ngrok 화면의 `Forwarding` HTTPS 주소를 열면 `board/bianca_fernando.html`이 기본 화면으로 표시됩니다. `board` 폴더의 파일만 제공합니다. MP3의 구간 요청과 HEAD 응답을 지원합니다.
+작업 폴더 `scripts` 안의 `Serve_Bianca_ngrok.bat`를 더블클릭합니다. Python 로컬 서버와 설치된 ngrok을 함께 실행합니다. ngrok 화면의 `Forwarding` HTTPS 주소를 열면 `board/bianca_fernando.html`이 기본 화면으로 표시됩니다. `board` 폴더의 파일만 제공합니다. MP3의 구간 요청과 HEAD 응답을 지원합니다.
 
 - 로컬 주소: `http://127.0.0.1:8080/`.
-- 포트 변경: 터미널에서 `Serve_Bianca_ngrok.bat 8081`.
-- 실행 파일 지정: `Serve_Bianca_ngrok.bat 8080 --ngrok "C:\경로\ngrok.exe"` 또는 `NGROK_EXE` 환경 변수 사용.
+- 포트 변경: 터미널에서 `scripts\Serve_Bianca_ngrok.bat 8081`.
+- 실행 파일 지정: `scripts\Serve_Bianca_ngrok.bat 8080 --ngrok "C:\경로\ngrok.exe"` 또는 `NGROK_EXE` 환경 변수 사용.
 - 현재 설치된 Python312의 ngrok 실행 파일을 우선 탐색하고, 없으면 PATH의 ngrok을 사용합니다. 기존 ngrok 인증 설정을 유지합니다. ngrok 인증 오류가 나오면 현재 ngrok 계정 설정을 확인합니다.
 - 종료: 실행 창에서 `Ctrl+C`. ngrok 터널과 로컬 서버를 함께 종료합니다.
 - BAT와 같은 기능을 담당하는 `serve_board_ngrok.py`를 함께 유지합니다. 이 파일은 공개되는 `board` 폴더 밖에 있습니다.

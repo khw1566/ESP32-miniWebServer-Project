@@ -30,12 +30,6 @@ static char s_current_ip[32] = "0.0.0.0";
 static bool s_sta_link_up = false;
 ESP_EVENT_DEFINE_BASE(NET_IPV6_EVENT);
 
-// 정적 IP 설정값 캐시 (STA_CONNECTED 이벤트에서 적용하기 위해)
-static bool s_use_static_ip = false;
-static char s_static_ip[32] = {0};
-static char s_static_gw[32] = {0};
-static char s_static_mask[32] = {0};
-
 // STA 연결 시도 활성화 여부 플래그
 // (SoftAP 모드에서 STA_START 이벤트 발생 시 자동 connect 차단)
 static atomic_bool s_sta_connect_requested = false;
@@ -50,6 +44,8 @@ ESP_EVENT_DEFINE_BASE(NET_RECOVERY_EVENT);
 static EventGroupHandle_t s_wifi_event_group;
 
 #include "network_mdns.inc"
+static esp_err_t network_apply_sta_address(void);
+static esp_err_t network_apply_setup_ap_address(void);
 #include "network_router.inc"
 
 /* Recovery runs on the Wi-Fi event loop, not on the display or timer task. */
@@ -120,17 +116,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (!s_sta_connect_requested) return;
         s_sta_link_up = true;
         if (s_sta_netif) {
-            // 정적 IP 예약된 경우 연결 직후 적용 (DHCP 비활성화 후 IP 고정)
-            if (s_use_static_ip) {
-                esp_netif_dhcpc_stop(s_sta_netif);
-                esp_netif_ip_info_t ip_info;
-                memset(&ip_info, 0, sizeof(ip_info));
-                ip_info.ip.addr     = esp_ip4addr_aton(s_static_ip);
-                ip_info.gw.addr     = esp_ip4addr_aton(s_static_gw);
-                ip_info.netmask.addr = esp_ip4addr_aton(s_static_mask);
-                esp_netif_set_ip_info(s_sta_netif, &ip_info);
-                ESP_LOGI(TAG, "[EVT] 정적 IP 적용: %s", s_static_ip);
-            }
             /* Queue behind default STA_CONNECTED handlers that bring netif up. */
             esp_err_t err = esp_event_post(NET_IPV6_EVENT, 0, NULL, 0, 0);
             if (err != ESP_OK) ESP_LOGW(TAG, "[IPv6] Request queue failed: %s", esp_err_to_name(err));
@@ -142,6 +127,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_sta_link_up = false;
         /* Deliberate STA stop during SoftAP handover is not a connection failure. */
         if (!s_sta_connect_requested) return;
+        snprintf(s_current_ip, sizeof(s_current_ip), "0.0.0.0");
         s_net_mode = NET_MODE_STA_CONNECTING;
         wifi_event_sta_disconnected_t *dc = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGW(TAG, "[EVT] STA_DISCONNECTED reason=%d, retry=%d/%d",
@@ -185,6 +171,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 // -------------------------------------------------------------
 esp_err_t network_init(void) {
     s_wifi_event_group = xEventGroupCreate();
+    if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
@@ -195,6 +182,7 @@ esp_err_t network_init(void) {
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(network_identity_init());
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
@@ -259,6 +247,8 @@ esp_err_t network_start_softap(void) {
         ESP_LOGE(TAG, "esp_wifi_set_config(AP) failed: %d", err);
         return err;
     }
+    err = network_apply_setup_ap_address();
+    if (err != ESP_OK) return err;
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_start failed: %d", err);
@@ -292,16 +282,6 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         !strcmp(saved_ssid, ssid) && !strcmp(saved_pass, pass ? pass : "");
     memset(saved_pass, 0, sizeof(saved_pass));
     s_sta_link_up = false;
-
-    // 정적 IP 여부 확인 및 캐시 저장 (실제 적용은 STA_CONNECTED 이벤트에서)
-    s_use_static_ip = network_get_static_ip(s_static_ip, sizeof(s_static_ip),
-                                             s_static_gw, sizeof(s_static_gw),
-                                             s_static_mask, sizeof(s_static_mask));
-    if (s_use_static_ip) {
-        ESP_LOGI(TAG, "정적 IP 예약: %s (STA_CONNECTED 시 적용)", s_static_ip);
-    } else {
-        ESP_LOGI(TAG, "DHCP 모드로 연결");
-    }
 
     // Wi-Fi 설정 구성
     wifi_config_t wifi_config = {0};
@@ -342,6 +322,9 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         return err;
     }
 
+    err = network_apply_sta_address();
+    if (err != ESP_OK) return err;
+
     // 플래그 먼저 세팅 후 start → STA_START 이벤트에서 connect 호출됨
     s_sta_connect_requested = true;
     err = esp_wifi_start();
@@ -374,79 +357,8 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
 // -------------------------------------------------------------
 // NVS: Wi-Fi 자격증명 저장
 // -------------------------------------------------------------
-esp_err_t network_save_credentials(const char *ssid, const char *pass) {
-    nvs_handle_t nvs_h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_h);
-    if (err != ESP_OK) return err;
+#include "network_settings.inc"
 
-    err = nvs_set_str(nvs_h, NVS_KEY_SSID, ssid);
-    if (err == ESP_OK) {
-        err = nvs_set_str(nvs_h, NVS_KEY_PASS, pass ? pass : "");
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs_h);
-    }
-    nvs_close(nvs_h);
-    return err;
-}
-
-bool network_has_saved_credentials(char *out_ssid, size_t ssid_len,
-                                   char *out_pass, size_t pass_len) {
-    nvs_handle_t nvs_h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_h);
-    if (err != ESP_OK) return false;
-
-    err = nvs_get_str(nvs_h, NVS_KEY_SSID, out_ssid, &ssid_len);
-    if (err != ESP_OK || strlen(out_ssid) == 0) {
-        nvs_close(nvs_h);
-        return false;
-    }
-
-    err = nvs_get_str(nvs_h, NVS_KEY_PASS, out_pass, &pass_len);
-    if (err != ESP_OK) {
-        out_pass[0] = '\0';
-    }
-    nvs_close(nvs_h);
-    return true;
-}
-
-// -------------------------------------------------------------
-// NVS: 정적 IP 저장 / 조회
-// -------------------------------------------------------------
-esp_err_t network_save_static_ip(const char *ip, const char *gw, const char *mask) {
-    nvs_handle_t nvs_h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_h);
-    if (err != ESP_OK) return err;
-
-    nvs_set_str(nvs_h, NVS_KEY_STATIC_IP,   ip);
-    nvs_set_str(nvs_h, NVS_KEY_STATIC_GW,   gw);
-    nvs_set_str(nvs_h, NVS_KEY_STATIC_MASK, mask);
-    nvs_commit(nvs_h);
-    nvs_close(nvs_h);
-    return ESP_OK;
-}
-
-bool network_get_static_ip(char *out_ip, size_t ip_len,
-                            char *out_gw, size_t gw_len,
-                            char *out_mask, size_t mask_len) {
-    nvs_handle_t nvs_h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_h);
-    if (err != ESP_OK) return false;
-
-    err = nvs_get_str(nvs_h, NVS_KEY_STATIC_IP, out_ip, &ip_len);
-    if (err != ESP_OK || strlen(out_ip) == 0) {
-        nvs_close(nvs_h);
-        return false;
-    }
-    nvs_get_str(nvs_h, NVS_KEY_STATIC_GW,   out_gw,   &gw_len);
-    nvs_get_str(nvs_h, NVS_KEY_STATIC_MASK, out_mask, &mask_len);
-    nvs_close(nvs_h);
-    return true;
-}
-
-// -------------------------------------------------------------
-// 네트워크 상태 조회
-// -------------------------------------------------------------
 esp_err_t network_get_ip_str(char *out_ip, size_t ip_len) {
     if (!out_ip) return ESP_ERR_INVALID_ARG;
     strncpy(out_ip, s_current_ip, ip_len - 1);

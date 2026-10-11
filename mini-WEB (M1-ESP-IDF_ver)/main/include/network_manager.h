@@ -1,6 +1,7 @@
 #pragma once
 #include <esp_err.h>
 #include <stdbool.h>
+#include "network_settings.h"
 #include "esp_wifi_types.h"
 
 #define SOFTAP_SSID_DEFAULT "Mini-WebServer-Setup"

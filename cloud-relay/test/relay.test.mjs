@@ -82,9 +82,10 @@ test('timeout, stale response and board reconnection', async () => {
   assert.equal((await post(s, j, 'start', { status: 200 })).status, 410);
   s.device.pollMs = 20; assert.equal((await s.call('poll')).status, 204);
 });
-test('abort releases pending request and duplicate polls are refused', async () => {
-  const s = setup(); const poll = s.call('poll'); while (!s.device.poll) await tick();
-  assert.equal((await s.call('poll')).status, 409); await poll;
+test('abort releases pending request and a new poll replaces a stale one', async () => {
+  const s = setup(); const stale = s.call('poll'); while (!s.device.poll) await tick();
+  s.device.pollMs = 20; const fresh = s.call('poll');
+  assert.equal((await stale).status, 204); assert.equal((await fresh).status, 204);
   const { job: j, visitor } = await job(s);
   assert.equal((await post(s, j, 'abort', {})).status, 204);
   assert.equal((await visitor).status, 502); assert.equal(s.device.jobs.size, 0);
@@ -102,4 +103,15 @@ test('oversized device messages and header injection fail closed', async () => {
   const next = await job(s);
   assert.equal((await post(s, next.job, 'start', 'x'.repeat(1025))).status, 400);
   assert.equal((await next.visitor).status, 502);
+});
+test('a board that reconnects receives the request its lost connection never started', async () => {
+  const s = setup(); const { job: lost, visitor } = await job(s);
+  // The board rebooted before answering: its next poll gets the same request again.
+  const again = await s.call('poll'); assert.equal(again.status, 200);
+  const redelivered = await again.json(); assert.equal(redelivered.id, lost.id); assert.equal(redelivered.path, '/');
+  assert.equal((await post(s, redelivered, 'start', { status: 200, headers: { 'content-type': 'text/plain' } })).status, 204);
+  const page = await visitor; assert.equal(page.status, 200); const body = page.text();
+  assert.equal((await post(s, redelivered, 'chunk', 'ok', { 'x-sequence': '0' })).status, 204);
+  assert.equal((await post(s, redelivered, 'end', { bytes: 2, chunks: 1 })).status, 204);
+  assert.equal(await body, 'ok');
 });

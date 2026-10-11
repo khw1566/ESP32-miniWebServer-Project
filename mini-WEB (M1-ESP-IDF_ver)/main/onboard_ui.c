@@ -86,6 +86,13 @@ static void worker(void *arg) {
                     esp_err_t router=network_router_start(false);
                     if(router!=ESP_OK) ESP_LOGW("M1_UI","Router mode restore failed: %s",esp_err_to_name(router));
                 }
+            } else {
+                /* Failed saved/manual Wi-Fi must leave a usable setup portal. */
+                r.op=4;
+                r.err=network_start_softap();
+                if(r.err==ESP_OK) r.err=dns_server_start();
+                if(r.err==ESP_OK) r.err=web_server_start();
+                server_running=r.err==ESP_OK;
             }
         } else if(cmd.op==3) {
             auto_server_requested=!server_running;
@@ -580,9 +587,10 @@ static void home(void) {
 static void ui_task(void *arg) {
     home();
     command_t c={.op=2};
-    if(network_has_saved_credentials(c.ssid,sizeof(c.ssid),c.pass,sizeof(c.pass))) {
-        xQueueSend(commands,&c,0);busy=true;lv_label_set_text(status,"저장된 Wi-Fi 연결 중");
-    }
+    bool saved=network_has_saved_credentials(c.ssid,sizeof(c.ssid),c.pass,sizeof(c.pass));
+    if(!saved) c.op=4;
+    xQueueSend(commands,&c,0);busy=true;
+    lv_label_set_text(status,saved?"저장된 Wi-Fi 연결 중":"SoftAP 설정 준비 중");
     memset(c.pass,0,sizeof(c.pass));
     int64_t last=0;
     int64_t next_capacity_refresh=0;

@@ -94,7 +94,15 @@ export class RelayDevice {
       this.lastSeen = Date.now();
       if (match[2] === 'poll') {
         if (request.method !== 'GET') return response(405);
-        if (this.poll || this.active) return response(409);
+        // A board keeps one poll open, so a new poll means its previous connection
+        // is gone (reboot, Wi-Fi drop). Release the stale poll and redeliver a job
+        // that never started, instead of refusing the board for up to a minute.
+        if (this.poll) { const stale = this.poll; this.poll = null; clearTimeout(stale.timer); stale.resolve(response(204)); }
+        if (this.active) {
+          const lost = this.active; this.active = null;
+          if (lost.writer || lost.busy) this.fail(lost, 502);
+          else { lost.delivered = false; this.queue.unshift(lost); }
+        }
         return new Promise(resolve => {
           const poll = { resolve, timer: null }; this.poll = poll;
           poll.timer = setTimeout(() => { if (this.poll === poll) this.poll = null; resolve(response(204)); }, this.pollMs);
