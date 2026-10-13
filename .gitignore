@@ -17,6 +17,7 @@
 *.elf
 *.map
 .env
+**/m3_gemini_private.h
 .env.*
 !.env.example
 **/ngrok.yml
@@ -41,3 +42,7 @@
 /sites/
 /scripts/Setup_nrok.bat
 /scripts/Serve_Opera_2021_ngrok.bat
+**/m3_tube_private.h
+/mini-WEB (M3-ESP-IDF_ver)/results/
+/mini-WEB (M3-ESP-IDF_ver)/sdkconfig
+/mini-WEB (M3-ESP-IDF_ver)/tools/ui_sim/*_preview.png

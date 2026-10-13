@@ -1,6 +1,6 @@
 # 모든 Mini WebServer 펌웨어의 SoftAP 설정
 
-C3, S3, M1, S3-N16R8-SD, P4에 같은 웹 설정을 적용했습니다.
+C3, S3, M1, S3-N16R8-SD, P4, M3에 같은 웹 설정을 적용했습니다. M3의 설정 AP 이름은 `Mini-WebServer-M3-Setup`이며 나머지는 `Mini-WebServer-Setup`입니다.
 
 1. 처음 전원을 켜거나 저장된 공유기 연결에 실패하면 `Mini-WebServer-Setup` Wi-Fi가 열립니다.
 2. 휴대전화·PC를 이 Wi-Fi에 연결하고 `http://192.168.4.1/setup`을 엽니다. 인터넷 없음 안내가 나와도 연결을 유지하세요.
@@ -18,12 +18,14 @@ Wi-Fi 이름은 UTF-8 1~32바이트, 비밀번호는 8~63바이트 또는 빈 �
 
 M1은 초기 설정과 연결 실패 시 SoftAP 화면을 자동으로 엽니다. LCD의 기존 Wi-Fi 선택·키보드·공유기 모드 기능도 유지합니다. P4는 ESP-Hosted로 C6 무선 칩을 사용하며, 호환되는 C6 펌웨어 설치가 필요합니다. [P4 설치 안내](<../mini-WEB (P4-ESP-IDF_ver)/README.md>)를 확인하세요.
 
+M3도 C6의 호환 펌웨어가 필요합니다. BOOT를 누른 채 전원을 켜면 저장된 Wi-Fi를 삭제하지 않고 설정 AP로 부팅합니다. 화면의 Wi-Fi 탭에서 주소와 QR을 확인하세요. [M3 설치 안내](<../mini-WEB (M3-ESP-IDF_ver)/README.md>)를 참고하세요.
+
 ## 소스와 검증
 
 - `tools/firmware_common/wifi_setup.html`: 공통 반응형 설정 화면
 - `tools/firmware_common/network_settings.inc`: 입력 검증, NVS 저장·이전 설정 호환, DNS/IP 적용
 - `tools/firmware_common/web_network_setup.inc`: 설정 조회·Wi-Fi 검색·저장 API
 - `python tools/sync_network_setup.py`: 각 프로젝트에 독립적으로 사용할 복사본과 내장 HTML 생성
-- `node tools/test_network_setup.cjs`: 실제 화면 JavaScript의 입력·실패·저장 흐름 및 다섯 프로젝트의 연결 지점 검사
+- `node tools/test_network_setup.cjs`: 실제 화면 JavaScript의 입력·실패·저장 흐름 및 모든 보드 프로젝트의 연결 지점 검사
 
 저장소 규칙에 따라 에이전트는 펌웨어를 컴파일하거나 설치하지 않습니다. 호스트 검증과 실물 검증은 별개입니다. 사용자 빌드 후 SoftAP 접속, WPA2 공유기 연결, 고정 IP/DNS 적용, DHCP 복귀, 잘못된 비밀번호에서 SoftAP 복구, 재부팅 후 설정 유지, P4의 C6·SD 동시 동작을 확인하세요.

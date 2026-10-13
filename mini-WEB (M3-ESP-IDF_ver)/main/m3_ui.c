@@ -1,0 +1,2770 @@
+#include "m3_music.h"
+#include "m3_photos.h"
+#include "m3_calendar.h"
+#include "m3_kana.h"
+#include "m3_utf8.h"
+#include "m3_memory.h"
+#include "m3_ui.h"
+#include "m3_board.h"
+#include "m3_runtime.h"
+#include "m3_web_address.h"
+#include "m3_audio.h"
+#include "m3_2048.h"
+#include "m3_hangul.h"
+#include "m3_voice.h"
+#include "m3_agent.h"
+#include "m3_i18n.h"
+#include "m3_tube.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
+#include "esp_timer.h"
+#include "esp_chip_info.h"
+#include "esp_system.h"
+#include "esp_random.h"
+#include "lvgl.h"
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <stdlib.h>
+
+/* Palette. CYAN/MAGENTA remain the product accents; everything else is neutral. */
+#define CYAN 0x00e5ef
+#define MAGENTA 0xf548ba
+#define INK 0x0a0e14
+#define SURFACE 0x151b25
+#define SURFACE_HI 0x202938
+#define LINE 0x2b3647
+#define TEXT 0xe9eef5
+#define MUTED 0x8c99ab
+#define ON_ACCENT 0x00272b
+#define GREEN 0x34d399
+#define AMBER 0xfbbf24
+#define RED 0xf87171
+#define FIELD 0x0e131b
+extern const lv_font_t m3_font_korean, m3_font_title, m3_font_clock;
+#define FONT_TITLE (&m3_font_title)
+#define FONT_ICON (&lv_font_montserrat_28)
+
+typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_AUDIO, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_COUNT } app_id_t;
+_Static_assert(APP_AGENT == 9, "Agent app dispatch IDs must match the UI enum");
+enum { CONTENT_TOP = 100, HOME_TOP = 756, KEYBOARD_HEIGHT = 270 };
+static const m3_text_t app_names[] = {T_APP_HOME, T_APP_WIFI, T_APP_FILES, T_APP_AUDIO, T_APP_MONITOR,
+    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC};
+
+static lv_obj_t *pages[APP_COUNT], *viewport, *app_title, *back_button, *keyboard;
+static lv_obj_t *home_strip, *home_pill, *home_hint;
+static int32_t home_progress;
+static app_id_t current_app;
+static bool form_dirty, swipe_started;
+static lv_point_t swipe_origin;
+static M3_PSRAM_BSS m3_runtime_state_t snapshot;
+
+/* Status bar, home and activity shade. */
+static lv_obj_t *status, *status_clock, *status_audio, *status_strip, *wifi_levels[4];
+static lv_obj_t *home_clock, *home_date, *home_net_icon, *home_net, *home_detail;
+enum { HOME_APPS_PER_PAGE = 6, HOME_APP_PAGE_COUNT = (APP_COUNT - 2) / HOME_APPS_PER_PAGE + 1,
+    HOME_PHOTOS = HOME_APP_PAGE_COUNT + 1, HOME_PAGE_COUNT = HOME_PHOTOS + 1 };
+static lv_obj_t *home_tiles, *home_sheets[HOME_PAGE_COUNT], *home_dots[HOME_PAGE_COUNT], *home_page_name;
+static unsigned home_index = 1;
+static lv_obj_t *calendar_heading, *calendar_weekdays[7], *calendar_cells[42], *calendar_hint;
+static unsigned calendar_year, calendar_month, calendar_stamp, calendar_today_stamp;
+static bool calendar_follow = true;
+static lv_obj_t *photo_canvas, *photo_name, *photo_info, *photo_pause, *photo_empty;
+static const uint8_t *photo_frame;
+static M3_PSRAM_BSS m3_photo_state_t photo_snapshot;
+static void home_page_update(void);
+static void update_calendar(void);
+static void update_photos(void);
+static lv_obj_t *shade, *shade_scrim, *usage_arcs[3], *usage_values[3], *usage_details[3], *job_cards[6], *job_labels[6];
+static int32_t shade_y = -HOME_TOP, shade_start_y;
+static bool shade_drag;
+static lv_point_t shade_origin;
+static void shade_set(bool open);
+
+/* Apps. */
+static lv_obj_t *net_title, *net_dot, *network, *qr, *qr_url;
+static lv_obj_t *ssid_field, *pass_field, *ip_field, *gateway_field, *mask_field, *dns_field;
+static lv_obj_t *static_switch, *static_fields, *wifi_info, *wifi_actions[3], *scan_buttons[M3_WIFI_RESULTS];
+static unsigned seen_scan, seen_settings, seen_wifi;
+static lv_obj_t *storage_tabs, *file_path, *file_info, *file_bar, *file_page, *file_buttons[STORAGE_VIEW_ROWS], *file_empty;
+static unsigned seen_files;
+static bool selected_sd;
+static char selected_folder[256];
+static unsigned selected_offset;
+enum { VOLUME_ROWS = 5 };
+static lv_obj_t *audio_info, *audio_bar, *volume_sliders[VOLUME_ROWS], *volume_values[VOLUME_ROWS];
+static unsigned shown_volume = 1000;
+static lv_obj_t *memory, *heap_bar, *chart, *monitor_info, *system_info;
+static lv_chart_series_t *heap_series, *psram_series;
+static unsigned chart_tick;
+static char seen_url[96], seen_audio[96];
+static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[8];
+static int radio_selected = -1;
+static bool radio_pending;
+static int64_t radio_pending_until;
+static lv_obj_t *tts_provider, *tts_text, *tts_speed, *tts_speed_value, *tts_info;
+static lv_obj_t *agent_prompt, *agent_model, *agent_info, *agent_dot, *agent_answer, *agent_output, *agent_trace;
+static unsigned seen_agent;
+static lv_obj_t *voice_provider, *voice_panel, *voice_info, *voice_text, *voice_target, *voice_key, *voice_key_info, *voice_dot;
+static unsigned seen_voice;
+static lv_obj_t *language_tabs;
+static lv_obj_t *agent_thinking, *agent_voice, *voice_think, *tts_wait, *tts_talk, *tube_wait;
+enum { METER_BARS = 11, METER_MIN = 4, METER_MAX = 44 };
+static lv_obj_t *voice_meter, *voice_meter_bars[METER_BARS], *voice_db;
+static unsigned meter_phase;
+static lv_obj_t *web_tabs, *web_qr, *web_url, *web_state, *web_dot, *web_requests;
+static unsigned web_address_kind = M3_WEB_DOMAIN;
+static bool web_qr_dirty = true, web_qr_ok;
+static lv_obj_t *web_frame, *web_hint, *web_retry;
+static char seen_web_url[96];
+static void voice_input(lv_event_t *event);
+static void apply_language(void);
+static void update_metrics(lv_timer_t *timer);
+static void tube_leave(void);
+
+/* Direct links published by SomaFM and Radio Swiss on 2026-10-13. */
+static const struct { const char *name, *url; bool aac; } radio_stations[] = {
+    {"SomaFM Groove Salad / MP3 128k", "https://ice5.somafm.com/groovesalad-128-mp3", false},
+    {"SomaFM Groove Salad / AAC 64k", "https://ice5.somafm.com/groovesalad-64-aac", true},
+    {"SomaFM Drone Zone / MP3 128k", "https://ice5.somafm.com/dronezone-128-mp3", false},
+    {"SomaFM Secret Agent / MP3 128k", "https://ice5.somafm.com/secretagent-128-mp3", false},
+    {"Radio Swiss Jazz / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128", false},
+    {"Radio Swiss Classic / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128", false},
+    {"Radio Swiss Pop / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128", false}
+};
+_Static_assert(sizeof(radio_stations) / sizeof(radio_stations[0]) <= 8, "station buttons");
+static lv_obj_t *game_board, *game_tiles[16], *game_info, *game_arrows[4], *game_tabs, *game_undo;
+static lv_obj_t *score_titles[2], *score_values[2];
+static m3_2048_t game, undo_game;
+static bool undo_available, memory_game, memory_visible[16], memory_solved[16];
+static uint8_t memory_cards[16];
+static int memory_first = -1, memory_second = -1;
+static unsigned memory_turns, best_score;
+static uint64_t memory_hide_at;
+static lv_point_t game_origin;
+static bool game_drag;
+
+/* ---------- Shared styles: one copy in static memory instead of per-object local styles. ---------- */
+static lv_style_t st_page, st_card, st_row, st_btn, st_btn_pressed, st_primary, st_primary_pressed, st_danger,
+    st_disabled, st_field, st_field_focus, st_seg, st_seg_item, st_seg_checked, st_list, st_list_checked,
+    st_caption, st_track, st_indicator, st_knob, st_title, st_bare;
+static void styles_init(void) {
+    lv_style_init(&st_bare);
+    lv_style_set_bg_opa(&st_bare, LV_OPA_TRANSP); lv_style_set_border_width(&st_bare, 0);
+    lv_style_set_pad_all(&st_bare, 0); lv_style_set_radius(&st_bare, 0);
+
+    lv_style_init(&st_page);
+    lv_style_set_bg_color(&st_page, lv_color_hex(INK)); lv_style_set_bg_opa(&st_page, LV_OPA_COVER);
+    lv_style_set_text_color(&st_page, lv_color_hex(TEXT));
+    lv_style_set_pad_hor(&st_page, 16); lv_style_set_pad_top(&st_page, 6); lv_style_set_pad_bottom(&st_page, 28);
+    lv_style_set_pad_row(&st_page, 14); lv_style_set_border_width(&st_page, 0); lv_style_set_radius(&st_page, 0);
+    lv_style_set_layout(&st_page, LV_LAYOUT_FLEX); lv_style_set_flex_flow(&st_page, LV_FLEX_FLOW_COLUMN);
+
+    lv_style_init(&st_card);
+    lv_style_set_bg_color(&st_card, lv_color_hex(SURFACE)); lv_style_set_bg_opa(&st_card, LV_OPA_COVER);
+    lv_style_set_radius(&st_card, 18); lv_style_set_pad_all(&st_card, 16); lv_style_set_pad_row(&st_card, 12);
+    lv_style_set_border_width(&st_card, 0); lv_style_set_width(&st_card, LV_PCT(100));
+    lv_style_set_height(&st_card, LV_SIZE_CONTENT);
+    lv_style_set_layout(&st_card, LV_LAYOUT_FLEX); lv_style_set_flex_flow(&st_card, LV_FLEX_FLOW_COLUMN);
+
+    lv_style_init(&st_row);
+    lv_style_set_bg_opa(&st_row, LV_OPA_TRANSP); lv_style_set_border_width(&st_row, 0); lv_style_set_pad_all(&st_row, 0);
+    lv_style_set_pad_column(&st_row, 10); lv_style_set_width(&st_row, LV_PCT(100)); lv_style_set_height(&st_row, LV_SIZE_CONTENT);
+    lv_style_set_layout(&st_row, LV_LAYOUT_FLEX); lv_style_set_flex_flow(&st_row, LV_FLEX_FLOW_ROW);
+    lv_style_set_flex_cross_place(&st_row, LV_FLEX_ALIGN_CENTER); lv_style_set_flex_track_place(&st_row, LV_FLEX_ALIGN_CENTER);
+
+    lv_style_init(&st_btn);
+    lv_style_set_bg_color(&st_btn, lv_color_hex(SURFACE_HI)); lv_style_set_bg_opa(&st_btn, LV_OPA_COVER);
+    lv_style_set_text_color(&st_btn, lv_color_hex(TEXT)); lv_style_set_radius(&st_btn, 14);
+    lv_style_set_height(&st_btn, 52); lv_style_set_width(&st_btn, LV_PCT(100));
+    lv_style_set_pad_hor(&st_btn, 12); lv_style_set_border_width(&st_btn, 0); lv_style_set_shadow_width(&st_btn, 0);
+    lv_style_init(&st_btn_pressed);
+    lv_style_set_bg_color(&st_btn_pressed, lv_color_hex(LINE));
+    lv_style_init(&st_primary);
+    lv_style_set_bg_color(&st_primary, lv_color_hex(CYAN)); lv_style_set_text_color(&st_primary, lv_color_hex(ON_ACCENT));
+    lv_style_init(&st_primary_pressed);
+    lv_style_set_bg_color(&st_primary_pressed, lv_color_hex(0x00b4bd));
+    lv_style_init(&st_danger);
+    lv_style_set_bg_color(&st_danger, lv_color_hex(0x3a1d27)); lv_style_set_text_color(&st_danger, lv_color_hex(0xff9aa8));
+    lv_style_init(&st_disabled);
+    lv_style_set_opa(&st_disabled, LV_OPA_40);
+
+    lv_style_init(&st_field);
+    lv_style_set_bg_color(&st_field, lv_color_hex(FIELD)); lv_style_set_bg_opa(&st_field, LV_OPA_COVER);
+    lv_style_set_border_color(&st_field, lv_color_hex(LINE)); lv_style_set_border_width(&st_field, 1);
+    lv_style_set_radius(&st_field, 12); lv_style_set_pad_all(&st_field, 13); lv_style_set_text_color(&st_field, lv_color_hex(TEXT));
+    lv_style_init(&st_field_focus);
+    lv_style_set_border_color(&st_field_focus, lv_color_hex(CYAN)); lv_style_set_border_width(&st_field_focus, 2);
+
+    lv_style_init(&st_seg);
+    lv_style_set_bg_color(&st_seg, lv_color_hex(FIELD)); lv_style_set_bg_opa(&st_seg, LV_OPA_COVER);
+    lv_style_set_radius(&st_seg, 14); lv_style_set_pad_all(&st_seg, 4); lv_style_set_pad_gap(&st_seg, 4);
+    lv_style_set_border_width(&st_seg, 0); lv_style_set_height(&st_seg, 52); lv_style_set_width(&st_seg, LV_PCT(100));
+    lv_style_init(&st_seg_item);
+    lv_style_set_bg_opa(&st_seg_item, LV_OPA_TRANSP); lv_style_set_text_color(&st_seg_item, lv_color_hex(MUTED));
+    lv_style_set_radius(&st_seg_item, 10); lv_style_set_border_width(&st_seg_item, 0); lv_style_set_shadow_width(&st_seg_item, 0);
+    lv_style_init(&st_seg_checked);
+    lv_style_set_bg_opa(&st_seg_checked, LV_OPA_COVER); lv_style_set_bg_color(&st_seg_checked, lv_color_hex(SURFACE_HI));
+    lv_style_set_text_color(&st_seg_checked, lv_color_hex(CYAN));
+
+    lv_style_init(&st_list);
+    lv_style_set_bg_color(&st_list, lv_color_hex(SURFACE_HI)); lv_style_set_bg_opa(&st_list, LV_OPA_COVER);
+    lv_style_set_radius(&st_list, 12); lv_style_set_height(&st_list, 56); lv_style_set_width(&st_list, LV_PCT(100));
+    lv_style_set_pad_hor(&st_list, 14); lv_style_set_pad_column(&st_list, 12); lv_style_set_border_width(&st_list, 0);
+    lv_style_set_shadow_width(&st_list, 0); lv_style_set_text_color(&st_list, lv_color_hex(TEXT));
+    lv_style_set_layout(&st_list, LV_LAYOUT_FLEX); lv_style_set_flex_flow(&st_list, LV_FLEX_FLOW_ROW);
+    lv_style_set_flex_cross_place(&st_list, LV_FLEX_ALIGN_CENTER); lv_style_set_flex_track_place(&st_list, LV_FLEX_ALIGN_CENTER);
+    lv_style_init(&st_list_checked);
+    lv_style_set_border_color(&st_list_checked, lv_color_hex(CYAN)); lv_style_set_border_width(&st_list_checked, 2);
+    lv_style_set_bg_color(&st_list_checked, lv_color_hex(0x15303a));
+
+    lv_style_init(&st_caption);
+    lv_style_set_text_color(&st_caption, lv_color_hex(MUTED)); lv_style_set_text_line_space(&st_caption, 3);
+    lv_style_init(&st_title);
+    lv_style_set_text_font(&st_title, FONT_TITLE); lv_style_set_text_color(&st_title, lv_color_hex(TEXT));
+
+    lv_style_init(&st_track);
+    lv_style_set_bg_color(&st_track, lv_color_hex(SURFACE_HI)); lv_style_set_bg_opa(&st_track, LV_OPA_COVER);
+    lv_style_set_radius(&st_track, LV_RADIUS_CIRCLE); lv_style_set_border_width(&st_track, 0);
+    lv_style_init(&st_indicator);
+    lv_style_set_bg_color(&st_indicator, lv_color_hex(CYAN)); lv_style_set_bg_opa(&st_indicator, LV_OPA_COVER);
+    lv_style_set_radius(&st_indicator, LV_RADIUS_CIRCLE);
+    lv_style_init(&st_knob);
+    lv_style_set_bg_color(&st_knob, lv_color_hex(0xffffff)); lv_style_set_bg_opa(&st_knob, LV_OPA_COVER);
+    lv_style_set_pad_all(&st_knob, 7); lv_style_set_radius(&st_knob, LV_RADIUS_CIRCLE);
+    lv_style_set_shadow_width(&st_knob, 10); lv_style_set_shadow_opa(&st_knob, LV_OPA_40);
+}
+
+/* ---------- Language binding: every static string remembers its text ID. ---------- */
+typedef enum { BIND_TEXT, BIND_PLACEHOLDER } bind_kind_t;
+typedef struct { lv_obj_t *obj; const char *prefix; uint16_t id; uint8_t kind; } binding_t;
+static M3_PSRAM_BSS binding_t bindings[256];
+static unsigned binding_count;
+static void bind_apply(unsigned index) {
+    /* Help texts exceed any small buffer in Korean (3 bytes per syllable); only
+     * icon-prefixed button captions, which are short, are composed here. */
+    char composed[128];
+    const char *value = tr((m3_text_t)bindings[index].id), *text = value;
+    if (bindings[index].prefix) {
+        snprintf(composed, sizeof(composed), "%s%s%s", bindings[index].prefix, value[0] ? "  " : "", value);
+        text = composed;
+    }
+    if (bindings[index].kind == BIND_PLACEHOLDER) lv_textarea_set_placeholder_text(bindings[index].obj, text);
+    else lv_label_set_text(bindings[index].obj, text);
+}
+static void bind_text(lv_obj_t *obj, m3_text_t id, const char *prefix, bind_kind_t kind) {
+    /* Icon-only labels never change with the language; some (password eye) are swapped at runtime. */
+    if (id == T_NONE) { if (kind == BIND_TEXT) lv_label_set_text(obj, prefix ? prefix : ""); return; }
+    if (binding_count < sizeof(bindings) / sizeof(bindings[0])) {
+        bindings[binding_count] = (binding_t){obj, prefix, (uint16_t)id, (uint8_t)kind};
+        bind_apply(binding_count++);
+    } else if (kind == BIND_TEXT) lv_label_set_text(obj, tr(id));
+}
+/* Style setters invalidate even when the value is unchanged; periodic updates go through these. */
+static void set_bg(lv_obj_t *obj, uint32_t color) {
+    if (!lv_color_eq(lv_obj_get_style_bg_color(obj, 0), lv_color_hex(color))) lv_obj_set_style_bg_color(obj, lv_color_hex(color), 0);
+}
+static void set_ink(lv_obj_t *obj, uint32_t color) {
+    if (!lv_color_eq(lv_obj_get_style_text_color(obj, 0), lv_color_hex(color))) lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+}
+/* Avoid redrawing a label every metrics tick when its text did not change. */
+static void set_text(lv_obj_t *obj, const char *text) {
+    if (strcmp(lv_label_get_text(obj), text)) lv_label_set_text(obj, text);
+}
+static const char *status_text(const char *english) {
+    static M3_PSRAM_BSS char buffers[4][256]; static unsigned next;
+    char *buffer = buffers[next++ % 4];
+    return m3_i18n_status(english, buffer, sizeof(buffers[0]));
+}
+
+/* ---------- Small widget helpers. ---------- */
+static lv_obj_t *label(lv_obj_t *parent, const char *text, uint32_t color) {
+    lv_obj_t *obj = lv_label_create(parent);
+    lv_label_set_text(obj, text);
+    lv_obj_set_width(obj, LV_PCT(100));
+    lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+    return obj;
+}
+static lv_obj_t *text(lv_obj_t *parent, m3_text_t id, uint32_t color) {
+    lv_obj_t *obj = label(parent, "", color); bind_text(obj, id, NULL, BIND_TEXT); return obj;
+}
+static lv_obj_t *caption(lv_obj_t *parent, m3_text_t id) {
+    lv_obj_t *obj = lv_label_create(parent); lv_obj_set_width(obj, LV_PCT(100));
+    lv_obj_add_style(obj, &st_caption, 0); bind_text(obj, id, NULL, BIND_TEXT); return obj;
+}
+static lv_obj_t *bare(lv_obj_t *parent) {
+    lv_obj_t *obj = lv_obj_create(parent); lv_obj_remove_style_all(obj); lv_obj_add_style(obj, &st_bare, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return obj;
+}
+static lv_obj_t *row(lv_obj_t *parent) {
+    lv_obj_t *obj = lv_obj_create(parent); lv_obj_remove_style_all(obj); lv_obj_add_style(obj, &st_row, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return obj;
+}
+static lv_obj_t *card(lv_obj_t *parent, m3_text_t title) {
+    lv_obj_t *obj = lv_obj_create(parent); lv_obj_remove_style_all(obj); lv_obj_add_style(obj, &st_card, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    if (title != T_NONE) {
+        lv_obj_t *heading = caption(obj, title);
+        lv_obj_set_style_text_color(heading, lv_color_hex(CYAN), 0);
+    }
+    return obj;
+}
+typedef enum { BTN_SECONDARY, BTN_PRIMARY, BTN_DANGER } button_kind_t;
+static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, button_kind_t kind, lv_event_cb_t callback, void *data) {
+    lv_obj_t *obj = lv_button_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_add_style(obj, &st_btn, 0); lv_obj_add_style(obj, &st_btn_pressed, LV_STATE_PRESSED);
+    lv_obj_add_style(obj, &st_disabled, LV_STATE_DISABLED);
+    if (kind == BTN_PRIMARY) {
+        lv_obj_add_style(obj, &st_primary, 0); lv_obj_add_style(obj, &st_primary_pressed, LV_STATE_PRESSED);
+    } else if (kind == BTN_DANGER) lv_obj_add_style(obj, &st_danger, 0);
+    lv_obj_t *text_obj = lv_label_create(obj); lv_obj_set_width(text_obj, LV_PCT(100));
+    lv_label_set_long_mode(text_obj, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(text_obj, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(text_obj);
+    bind_text(text_obj, id, symbol, BIND_TEXT);
+    lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
+    return obj;
+}
+static lv_obj_t *grow(lv_obj_t *obj) { lv_obj_set_flex_grow(obj, 1); lv_obj_set_width(obj, 0); return obj; }
+static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol, lv_event_cb_t callback, void *data) {
+    lv_obj_t *obj = button(parent, symbol, T_NONE, BTN_SECONDARY, callback, data);
+    lv_obj_set_size(obj, 52, 52); lv_obj_set_style_pad_all(obj, 0, 0);
+    return obj;
+}
+static void style_slider(lv_obj_t *slider) {
+    lv_obj_remove_style_all(slider);
+    lv_obj_add_style(slider, &st_track, LV_PART_MAIN); lv_obj_add_style(slider, &st_indicator, LV_PART_INDICATOR);
+    lv_obj_add_style(slider, &st_knob, LV_PART_KNOB);
+    lv_obj_set_height(slider, 8);
+    lv_obj_add_flag(slider, LV_OBJ_FLAG_ADV_HITTEST);
+    lv_obj_set_ext_click_area(slider, 18);
+}
+static lv_obj_t *bar(lv_obj_t *parent, uint32_t color, int32_t height) {
+    lv_obj_t *obj = lv_bar_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_add_style(obj, &st_track, LV_PART_MAIN); lv_obj_add_style(obj, &st_indicator, LV_PART_INDICATOR);
+    lv_obj_set_size(obj, LV_PCT(100), height);
+    if (color != CYAN) lv_obj_set_style_bg_color(obj, lv_color_hex(color), LV_PART_INDICATOR);
+    return obj;
+}
+/* Dot that shows a state color (online, recording, busy). */
+static lv_obj_t *dot(lv_obj_t *parent, uint32_t color) {
+    lv_obj_t *obj = bare(parent); lv_obj_set_size(obj, 10, 10);
+    lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(color), 0);
+    return obj;
+}
+
+
+/* ---------- Waiting animations ----------
+ * Dots: work in progress with no level (AI reply, recognition, voice download).
+ * Bars: sound in progress (recording, speaking). Animations run only while shown. */
+typedef enum { ACTIVITY_DOTS = 1, ACTIVITY_BARS } activity_kind_t;
+static void dot_bounce(void *obj, int32_t v) {
+    lv_obj_set_style_translate_y(obj, -v, 0);
+    lv_obj_set_style_bg_opa(obj, (lv_opa_t)(110 + v * 18), 0);
+}
+static void bar_level(void *obj, int32_t v) { lv_obj_set_height(obj, v); }
+static lv_obj_t *activity_create(lv_obj_t *parent, activity_kind_t kind, uint32_t color, m3_text_t caption_id) {
+    lv_obj_t *box = row(parent);
+    lv_obj_set_width(box, LV_SIZE_CONTENT); lv_obj_set_style_pad_column(box, 10, 0);
+    lv_obj_set_user_data(box, (void *)(uintptr_t)kind);
+    lv_obj_t *indicator = row(box);
+    lv_obj_set_size(indicator, LV_SIZE_CONTENT, 26);
+    lv_obj_set_style_pad_column(indicator, kind == ACTIVITY_DOTS ? 6 : 4, 0);
+    lv_obj_set_style_flex_cross_place(indicator, kind == ACTIVITY_DOTS ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_END, 0);
+    for (unsigned i = 0; i < (kind == ACTIVITY_DOTS ? 3u : 5u); ++i) {
+        lv_obj_t *part = bare(indicator);
+        lv_obj_set_size(part, kind == ACTIVITY_DOTS ? 9 : 5, kind == ACTIVITY_DOTS ? 9 : 6);
+        lv_obj_set_style_radius(part, kind == ACTIVITY_DOTS ? LV_RADIUS_CIRCLE : 3, 0);
+        lv_obj_set_style_bg_opa(part, LV_OPA_COVER, 0); lv_obj_set_style_bg_color(part, lv_color_hex(color), 0);
+    }
+    if (caption_id != T_NONE) { lv_obj_t *text_obj = caption(box, caption_id); lv_obj_set_width(text_obj, LV_SIZE_CONTENT); }
+    lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
+    return box;
+}
+static void activity_set(lv_obj_t *box, bool on) {
+    if (!box || on != lv_obj_has_flag(box, LV_OBJ_FLAG_HIDDEN)) return;
+    activity_kind_t kind = (activity_kind_t)(uintptr_t)lv_obj_get_user_data(box);
+    lv_obj_t *indicator = lv_obj_get_child(box, 0);
+    for (uint32_t i = 0; i < lv_obj_get_child_count(indicator); ++i) {
+        lv_obj_t *part = lv_obj_get_child(indicator, (int32_t)i);
+        lv_anim_delete(part, NULL);
+        if (!on) { if (kind == ACTIVITY_DOTS) dot_bounce(part, 0); else bar_level(part, 6); continue; }
+        lv_anim_t animation; lv_anim_init(&animation);
+        lv_anim_set_var(&animation, part);
+        lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
+        lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+        if (kind == ACTIVITY_DOTS) {
+            /* A wave: each dot starts 140 ms after the previous one and they stay in step. */
+            lv_anim_set_exec_cb(&animation, dot_bounce); lv_anim_set_values(&animation, 0, 7);
+            lv_anim_set_duration(&animation, 280); lv_anim_set_playback_duration(&animation, 280);
+            lv_anim_set_delay(&animation, i * 140); lv_anim_set_repeat_delay(&animation, 280);
+        } else {
+            /* Bars at unrelated periods read as a live level meter. */
+            static const uint16_t periods[] = {230, 310, 270, 350, 290};
+            static const uint8_t peaks[] = {18, 26, 22, 26, 16};
+            lv_anim_set_exec_cb(&animation, bar_level); lv_anim_set_values(&animation, 6, peaks[i % 5]);
+            lv_anim_set_duration(&animation, periods[i % 5]); lv_anim_set_playback_duration(&animation, periods[i % 5]);
+        }
+        lv_anim_start(&animation);
+    }
+    if (on) lv_obj_remove_flag(box, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
+}
+/* Speech phase from the audio worker's status: 1 preparing (download or engine start), 2 speaking. */
+static unsigned tts_phase(const m3_audio_state_t *audio) {
+    static const char *const preparing[] = {"Korean TTS initializing", "Google Korean TTS / downloading", "OpenAI TTS / downloading"};
+    static const char *const speaking[] = {"Speaking Korean", "Google Korean TTS / speaking", "OpenAI TTS / AI-generated"};
+    if (!audio->playing) return 0;
+    for (unsigned i = 0; i < 3; ++i) {
+        if (!strncmp(audio->message, preparing[i], strlen(preparing[i]))) return 1;
+        if (!strncmp(audio->message, speaking[i], strlen(speaking[i]))) return 2;
+    }
+    return 0;
+}
+
+/* Segmented control on a button matrix: translated labels, exactly one choice. */
+typedef struct { lv_obj_t *obj; const char *const *fixed; const char *map[5]; m3_text_t ids[4]; uint8_t count, selected; } segment_t;
+static segment_t segments[12];
+static unsigned segment_count;
+static segment_t *segment_of(lv_obj_t *obj) {
+    for (unsigned i = 0; i < segment_count; ++i) if (segments[i].obj == obj) return &segments[i];
+    return NULL;
+}
+static void segment_refresh(segment_t *segment) {
+    /* Product names (models, codecs) use a fixed map that is identical in both languages. */
+    for (unsigned i = 0; i < segment->count; ++i) segment->map[i] = segment->fixed ? segment->fixed[i] : tr(segment->ids[i]);
+    segment->map[segment->count] = "";
+    lv_buttonmatrix_set_map(segment->obj, segment->map);
+    lv_buttonmatrix_set_button_ctrl_all(segment->obj, LV_BUTTONMATRIX_CTRL_CHECKABLE | LV_BUTTONMATRIX_CTRL_CLICK_TRIG);
+    lv_buttonmatrix_set_button_ctrl(segment->obj, segment->selected, LV_BUTTONMATRIX_CTRL_CHECKED);
+}
+static void segment_select(lv_obj_t *obj, unsigned index) {
+    segment_t *segment = segment_of(obj);
+    if (!segment || index >= segment->count) return;
+    lv_buttonmatrix_clear_button_ctrl_all(obj, LV_BUTTONMATRIX_CTRL_CHECKED);
+    segment->selected = (uint8_t)index; lv_buttonmatrix_set_button_ctrl(obj, index, LV_BUTTONMATRIX_CTRL_CHECKED);
+}
+static unsigned segment_value(lv_obj_t *obj) {
+    segment_t *segment = segment_of(obj);
+    if (!segment) return 0;
+    uint32_t pressed = lv_buttonmatrix_get_selected_button(obj);
+    if (pressed != LV_BUTTONMATRIX_BUTTON_NONE && pressed < segment->count) segment->selected = (uint8_t)pressed;
+    return segment->selected;
+}
+static lv_obj_t *segmented(lv_obj_t *parent, const m3_text_t *ids, const char *const *fixed, unsigned count, unsigned selected, lv_event_cb_t callback) {
+    lv_obj_t *obj = lv_buttonmatrix_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_add_style(obj, &st_seg, 0);
+    lv_obj_add_style(obj, &st_seg_item, LV_PART_ITEMS);
+    lv_obj_add_style(obj, &st_seg_checked, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_buttonmatrix_set_one_checked(obj, true);
+    if (segment_count < sizeof(segments) / sizeof(segments[0]) && count <= 4) {
+        segment_t *segment = &segments[segment_count++];
+        segment->obj = obj; segment->fixed = fixed; segment->count = (uint8_t)count; segment->selected = (uint8_t)selected;
+        for (unsigned i = 0; i < count; ++i) segment->ids[i] = ids ? ids[i] : T_NONE;
+        segment_refresh(segment);
+    }
+    if (callback) lv_obj_add_event_cb(obj, callback, LV_EVENT_VALUE_CHANGED, NULL);
+    return obj;
+}
+static void volume_changed(lv_event_t *event);
+static lv_obj_t *volume_row(lv_obj_t *parent, unsigned index, unsigned volume) {
+    lv_obj_t *line = row(parent);
+    lv_obj_t *low = label(line, LV_SYMBOL_MUTE, MUTED); lv_obj_set_width(low, LV_SIZE_CONTENT);
+    lv_obj_t *slider = lv_slider_create(line); style_slider(slider); grow(slider);
+    lv_slider_set_range(slider, 0, 150); lv_slider_set_value(slider, volume, LV_ANIM_OFF);
+    lv_obj_add_event_cb(slider, volume_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *value = label(line, "", TEXT); lv_obj_set_width(value, 56);
+    lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
+    volume_sliders[index] = slider; volume_values[index] = value;
+    return line;
+}
+
+static lv_obj_t *music_source, *music_repeat, *music_title, *music_info, *music_time, *music_bar, *music_pause_button;
+static lv_obj_t *music_rows[M3_MUSIC_ROWS], *music_labels[M3_MUSIC_ROWS], *music_empty;
+static M3_PSRAM_BSS m3_music_state_t music_snapshot;
+static unsigned seen_music = ~0u;
+static void music_refresh_event(lv_event_t *event) {
+    (void)event; m3_music_refresh(segment_value(music_source) == 0);
+    set_text(music_info, tr(T_MUSIC_SCAN));
+}
+static void music_page_event(lv_event_t *event) { m3_music_page((intptr_t)lv_event_get_user_data(event)); }
+static void music_track_event(lv_event_t *event) {
+    unsigned row_index = (uintptr_t)lv_event_get_user_data(event);
+    if (row_index < music_snapshot.shown && !m3_music_play(music_snapshot.items[row_index].index, music_snapshot.catalog_revision))
+        set_text(music_info, tr(T_MUSIC_FAIL));
+}
+static void music_step_event(lv_event_t *event) { if (!m3_music_next((intptr_t)lv_event_get_user_data(event))) set_text(music_info, tr(T_MUSIC_FAIL)); }
+static void music_pause_event(lv_event_t *event) { (void)event; m3_music_pause(); }
+static void music_stop_event(lv_event_t *event) { (void)event; m3_music_stop(); }
+static void music_repeat_event(lv_event_t *event) { (void)event; m3_music_repeat(segment_value(music_repeat) == 1); }
+static void update_music(void) {
+    m3_music_state(&music_snapshot);
+    if (seen_music == music_snapshot.revision && current_app != APP_MUSIC) return;
+    seen_music = music_snapshot.revision;
+    set_text(music_title, music_snapshot.title[0] ? music_snapshot.title : tr(T_MUSIC_EMPTY));
+    set_text(music_info, music_snapshot.active && music_snapshot.paused ? tr(T_MUSIC_PAUSE) : status_text(music_snapshot.message));
+    lv_bar_set_value(music_bar, music_snapshot.progress, LV_ANIM_OFF);
+    char time[80]; snprintf(time, sizeof(time), tr(T_MUSIC_STATUS), music_snapshot.seconds / 60, music_snapshot.seconds % 60,
+        music_snapshot.progress, music_snapshot.count); set_text(music_time, time);
+    lv_label_set_text(lv_obj_get_child(music_pause_button, 0), tr(music_snapshot.active && music_snapshot.paused ? T_MUSIC_RESUME : T_MUSIC_PAUSE));
+    for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
+        if (i < music_snapshot.shown) {
+            set_text(music_labels[i], music_snapshot.items[i].name);
+            lv_obj_remove_flag(music_rows[i], LV_OBJ_FLAG_HIDDEN);
+            set_bg(music_rows[i], music_snapshot.active && music_snapshot.items[i].index == music_snapshot.selected ? 0x164653 : SURFACE_HI);
+        } else lv_obj_add_flag(music_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (music_snapshot.count) lv_obj_add_flag(music_empty, LV_OBJ_FLAG_HIDDEN); else lv_obj_remove_flag(music_empty, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ---------- Navigation. ---------- */
+static void keyboard_motion(void *obj, int32_t y) { lv_obj_set_style_translate_y(obj, y, 0); }
+static void home_feedback(void *obj, int32_t progress) {
+    home_progress = progress;
+    int32_t width = 120 + progress;
+    lv_obj_set_size(obj, width, 5 + progress / 20);
+    lv_obj_set_pos(obj, (480 - width) / 2, 30 - progress / 20);
+    lv_obj_set_style_bg_color(obj, lv_color_mix(lv_color_hex(CYAN), lv_color_hex(MAGENTA), progress * 255 / 100), 0);
+    lv_obj_set_style_shadow_color(obj, lv_color_hex(CYAN), 0);
+    lv_obj_set_style_shadow_width(obj, progress / 5, 0);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_50, 0);
+}
+static void home_settle(void) {
+    lv_anim_delete(home_pill, home_feedback);
+    lv_anim_t animation; lv_anim_init(&animation);
+    lv_anim_set_var(&animation, home_pill); lv_anim_set_exec_cb(&animation, home_feedback);
+    lv_anim_set_values(&animation, home_progress, 0); lv_anim_set_duration(&animation, 220);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
+}
+static void hide_keyboard(void) {
+    lv_obj_t *field = lv_keyboard_get_textarea(keyboard);
+    if (field) lv_obj_remove_state(field, LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(keyboard, NULL);
+    lv_anim_delete(keyboard, keyboard_motion);
+    keyboard_motion(keyboard, 0);
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_height(viewport, HOME_TOP - (current_app == APP_HOME ? 44 : CONTENT_TOP));
+}
+/* Translation only: page-wide opacity would force a full-screen layer on every frame. */
+static void page_motion(void *obj, int32_t x) { lv_obj_set_style_translate_x(obj, x, 0); }
+static void show_app(app_id_t app) {
+    if (app >= APP_COUNT) return;
+    if (current_app == APP_TUBE && app != APP_TUBE) tube_leave();
+    if (voice_target) { m3_audio_stop(); voice_target = NULL; }
+    if (voice_panel) lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
+    if (shade) shade_set(false);
+    hide_keyboard();
+    swipe_started = false;
+    home_settle();
+    for (unsigned i = 0; i < APP_COUNT; ++i) {
+        lv_anim_delete(pages[i], page_motion);
+        page_motion(pages[i], 0);
+        if (i == app) lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    current_app = app;
+    if (app == APP_HOME && home_tiles) {
+        home_index = 1;
+        lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
+    }
+    home_page_update();
+    if (app == APP_MUSIC && !music_snapshot.catalog_revision) m3_music_refresh(true);
+    bool home = app == APP_HOME;
+    if (home) {
+        lv_obj_add_flag(back_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(app_title, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(home_hint, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(back_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(app_title, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(home_hint, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_y(pages[app], 0, LV_ANIM_OFF);
+    }
+    lv_obj_set_y(viewport, home ? 44 : CONTENT_TOP);
+    lv_obj_set_height(viewport, HOME_TOP - (home ? 44 : CONTENT_TOP));
+    lv_label_set_text(app_title, tr(app_names[app]));
+    lv_anim_t animation; lv_anim_init(&animation);
+    lv_anim_set_var(&animation, pages[app]); lv_anim_set_exec_cb(&animation, page_motion);
+    lv_anim_set_values(&animation, home ? 0 : 36, 0); lv_anim_set_duration(&animation, 180);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
+}
+static void launch_app(lv_event_t *event) { show_app((app_id_t)(uintptr_t)lv_event_get_user_data(event)); }
+static void go_home(lv_event_t *event) { (void)event; show_app(APP_HOME); }
+/* Only a drag originating in the bottom strip is a home gesture. Scrolling
+ * files/forms and dragging the keyboard cannot accidentally exit an app. */
+static bool home_swipe(int dx, int dy) { return dy <= -70 && dx >= -90 && dx <= 90; }
+static void home_gesture(lv_event_t *event) {
+    lv_indev_t *input = lv_indev_active();
+    if (!input) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    lv_point_t point; lv_indev_get_point(input, &point);
+    if (code == LV_EVENT_PRESSED) {
+        swipe_origin = point; swipe_started = point.y >= HOME_TOP;
+        if (swipe_started) {
+            lv_anim_delete(home_pill, home_feedback);
+            home_feedback(home_pill, 10);
+        }
+    } else if (code == LV_EVENT_PRESSING && swipe_started) {
+        int dx = point.x - swipe_origin.x, dy = point.y - swipe_origin.y;
+        int progress = dx < -90 || dx > 90 || dy >= 0 ? 0 : -dy * 100 / 70;
+        if (progress > 100) progress = 100;
+        home_feedback(home_pill, progress);
+        if (home_swipe(dx, dy)) {
+            swipe_started = false; show_app(APP_HOME);
+        }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        if (swipe_started) home_settle();
+        swipe_started = false;
+    }
+}
+
+/* ---------- Keyboard. Function keys use LVGL symbols, so keycaps stay language-neutral. ---------- */
+#define KEY_SHIFT LV_SYMBOL_UP
+#define KEY_DEL LV_SYMBOL_BACKSPACE
+#define KEY_HIDE LV_SYMBOL_KEYBOARD
+#define KEY_OK LV_SYMBOL_OK
+#define KEY_KO "한"
+#define KEY_JA "かな"
+#define KEY_KATA "カナ"
+#define KEY_DAKU "゛"
+#define KEY_SEMI "゜"
+#define KEY_SMALL "小"
+#define KEY_EN "ABC"
+#define KEY_SYM "?123"
+#define KEY_SPACE " "
+static const char *const keys_lower[] = {
+    "q","w","e","r","t","y","u","i","o","p","\n",
+    "a","s","d","f","g","h","j","k","l","\n",
+    KEY_SHIFT,"z","x","c","v","b","n","m",KEY_DEL,"\n",
+    KEY_SYM,KEY_KO,KEY_JA,KEY_SPACE,".",KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_upper[] = {
+    "Q","W","E","R","T","Y","U","I","O","P","\n",
+    "A","S","D","F","G","H","J","K","L","\n",
+    KEY_SHIFT,"Z","X","C","V","B","N","M",KEY_DEL,"\n",
+    KEY_SYM,KEY_KO,KEY_JA,KEY_SPACE,".",KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_special[] = {
+    "1","2","3","4","5","6","7","8","9","0","\n",
+    "!","@","#","$","%","^","&","*","(",")","\n",
+    "_","-","+","=","/","?",":",";","\"","'","\n",
+    "[","]","{","}","\\","|","<",">",",","~","`","\n",
+    KEY_EN,KEY_KO,KEY_JA,KEY_SPACE,".",KEY_DEL,KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_number[] = {
+    "1","2","3","\n","4","5","6","\n","7","8","9","\n",
+    ".","0",KEY_DEL,"\n",KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_korean[] = {
+    "ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ","ㅔ","\n",
+    "ㅁ","ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ","\n",
+    KEY_SHIFT,"ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ",KEY_DEL,"\n",
+    KEY_SYM,KEY_EN,KEY_JA,KEY_SPACE,".",KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_korean_shift[] = {
+    "ㅃ","ㅉ","ㄸ","ㄲ","ㅆ","ㅛ","ㅕ","ㅑ","ㅒ","ㅖ","\n",
+    "ㅁ","ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ","\n",
+    KEY_SHIFT,"ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ",KEY_DEL,"\n",
+    KEY_SYM,KEY_EN,KEY_JA,KEY_SPACE,".",KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_hiragana[] = {
+    "あ","か","さ","た","な","は","ま","や","ら","わ","\n",
+    "い","き","し","ち","に","ひ","み","ゆ","り","を","\n",
+    "う","く","す","つ","ぬ","ふ","む","よ","る","ん","\n",
+    "え","け","せ","て","ね","へ","め","ゃ","れ","ー","\n",
+    "お","こ","そ","と","の","ほ","も","ゅ","ろ","ょ","\n",
+    KEY_KATA,KEY_DAKU,KEY_SEMI,KEY_SMALL,KEY_EN,KEY_KO,KEY_SPACE,KEY_DEL,KEY_HIDE,KEY_OK,""
+};
+static const char *const keys_katakana[] = {
+    "ア","カ","サ","タ","ナ","ハ","マ","ヤ","ラ","ワ","\n",
+    "イ","キ","シ","チ","ニ","ヒ","ミ","ユ","リ","ヲ","\n",
+    "ウ","ク","ス","ツ","ヌ","フ","ム","ヨ","ル","ン","\n",
+    "エ","ケ","セ","テ","ネ","ヘ","メ","ャ","レ","ー","\n",
+    "オ","コ","ソ","ト","ノ","ホ","モ","ュ","ロ","ョ","\n",
+    KEY_JA,KEY_DAKU,KEY_SEMI,KEY_SMALL,KEY_EN,KEY_KO,KEY_SPACE,KEY_DEL,KEY_HIDE,KEY_OK,""
+};
+static M3_PSRAM_BSS lv_buttonmatrix_ctrl_t key_controls[8][64];
+static bool function_key(const char *key) {
+    return !strcmp(key, KEY_SHIFT) || !strcmp(key, KEY_DEL) || !strcmp(key, KEY_HIDE) || !strcmp(key, KEY_OK) ||
+        !strcmp(key, KEY_KO) || !strcmp(key, KEY_EN) || !strcmp(key, KEY_SYM) || !strcmp(key, KEY_JA) ||
+        !strcmp(key, KEY_KATA) || !strcmp(key, KEY_DAKU) || !strcmp(key, KEY_SEMI) || !strcmp(key, KEY_SMALL);
+}
+static void kana_edit(lv_obj_t *field, unsigned kind) {
+    char text[385]; const char *value = lv_textarea_get_text(field);
+    if (strlen(value) >= sizeof(text)) return;
+    memcpy(text, value, strlen(value) + 1);
+    if (m3_kana_edit(text, sizeof(text), kind)) {
+        lv_textarea_set_text(field, text); lv_textarea_set_cursor_pos(field, LV_TEXTAREA_CURSOR_LAST);
+    }
+}
+static void keyboard_key(lv_event_t *event) {
+    (void)event;
+    uint32_t index = lv_buttonmatrix_get_selected_button(keyboard);
+    if (index == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    const char *key = lv_buttonmatrix_get_button_text(keyboard, index);
+    lv_obj_t *field = lv_keyboard_get_textarea(keyboard);
+    if (!key || !field) return;
+    lv_keyboard_mode_t mode = lv_keyboard_get_mode(keyboard);
+    if (!strcmp(key, KEY_OK)) { hide_keyboard(); lv_obj_send_event(field, LV_EVENT_READY, NULL); }
+    else if (!strcmp(key, KEY_HIDE)) hide_keyboard();
+    else if (!strcmp(key, KEY_KO)) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_USER_1);
+    else if (!strcmp(key, KEY_JA)) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_USER_3);
+    else if (!strcmp(key, KEY_KATA)) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_USER_4);
+    else if (!strcmp(key, KEY_DAKU)) kana_edit(field, M3_KANA_VOICED);
+    else if (!strcmp(key, KEY_SEMI)) kana_edit(field, M3_KANA_SEMIVOICED);
+    else if (!strcmp(key, KEY_SMALL)) kana_edit(field, M3_KANA_SMALL);
+    else if (!strcmp(key, KEY_EN)) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    else if (!strcmp(key, KEY_SYM)) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_SPECIAL);
+    else if (!strcmp(key, KEY_SHIFT)) lv_keyboard_set_mode(keyboard,
+        mode == LV_KEYBOARD_MODE_USER_1 ? LV_KEYBOARD_MODE_USER_2 : mode == LV_KEYBOARD_MODE_USER_2 ? LV_KEYBOARD_MODE_USER_1 :
+        mode == LV_KEYBOARD_MODE_TEXT_LOWER ? LV_KEYBOARD_MODE_TEXT_UPPER : LV_KEYBOARD_MODE_TEXT_LOWER);
+    else if (!strcmp(key, KEY_DEL)) lv_textarea_delete_char(field);
+    else if (mode == LV_KEYBOARD_MODE_USER_3 || mode == LV_KEYBOARD_MODE_USER_4) lv_textarea_add_text(field, key);
+    else if ((unsigned char)key[0] >= 128) {
+        char text[385];
+        const char *current = lv_textarea_get_text(field);
+        if (strlen(current) >= sizeof(text)) return;
+        snprintf(text, sizeof(text), "%s", current);
+        if (m3_hangul_append(text, sizeof(text), key)) {
+            lv_textarea_set_text(field, text); lv_textarea_set_cursor_pos(field, LV_TEXTAREA_CURSOR_LAST);
+        }
+    } else lv_textarea_add_text(field, key);
+}
+static void configure_keyboard(void) {
+    static const char *const *maps[] = {keys_lower, keys_upper, keys_special, keys_number, keys_korean, keys_korean_shift, keys_hiragana, keys_katakana};
+    static const lv_keyboard_mode_t modes[] = {LV_KEYBOARD_MODE_TEXT_LOWER, LV_KEYBOARD_MODE_TEXT_UPPER,
+        LV_KEYBOARD_MODE_SPECIAL, LV_KEYBOARD_MODE_NUMBER, LV_KEYBOARD_MODE_USER_1, LV_KEYBOARD_MODE_USER_2, LV_KEYBOARD_MODE_USER_3, LV_KEYBOARD_MODE_USER_4};
+    for (unsigned mode = 0; mode < 8; ++mode) {
+        unsigned count = 0;
+        for (unsigned key = 0; maps[mode][key][0]; ++key) {
+            const char *cap = maps[mode][key];
+            if (!strcmp(cap, "\n")) continue;
+            unsigned width = mode == 3 ? 1 : !strcmp(cap, KEY_SPACE) ? 6 : function_key(cap) ? 3 : 2;
+            if (mode == 2 && width == 2) width = 1; /* Symbol rows hold up to 11 keys. */
+            bool upper = mode == 1 && !strcmp(cap, KEY_SHIFT), korean_shift = mode == 5 && !strcmp(cap, KEY_SHIFT);
+            key_controls[mode][count++] = width | LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT |
+                (function_key(cap) && !upper && !korean_shift ? LV_BUTTONMATRIX_CTRL_CHECKED : 0);
+        }
+        lv_keyboard_set_map(keyboard, modes[mode], maps[mode], key_controls[mode]);
+    }
+    lv_obj_remove_event_cb(keyboard, lv_keyboard_def_event_cb);
+    lv_obj_add_event_cb(keyboard, keyboard_key, LV_EVENT_VALUE_CHANGED, NULL);
+}
+static void edit_field(lv_event_t *event) {
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_VALUE_CHANGED) { form_dirty = true; return; }
+    if (code != LV_EVENT_FOCUSED && code != LV_EVENT_CLICKED && code != LV_EVENT_PRESSED) return;
+    lv_obj_t *field = lv_event_get_current_target(event);
+    bool opening = lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    uintptr_t input_mode = (uintptr_t)lv_event_get_user_data(event);
+    lv_keyboard_set_mode(keyboard, input_mode == 2 ? (m3_i18n_language() == M3_LANG_JA ? LV_KEYBOARD_MODE_USER_3 : LV_KEYBOARD_MODE_USER_1) :
+        input_mode == 1 ? LV_KEYBOARD_MODE_NUMBER : LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(keyboard, field);
+    lv_obj_remove_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    /* The keyboard constructor uses BOTTOM_MID alignment. Coordinates below
+     * must be absolute screen coordinates, not offsets from that alignment. */
+    lv_obj_align(keyboard, LV_ALIGN_TOP_LEFT, 0, HOME_TOP - KEYBOARD_HEIGHT);
+    lv_obj_move_to_index(keyboard, -1);
+    lv_obj_move_to_index(home_strip, -1);
+    lv_obj_set_height(viewport, HOME_TOP - CONTENT_TOP - KEYBOARD_HEIGHT);
+    lv_obj_update_layout(viewport);
+    lv_obj_scroll_to_view_recursive(field, LV_ANIM_ON);
+    if (opening) {
+        lv_anim_delete(keyboard, keyboard_motion);
+        lv_anim_t animation; lv_anim_init(&animation);
+        lv_anim_set_var(&animation, keyboard); lv_anim_set_exec_cb(&animation, keyboard_motion);
+        lv_anim_set_values(&animation, KEYBOARD_HEIGHT, 0); lv_anim_set_duration(&animation, 180);
+        lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
+    }
+}
+static lv_obj_t *icon_part(lv_obj_t *parent, int x, int y, int w, int h, int radius);
+/* Microphone glyph drawn from shapes; the built-in symbol set has no microphone. */
+static lv_obj_t *mic_button(lv_obj_t *parent, lv_obj_t *field) {
+    lv_obj_t *obj = icon_button(parent, NULL, voice_input, field);
+    icon_part(obj, 21, 11, 10, 19, 5);
+    lv_obj_t *cradle = bare(obj); lv_obj_set_pos(cradle, 16, 20); lv_obj_set_size(cradle, 20, 16);
+    lv_obj_set_style_border_width(cradle, 2, 0); lv_obj_set_style_border_color(cradle, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_border_side(cradle, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT | LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_radius(cradle, 9, 0);
+    icon_part(obj, 25, 36, 2, 5, 1); icon_part(obj, 20, 40, 12, 2, 1);
+    return obj;
+}
+typedef enum { INPUT_TEXT, INPUT_NUMBER, INPUT_KOREAN } input_mode_t;
+/* Caption + field. Voice input is offered only where speech is a sensible way to type. */
+static lv_obj_t *input_field(lv_obj_t *parent, m3_text_t title, unsigned length, input_mode_t mode, bool voice) {
+    if (title != T_NONE) caption(parent, title);
+    lv_obj_t *line = row(parent);
+    lv_obj_t *field = lv_textarea_create(line);
+    lv_obj_add_style(field, &st_field, 0); lv_obj_add_style(field, &st_field_focus, LV_STATE_FOCUSED);
+    lv_obj_add_flag(field, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    grow(field); lv_obj_set_height(field, 52);
+    lv_textarea_set_one_line(field, true); lv_textarea_set_max_length(field, length);
+    if (mode == INPUT_NUMBER) lv_textarea_set_accepted_chars(field, "0123456789.");
+    lv_obj_add_event_cb(field, edit_field, LV_EVENT_ALL, (void *)(uintptr_t)mode);
+    if (voice) mic_button(line, field);
+    return field;
+}
+
+/* ---------- Voice input sheet. ---------- */
+static void voice_retry(lv_event_t *event) {
+    (void)event;
+    static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice); if (voice.busy) return;
+    if (!m3_audio_voice()) lv_label_set_text(voice_info, tr(T_VOICE_START_FAIL));
+}
+static void voice_input(lv_event_t *event) {
+    static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    if (voice.busy) return;
+    seen_voice = voice.revision;
+    hide_keyboard();
+    voice_target = lv_event_get_user_data(event);
+    lv_label_set_text(voice_text, "");
+    lv_label_set_text(voice_info, tr(voice.provider ? T_VOICE_GEMINI : T_VOICE_OPENAI));
+    lv_obj_remove_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_to_index(voice_panel, -1); lv_obj_move_to_index(home_strip, -1);
+    voice_retry(NULL);
+}
+static void voice_finish(lv_event_t *event) { (void)event; m3_voice_finish(); }
+static void voice_cancel(lv_event_t *event) {
+    (void)event; m3_audio_stop(); voice_target = NULL;
+    lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void voice_settings(lv_event_t *event) { (void)event; show_app(APP_SYSTEM); }
+static void voice_apply(lv_event_t *event) {
+    (void)event;
+    static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    if (!voice_target || voice.busy || !voice.text[0]) return;
+    const char *accepted = lv_textarea_get_accepted_chars(voice_target);
+    unsigned characters = 0;
+    for (const unsigned char *p = (const unsigned char *)voice.text; *p; ++p) {
+        if ((*p & 0xc0) != 0x80) ++characters;
+        if (accepted && !strchr(accepted, *p)) {
+            lv_label_set_text(voice_info, tr(T_VOICE_DIGITS)); return;
+        }
+    }
+    unsigned maximum = lv_textarea_get_max_length(voice_target);
+    if ((maximum && characters > maximum) || (voice_target == ssid_field && strlen(voice.text) > 32)) {
+        lv_label_set_text(voice_info, tr(T_VOICE_TOO_LONG)); return;
+    }
+    lv_textarea_set_text(voice_target, voice.text);
+    voice_cancel(NULL);
+}
+static void voice_key_status(void) {
+    static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    lv_label_set_text(voice_key_info, tr(voice.key_ready ? T_STT_READY : T_STT_NEEDS_KEY));
+    lv_obj_set_style_text_color(voice_key_info, lv_color_hex(voice.key_ready ? GREEN : AMBER), 0);
+}
+static void voice_save_key(lv_event_t *event) {
+    (void)event; hide_keyboard();
+    if (!m3_voice_set_key(lv_textarea_get_text(voice_key))) {
+        lv_label_set_text(voice_key_info, tr(T_STT_KEY_FAIL)); return;
+    }
+    lv_textarea_set_text(voice_key, "");
+    voice_key_status();
+}
+static void voice_provider_changed(lv_event_t *event) {
+    (void)event;
+    if (!m3_voice_set_provider(segment_value(voice_provider))) {
+        static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+        segment_select(voice_provider, voice.provider);
+        lv_label_set_text(voice_key_info, tr(T_STT_BUSY)); return;
+    }
+    voice_key_status();
+}
+static void language_changed(lv_event_t *event) {
+    (void)event;
+    m3_lang_t language = (m3_lang_t)segment_value(language_tabs);
+    if (language != m3_i18n_language() && m3_i18n_set_language(language)) apply_language();
+}
+
+/* ---------- AI agent. ---------- */
+static void agent_send(lv_event_t *event) {
+    (void)event; hide_keyboard();
+    if (!m3_agent_submit(lv_textarea_get_text(agent_prompt), segment_value(agent_model))) {
+        static M3_PSRAM_BSS m3_agent_state_t agent; m3_agent_state(&agent);
+        lv_label_set_text(agent_info, tr(!agent.ready ? T_AGENT_UNAVAILABLE : !agent.key_ready ? T_AGENT_NO_KEY :
+            agent.busy ? T_AGENT_BUSY : T_AGENT_OFFLINE));
+    } else lv_textarea_set_text(agent_prompt, "");
+}
+static void agent_cancel(lv_event_t *event) { (void)event; m3_agent_cancel(false); }
+static void agent_clear(lv_event_t *event) { (void)event; m3_agent_cancel(true); }
+static void agent_read(lv_event_t *event) {
+    (void)event; static M3_PSRAM_BSS m3_agent_state_t agent; m3_agent_state(&agent);
+    static char speech[385]; size_t length = strnlen(agent.answer, sizeof(speech) - 1);
+    while (length && ((unsigned char)agent.answer[length] & 0xc0) == 0x80) --length;
+    memcpy(speech, agent.answer, length); speech[length] = 0;
+    if (!m3_audio_speak(speech, 165)) lv_label_set_text(agent_info, tr(T_AGENT_TTS_FAIL));
+}
+
+/* ---------- Wi-Fi. ---------- */
+static void static_changed(lv_event_t *event) {
+    (void)event; form_dirty = true;
+    if (lv_obj_has_state(static_switch, LV_STATE_CHECKED)) lv_obj_remove_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
+}
+static void password_visibility(lv_event_t *event) {
+    bool hidden = !lv_textarea_get_password_mode(pass_field);
+    lv_textarea_set_password_mode(pass_field, hidden);
+    lv_obj_t *icon = lv_obj_get_child(lv_event_get_current_target(event), 0);
+    lv_label_set_text(icon, hidden ? LV_SYMBOL_EYE_OPEN : LV_SYMBOL_EYE_CLOSE);
+}
+static void select_network(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index >= (unsigned)snapshot.scan_count) return;
+    hide_keyboard();
+    lv_textarea_set_text(ssid_field, snapshot.networks[index].ssid);
+    lv_textarea_set_text(pass_field, "");
+    form_dirty = true;
+    /* Move straight to the password so one tap selects and continues. */
+    lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
+}
+static void wifi_feedback(const char *message, uint32_t color) {
+    lv_label_set_text(wifi_info, message);
+    lv_obj_set_style_text_color(wifi_info, lv_color_hex(color), 0);
+    lv_obj_scroll_to_view_recursive(wifi_info, LV_ANIM_ON);
+}
+static void wifi_action(lv_event_t *event) {
+    m3_wifi_action_t action = (m3_wifi_action_t)(uintptr_t)lv_event_get_user_data(event);
+    network_settings_t settings = {.version = 1};
+    hide_keyboard();
+    if (action == M3_WIFI_CONNECT) {
+        const char *ssid = lv_textarea_get_text(ssid_field), *pass = lv_textarea_get_text(pass_field);
+        if (strlen(ssid) > 32 || strlen(pass) > 63) {
+            wifi_feedback(tr(T_WIFI_TOO_LONG), RED); return;
+        }
+        snprintf(settings.ssid, sizeof(settings.ssid), "%s", ssid);
+        snprintf(settings.pass, sizeof(settings.pass), "%s", pass);
+        settings.use_static = lv_obj_has_state(static_switch, LV_STATE_CHECKED);
+        snprintf(settings.ip, sizeof(settings.ip), "%s", lv_textarea_get_text(ip_field));
+        snprintf(settings.gateway, sizeof(settings.gateway), "%s", lv_textarea_get_text(gateway_field));
+        snprintf(settings.netmask, sizeof(settings.netmask), "%s", lv_textarea_get_text(mask_field));
+        snprintf(settings.dns, sizeof(settings.dns), "%s", lv_textarea_get_text(dns_field));
+        if (!settings.dns[0]) snprintf(settings.dns, sizeof(settings.dns), "%s", settings.gateway);
+        if (!network_settings_valid(&settings)) {
+            memset(&settings, 0, sizeof(settings));
+            wifi_feedback(tr(T_WIFI_INVALID), RED); return;
+        }
+    }
+    bool accepted = m3_runtime_wifi(action, action == M3_WIFI_CONNECT ? &settings : NULL);
+    memset(&settings, 0, sizeof(settings));
+    if (accepted) {
+        if (action == M3_WIFI_CONNECT) {
+            lv_textarea_set_text(pass_field, ""); lv_textarea_set_password_mode(pass_field, true);
+        }
+        wifi_feedback(tr(T_WIFI_QUEUED), CYAN);
+    } else wifi_feedback(tr(T_WIFI_BUSY), AMBER);
+}
+static unsigned wifi_bars(int rssi) {
+    return rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -75 ? 2 : rssi >= -85 ? 1 : 0;
+}
+static void update_wifi(void) {
+    static bool was_busy;
+    if (snapshot.wifi_busy || was_busy || seen_wifi != snapshot.wifi_revision) {
+        seen_wifi = snapshot.wifi_revision;
+        set_text(wifi_info, status_text(snapshot.wifi_message));
+        set_ink(wifi_info, snapshot.wifi_busy ? AMBER : CYAN);
+    }
+    was_busy = snapshot.wifi_busy;
+    for (unsigned i = 0; i < 3; ++i) {
+        if (!snapshot.initialized || !snapshot.wifi_ready || snapshot.wifi_busy) lv_obj_add_state(wifi_actions[i], LV_STATE_DISABLED);
+        else lv_obj_remove_state(wifi_actions[i], LV_STATE_DISABLED);
+    }
+    if (seen_settings != snapshot.settings_revision) {
+        seen_settings = snapshot.settings_revision;
+        if (!form_dirty) {
+            lv_textarea_set_text(ssid_field, snapshot.settings.ssid);
+            lv_textarea_set_text(ip_field, snapshot.settings.ip);
+            lv_textarea_set_text(gateway_field, snapshot.settings.gateway);
+            lv_textarea_set_text(mask_field, snapshot.settings.netmask[0] ? snapshot.settings.netmask : "255.255.255.0");
+            lv_textarea_set_text(dns_field, snapshot.settings.dns);
+            if (snapshot.settings.use_static) {
+                lv_obj_add_state(static_switch, LV_STATE_CHECKED);
+                lv_obj_remove_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
+            }
+            form_dirty = false;
+        }
+    }
+    if (seen_scan != snapshot.scan_revision) {
+        seen_scan = snapshot.scan_revision;
+        set_text(wifi_info, status_text(snapshot.wifi_message));
+        for (unsigned i = 0; i < M3_WIFI_RESULTS; ++i) {
+            if (i < (unsigned)snapshot.scan_count) {
+                char text[64];
+                unsigned bars = wifi_bars(snapshot.networks[i].rssi);
+                lv_obj_set_style_text_color(lv_obj_get_child(scan_buttons[i], 0),
+                    lv_color_hex(bars >= 3 ? GREEN : bars == 2 ? AMBER : RED), 0);
+                lv_label_set_text(lv_obj_get_child(scan_buttons[i], 1), snapshot.networks[i].ssid);
+                snprintf(text, sizeof(text), "%d dBm  %s", snapshot.networks[i].rssi,
+                    tr(snapshot.networks[i].authmode == WIFI_AUTH_OPEN ? T_NET_OPEN : T_NET_SECURED));
+                lv_label_set_text(lv_obj_get_child(scan_buttons[i], 2), text);
+                lv_obj_remove_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
+            } else lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+/* ---------- Audio, radio and speech. ---------- */
+static void test_audio(lv_event_t *event) {
+    (void)event;
+    if (!m3_audio_test()) lv_label_set_text(audio_info, tr(T_AUDIO_BUSY));
+}
+static void stop_audio(lv_event_t *event) { (void)event; radio_pending = false; m3_audio_stop(); }
+static void volume_changed(lv_event_t *event) {
+    unsigned value = (unsigned)lv_slider_get_value(lv_event_get_target(event));
+    m3_audio_volume(value);
+    shown_volume = 1000; /* Next metrics tick mirrors the value to every volume row. */
+}
+static void radio_mark(int index) {
+    radio_selected = index;
+    for (unsigned i = 0; i < sizeof(radio_stations) / sizeof(radio_stations[0]); ++i) {
+        if ((int)i == index) lv_obj_add_state(station_buttons[i], LV_STATE_CHECKED);
+        else lv_obj_remove_state(station_buttons[i], LV_STATE_CHECKED);
+    }
+    lv_label_set_text(radio_now, index >= 0 ? radio_stations[index].name : lv_textarea_get_text(radio_url));
+}
+static void start_radio(lv_event_t *event) {
+    (void)event; hide_keyboard();
+    if (!m3_audio_radio(lv_textarea_get_text(radio_url), segment_value(radio_codec) == 1))
+        lv_label_set_text(radio_info, tr(T_RADIO_FAIL));
+    else lv_label_set_text(radio_info, tr(T_RADIO_QUEUED));
+}
+/* Stopping is asynchronous. A new station waits for the old stream to finish. */
+static void radio_select(unsigned index);
+static void play_radio(void) {
+    m3_audio_state_t audio; m3_audio_state(&audio);
+    if (!audio.playing) { radio_pending = false; start_radio(NULL); return; }
+    m3_audio_stop();
+    radio_pending = true; radio_pending_until = esp_timer_get_time() + 6000000;
+    lv_label_set_text(radio_info, tr(T_RADIO_SWITCHING));
+}
+static void radio_preset(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index >= sizeof(radio_stations) / sizeof(radio_stations[0])) return;
+    radio_select(index);
+}
+static void radio_select(unsigned index) {
+    hide_keyboard();
+    lv_textarea_set_text(radio_url, radio_stations[index].url);
+    segment_select(radio_codec, radio_stations[index].aac ? 1 : 0);
+    radio_mark((int)index);
+}
+static void station_tap(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index < sizeof(radio_stations) / sizeof(radio_stations[0])) { radio_select(index); play_radio(); }
+}
+static void play_selected(lv_event_t *event) { (void)event; play_radio(); }
+static void play_custom(lv_event_t *event) { (void)event; radio_mark(-1); play_radio(); }
+static void speak_text(lv_event_t *event) {
+    (void)event; hide_keyboard();
+    if (!m3_audio_speak(lv_textarea_get_text(tts_text), (unsigned)lv_slider_get_value(tts_speed)))
+        lv_label_set_text(tts_info, tr(T_TTS_FAIL));
+    else lv_label_set_text(tts_info, tr(T_TTS_QUEUED));
+}
+static void tts_sample(lv_event_t *event) {
+    static const char *samples[] = {"안녕하세요. 한국어 음성 합성 시험입니다.",
+        "무선 인터넷에 연결되었습니다.", "하나 둘 셋 넷 다섯. 스피커를 확인합니다."};
+    lv_textarea_set_text(tts_text, samples[(uintptr_t)lv_event_get_user_data(event) % 3]);
+}
+static void tts_speed_label(void) {
+    char text[16]; snprintf(text, sizeof(text), "%d", (int)lv_slider_get_value(tts_speed));
+    lv_label_set_text(tts_speed_value, text);
+}
+static void tts_provider_changed(lv_event_t *event) {
+    (void)event;
+    unsigned provider = segment_value(tts_provider);
+    m3_audio_tts_provider(provider);
+    if (provider == 2) lv_obj_remove_state(tts_speed, LV_STATE_DISABLED);
+    else lv_obj_add_state(tts_speed, LV_STATE_DISABLED);
+}
+static void tts_speed_changed(lv_event_t *event) { (void)event; tts_speed_label(); }
+
+/* ---------- Games. ---------- */
+static uint32_t tile_color(uint8_t power) {
+    static const uint32_t colors[] = {SURFACE_HI, 0x2e3a4d, 0x3b4a61, 0xf59e0b, 0xf97316, 0xef4444, 0xdc2626,
+        0xeab308, 0xfacc15, 0x22c55e, 0x06b6d4, 0xa855f7};
+    return power < sizeof(colors) / sizeof(colors[0]) ? colors[power] : MAGENTA;
+}
+static void render_game(void) {
+    char text[96];
+    if (memory_game) {
+        unsigned solved = 0;
+        for (unsigned i = 0; i < 16; ++i) if (memory_solved[i]) ++solved;
+        lv_label_set_text(score_titles[0], tr(T_TURNS)); lv_label_set_text(score_titles[1], tr(T_PAIRS));
+        snprintf(text, sizeof(text), "%u", memory_turns); lv_label_set_text(score_values[0], text);
+        snprintf(text, sizeof(text), "%u / 8", solved / 2); lv_label_set_text(score_values[1], text);
+        lv_label_set_text(game_info, tr(solved == 16 ? T_GAME_CLEARED : T_GAME_MATCH));
+    } else {
+        if (game.score > best_score) best_score = game.score;
+        lv_label_set_text(score_titles[0], tr(T_SCORE)); lv_label_set_text(score_titles[1], tr(T_BEST));
+        snprintf(text, sizeof(text), "%lu", (unsigned long)game.score); lv_label_set_text(score_values[0], text);
+        snprintf(text, sizeof(text), "%u", best_score); lv_label_set_text(score_values[1], text);
+        lv_label_set_text(game_info, tr(!m3_2048_can_move(&game) ? T_GAME_OVER : game.won ? T_GAME_WON : T_GAME_SWIPE));
+    }
+    if (undo_available && !memory_game) lv_obj_remove_state(game_undo, LV_STATE_DISABLED);
+    else lv_obj_add_state(game_undo, LV_STATE_DISABLED);
+    for (unsigned i = 0; i < 16; ++i) {
+        uint32_t color = SURFACE_HI, ink = TEXT;
+        const lv_font_t *font = FONT_ICON;
+        if (memory_game) {
+            snprintf(text, sizeof(text), "%s", "?"); ink = MUTED;
+            if (memory_visible[i] || memory_solved[i]) {
+                snprintf(text, sizeof(text), "%u", memory_cards[i] + 1);
+                color = memory_solved[i] ? 0x0f5f4a : 0x7c205f; ink = TEXT;
+            }
+        } else {
+            text[0] = 0;
+            if (game.tiles[i]) {
+                unsigned long value = (unsigned long)(UINT32_C(1) << game.tiles[i]);
+                snprintf(text, sizeof(text), "%lu", value);
+                if (value >= 1024) font = &lv_font_montserrat_20;
+                ink = game.tiles[i] <= 2 ? TEXT : 0x1a1205;
+            }
+            color = tile_color(game.tiles[i]);
+        }
+        lv_obj_t *face = lv_obj_get_child(game_tiles[i], 0);
+        lv_label_set_text(face, text);
+        lv_obj_set_style_text_font(face, font, 0); lv_obj_set_style_text_color(face, lv_color_hex(ink), 0);
+        lv_obj_set_style_bg_color(game_tiles[i], lv_color_hex(color), 0);
+    }
+}
+static void game_move(m3_game_direction_t direction) {
+    if (memory_game) return;
+    m3_2048_t previous = game;
+    if (m3_2048_move(&game, direction)) { undo_game = previous; undo_available = true; render_game(); }
+}
+static void game_direction(lv_event_t *event) { game_move((m3_game_direction_t)(uintptr_t)lv_event_get_user_data(event)); }
+static void game_touch(lv_event_t *event) {
+    if (memory_game) return;
+    lv_indev_t *input = lv_indev_active(); if (!input) return;
+    lv_point_t point; lv_indev_get_point(input, &point);
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) { game_origin = point; game_drag = true; }
+    else if (code == LV_EVENT_PRESSING && game_drag) {
+        int dx = point.x - game_origin.x, dy = point.y - game_origin.y;
+        if (abs(dx) >= 40 || abs(dy) >= 40) {
+            game_drag = false;
+            game_move(abs(dx) > abs(dy) ? (dx < 0 ? M3_GAME_LEFT : M3_GAME_RIGHT) : (dy < 0 ? M3_GAME_UP : M3_GAME_DOWN));
+        }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) game_drag = false;
+}
+static void memory_card(lv_event_t *event) {
+    if (!memory_game || memory_second >= 0) return;
+    unsigned i = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (i >= 16 || memory_solved[i] || memory_visible[i]) return;
+    memory_visible[i] = true;
+    if (memory_first < 0) memory_first = (int)i;
+    else {
+        ++memory_turns;
+        if (memory_cards[memory_first] == memory_cards[i]) {
+            memory_solved[memory_first] = memory_solved[i] = true; memory_first = -1;
+        } else { memory_second = (int)i; memory_hide_at = (uint64_t)esp_timer_get_time() + 750000; }
+    }
+    render_game();
+}
+static void new_game(lv_event_t *event) {
+    (void)event;
+    if (memory_game) {
+        memset(memory_visible, 0, sizeof(memory_visible)); memset(memory_solved, 0, sizeof(memory_solved));
+        memory_first = memory_second = -1; memory_turns = 0;
+        for (unsigned i = 0; i < 16; ++i) memory_cards[i] = i / 2;
+        for (unsigned i = 15; i; --i) { unsigned other = esp_random() % (i + 1); uint8_t value = memory_cards[i]; memory_cards[i] = memory_cards[other]; memory_cards[other] = value; }
+    } else { m3_2048_reset(&game, esp_random()); undo_available = false; }
+    render_game();
+}
+static void choose_game(lv_event_t *event) {
+    (void)event;
+    memory_game = segment_value(game_tabs) != 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        if (memory_game) lv_obj_add_flag(game_arrows[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(game_arrows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    new_game(NULL);
+}
+static void undo_move(lv_event_t *event) {
+    (void)event;
+    if (!memory_game && undo_available) { game = undo_game; undo_available = false; render_game(); }
+}
+
+/* ---------- Files. ---------- */
+static void browse_refresh(void) {
+    if (m3_runtime_browse(selected_sd, selected_folder, selected_offset)) {
+        for (unsigned i = 0; i < STORAGE_VIEW_ROWS; ++i) lv_obj_add_state(file_buttons[i], LV_STATE_DISABLED);
+        lv_label_set_text(file_info, tr(T_FILES_READING));
+    }
+}
+static void choose_storage(lv_event_t *event) {
+    (void)event;
+    selected_sd = segment_value(storage_tabs) != 0;
+    selected_folder[0] = 0; selected_offset = 0; browse_refresh();
+}
+static void previous_files(lv_event_t *event) {
+    (void)event; selected_offset = selected_offset >= STORAGE_VIEW_ROWS ? selected_offset - STORAGE_VIEW_ROWS : 0; browse_refresh();
+}
+static void next_files(lv_event_t *event) {
+    (void)event;
+    if (snapshot.files.offset + snapshot.files.shown < snapshot.files.count) {
+        selected_offset = snapshot.files.offset + STORAGE_VIEW_ROWS; browse_refresh();
+    }
+}
+static void parent_folder(lv_event_t *event) {
+    (void)event; char *slash = strrchr(selected_folder, '/'); if (slash) *slash = 0;
+    selected_offset = 0; browse_refresh();
+}
+static bool wav_name(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && !strcasecmp(ext, ".wav");
+}
+static void open_file(lv_event_t *event) {
+    unsigned row_index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (row_index >= snapshot.files.shown || snapshot.files.error != ESP_OK) return;
+    const storage_view_entry_t *entry = &snapshot.files.entries[row_index];
+    if (entry->directory && snapshot.browse_sd) {
+        char folder[256];
+        int length = snprintf(folder, sizeof(folder), "%s/%s", snapshot.folder, entry->name);
+        if (length <= 0 || (size_t)length >= sizeof(folder)) return;
+        snprintf(selected_folder, sizeof(selected_folder), "%s", folder);
+        selected_sd = true; selected_offset = 0; browse_refresh();
+    } else if (snapshot.browse_sd && !strcmp(snapshot.folder, "/media")) {
+        if (!m3_audio_play(entry->name)) lv_label_set_text(file_info, tr(T_FILES_PLAY_FAIL));
+    }
+}
+static void media_folder(lv_event_t *event) {
+    (void)event; selected_sd = true; strcpy(selected_folder, "/media"); selected_offset = 0; browse_refresh();
+    segment_select(storage_tabs, 1);
+    show_app(APP_FILES);
+}
+static void format_size(uint64_t bytes, char *text, size_t size) {
+    if (bytes >= 1073741824ull) snprintf(text, size, "%.1f GiB", bytes / 1073741824.0);
+    else if (bytes >= 1048576) snprintf(text, size, "%.1f MiB", bytes / 1048576.0);
+    else if (bytes >= 1024) snprintf(text, size, "%.0f KiB", bytes / 1024.0);
+    else snprintf(text, size, "%u B", (unsigned)bytes);
+}
+static void update_files(void) {
+    char text[300], used[24], total[24];
+    segment_select(storage_tabs, snapshot.browse_sd ? 1 : 0);
+    snprintf(text, sizeof(text), "%s%s", snapshot.browse_sd ? "SD" : "Flash", snapshot.folder[0] ? snapshot.folder : "/");
+    lv_label_set_text(file_path, text);
+    if (snapshot.files.error != ESP_OK) {
+        lv_label_set_text(file_info, tr(T_FILES_UNAVAILABLE)); lv_bar_set_value(file_bar, 0, LV_ANIM_OFF);
+    } else {
+        format_size(snapshot.files.used, used, sizeof(used)); format_size(snapshot.files.total, total, sizeof(total));
+        snprintf(text, sizeof(text), tr(T_FILES_USED), used, total, snapshot.files.count);
+        lv_label_set_text(file_info, text);
+        lv_bar_set_value(file_bar, snapshot.files.total ? (int32_t)(snapshot.files.used * 100 / snapshot.files.total) : 0, LV_ANIM_ON);
+    }
+    unsigned pages_total = (snapshot.files.count + STORAGE_VIEW_ROWS - 1) / STORAGE_VIEW_ROWS;
+    snprintf(text, sizeof(text), "%u / %u", snapshot.files.offset / STORAGE_VIEW_ROWS + 1, pages_total ? pages_total : 1);
+    lv_label_set_text(file_page, text);
+    bool empty = snapshot.files.error == ESP_OK && !snapshot.files.shown;
+    if (empty) lv_obj_remove_flag(file_empty, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(file_empty, LV_OBJ_FLAG_HIDDEN);
+    for (unsigned i = 0; i < STORAGE_VIEW_ROWS; ++i) {
+        if (i < snapshot.files.shown && snapshot.files.error == ESP_OK) {
+            const storage_view_entry_t *file = &snapshot.files.entries[i];
+            bool playable = !file->directory && snapshot.browse_sd && !strcmp(snapshot.folder, "/media") && wav_name(file->name);
+            lv_obj_t *icon = lv_obj_get_child(file_buttons[i], 0);
+            lv_label_set_text(icon, file->directory ? LV_SYMBOL_DIRECTORY : playable ? LV_SYMBOL_PLAY : LV_SYMBOL_FILE);
+            lv_obj_set_style_text_color(icon, lv_color_hex(file->directory ? AMBER : playable ? CYAN : MUTED), 0);
+            set_text(lv_obj_get_child(file_buttons[i], 1), file->name);
+            if (file->directory) snprintf(text, sizeof(text), "%s", LV_SYMBOL_RIGHT);
+            else format_size(file->bytes, text, sizeof(text));
+            lv_label_set_text(lv_obj_get_child(file_buttons[i], 2), text);
+            lv_obj_remove_flag(file_buttons[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_state(file_buttons[i], LV_STATE_DISABLED);
+        } else lv_obj_add_flag(file_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* ---------- Activity shade. ---------- */
+static unsigned usage_percent(uint64_t occupied, uint64_t total) {
+    if (!total) return 0;
+    if (occupied >= total) return 100;
+    return (unsigned)(occupied * 100 / total);
+}
+static void shade_motion(void *obj, int32_t y) {
+    if (y < -HOME_TOP) y = -HOME_TOP;
+    if (y > 0) y = 0;
+    shade_y = y; lv_obj_set_y(obj, y);
+    lv_obj_set_style_bg_opa(shade_scrim, (y + HOME_TOP) * LV_OPA_60 / HOME_TOP, 0);
+    if (y == -HOME_TOP) {
+        lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(shade_scrim, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(shade, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(shade_scrim, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+static void shade_set(bool open) {
+    shade_drag = false;
+    if (open) {
+        hide_keyboard();
+        lv_obj_move_to_index(shade_scrim, -1); lv_obj_move_to_index(shade, -1); lv_obj_move_to_index(home_strip, -1);
+    }
+    lv_anim_delete(shade, shade_motion);
+    lv_anim_t animation; lv_anim_init(&animation);
+    lv_anim_set_var(&animation, shade); lv_anim_set_exec_cb(&animation, shade_motion);
+    lv_anim_set_values(&animation, shade_y, open ? 0 : -HOME_TOP); lv_anim_set_duration(&animation, 220);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
+}
+static bool shade_should_open(int start, int dx, int dy) {
+    if (dx < -90 || dx > 90) return start == 0;
+    return start == 0 ? dy > -50 : dy >= 70;
+}
+static void shade_touch(lv_event_t *event) {
+    lv_indev_t *input = lv_indev_active(); if (!input) return;
+    lv_point_t point; lv_indev_get_point(input, &point);
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        shade_drag = point.y <= 44 || (shade_y > -HOME_TOP && point.y < 88);
+        if (shade_drag) {
+            shade_origin = point; shade_start_y = shade_y;
+            lv_anim_delete(shade, shade_motion);
+            hide_keyboard();
+            lv_obj_move_to_index(shade_scrim, -1); lv_obj_move_to_index(shade, -1); lv_obj_move_to_index(home_strip, -1);
+        }
+    } else if (code == LV_EVENT_PRESSING && shade_drag) {
+        int dx = point.x - shade_origin.x;
+        shade_motion(shade, dx >= -90 && dx <= 90 ? shade_start_y + point.y - shade_origin.y : shade_start_y);
+    } else if (code == LV_EVENT_RELEASED && shade_drag) {
+        shade_set(shade_should_open(shade_start_y, point.x - shade_origin.x, point.y - shade_origin.y));
+    } else if (code == LV_EVENT_PRESS_LOST && shade_drag) shade_set(shade_start_y == 0);
+}
+static void shade_close(lv_event_t *event) { (void)event; shade_set(false); }
+static void usage_update(unsigned index, uint64_t occupied, uint64_t total) {
+    char text[64]; unsigned percent = usage_percent(occupied, total);
+    lv_arc_set_value(usage_arcs[index], percent);
+    if (total) snprintf(text, sizeof(text), "%u%%", percent);
+    else snprintf(text, sizeof(text), "--");
+    set_text(usage_values[index], text);
+    if (total) snprintf(text, sizeof(text), "%.1f / %.1f MiB", occupied / 1048576.0, total / 1048576.0);
+    else snprintf(text, sizeof(text), "%s", tr(T_SHADE_UNAVAILABLE));
+    set_text(usage_details[index], text);
+}
+static void job_update(unsigned index, const char *title, const char *detail, bool running) {
+    char text[192]; snprintf(text, sizeof(text), "%s  " LV_SYMBOL_BULLET "  %s\n%s", title, tr(running ? T_SHADE_ACTIVE : T_SHADE_IDLE), detail);
+    set_text(job_labels[index], text);
+    if (!lv_color_eq(lv_obj_get_style_border_color(job_cards[index], 0), lv_color_hex(running ? CYAN : LINE)))
+        lv_obj_set_style_border_color(job_cards[index], lv_color_hex(running ? CYAN : LINE), 0);
+}
+
+
+/* ---------- YouTube (PC relay at tube.audreaming.com) ---------- */
+typedef struct { lv_obj_t *button, *thumb, *canvas, *badge, *title, *channel, *meta; } tube_row_t;
+static M3_PSRAM_BSS tube_row_t tube_rows[M3_TUBE_ITEMS];
+static lv_obj_t *tube_search_view, *tube_player_view, *tube_query, *tube_heading, *tube_back_search, *tube_status;
+static lv_obj_t *tube_prev, *tube_next, *tube_page, *tube_pager;
+static lv_obj_t *tube_video, *tube_overlay, *tube_seek, *tube_time, *tube_total, *tube_toggle, *tube_title, *tube_channel;
+static lv_obj_t *tube_channel_button, *tube_player_status;
+static M3_PSRAM_BSS m3_tube_list_t tube_list;
+static unsigned seen_tube_list = ~0u, seen_tube_player = ~0u;
+static uint16_t seen_tube_thumbs;
+static int seen_tube_set = -1;
+static bool tube_in_player, tube_pending;
+static int64_t tube_pending_until;
+static char tube_id[12], tube_channel_id[25], tube_last_query[128];
+static unsigned tube_start_s, tube_duration_s;
+
+static void format_clock(unsigned seconds, char *text, size_t size) {
+    if (seconds >= 3600) snprintf(text, size, "%u:%02u:%02u", seconds / 3600, seconds / 60 % 60, seconds % 60);
+    else snprintf(text, size, "%u:%02u", seconds / 60, seconds % 60);
+}
+/* Korean counts in 만/억, English in K/M/B. */
+static void format_views(uint32_t views, char *text, size_t size) {
+    if (m3_i18n_language() == M3_LANG_KO) {
+        if (views >= 100000000u) snprintf(text, size, "조회수 %.1f억회", views / 100000000.0);
+        else if (views >= 10000u) snprintf(text, size, "조회수 %.*f만회", views >= 100000u ? 0 : 1, views / 10000.0);
+        else snprintf(text, size, "조회수 %lu회", (unsigned long)views);
+    } else if (m3_i18n_language() == M3_LANG_JA) {
+        if (views >= 100000000u) snprintf(text, size, "視聴回数 %.1f億回", views / 100000000.0);
+        else if (views >= 10000u) snprintf(text, size, "視聴回数 %.*f万回", views >= 100000u ? 0 : 1, views / 10000.0);
+        else snprintf(text, size, "視聴回数 %lu回", (unsigned long)views);
+    } else {
+        if (views >= 1000000000u) snprintf(text, size, "%.1fB views", views / 1e9);
+        else if (views >= 1000000u) snprintf(text, size, "%.1fM views", views / 1e6);
+        else if (views >= 1000u) snprintf(text, size, "%.0fK views", views / 1e3);
+        else snprintf(text, size, "%lu views", (unsigned long)views);
+    }
+}
+static void tube_show_player(bool player) {
+    tube_in_player = player;
+    if (player) { lv_obj_add_flag(tube_search_view, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(tube_player_view, LV_OBJ_FLAG_HIDDEN); }
+    else { lv_obj_add_flag(tube_player_view, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(tube_search_view, LV_OBJ_FLAG_HIDDEN); }
+    lv_obj_scroll_to_y(pages[APP_TUBE], 0, LV_ANIM_OFF);
+}
+/* Starts (or restarts at a position) the selected video. A playing source is
+ * stopped first; the new request waits for the audio worker to become free. */
+static void tube_start(unsigned seconds) {
+    tube_start_s = seconds;
+    m3_audio_state_t audio; m3_audio_state(&audio);
+    if (audio.playing) m3_audio_stop();
+    tube_pending = true; tube_pending_until = esp_timer_get_time() + 8000000;
+    lv_label_set_text(tube_overlay, tr(T_TUBE_CONNECTING)); lv_obj_remove_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+static void tube_stop(void) { tube_pending = false; m3_tube_player_t player; m3_tube_player(&player); if (player.active) m3_audio_stop(); }
+static void tube_leave(void) { if (tube_in_player || tube_pending) tube_stop(); }
+static void tube_submit(void) {
+    const char *query = lv_textarea_get_text(tube_query);
+    if (!query[0]) return;
+    hide_keyboard();
+    snprintf(tube_last_query, sizeof(tube_last_query), "%s", query);
+    if (!m3_tube_search(query, 1)) lv_label_set_text(tube_status, tr(T_TUBE_NOT_CONFIGURED));
+}
+static void tube_search_event(lv_event_t *event) { (void)event; tube_submit(); }
+static void tube_chip(lv_event_t *event) {
+    lv_textarea_set_text(tube_query, tr((m3_text_t)(uintptr_t)lv_event_get_user_data(event)));
+    tube_submit();
+}
+static void tube_page_turn(lv_event_t *event) {
+    int step = (int)(intptr_t)lv_event_get_user_data(event);
+    unsigned page = (unsigned)((int)tube_list.page + step);
+    if (page < 1 || (step > 0 && !tube_list.more)) return;
+    if (tube_list.channel) m3_tube_channel(tube_list.query, page); else m3_tube_search(tube_list.query, page);
+    lv_obj_scroll_to_y(pages[APP_TUBE], 0, LV_ANIM_ON);
+}
+static void tube_back_to_search(lv_event_t *event) {
+    (void)event;
+    if (tube_last_query[0]) { lv_textarea_set_text(tube_query, tube_last_query); m3_tube_search(tube_last_query, 1); }
+}
+static void tube_open(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index >= tube_list.count) return;
+    const m3_tube_item_t *item = &tube_list.items[index];
+    snprintf(tube_id, sizeof(tube_id), "%s", item->id);
+    snprintf(tube_channel_id, sizeof(tube_channel_id), "%s", item->channel_id);
+    tube_duration_s = item->duration;
+    lv_label_set_text(tube_title, item->title); lv_label_set_text(tube_channel, item->channel);
+    if (tube_channel_id[0]) lv_obj_remove_state(tube_channel_button, LV_STATE_DISABLED);
+    else lv_obj_add_state(tube_channel_button, LV_STATE_DISABLED);
+    /* Show the thumbnail until the first frame arrives. */
+    const uint8_t *thumb = m3_tube_thumb(&tube_list, index);
+    if (thumb) lv_canvas_set_buffer(tube_video, (void *)thumb, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H, LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_style_transform_scale(tube_video, thumb ? 768 : 256, 0);
+    lv_slider_set_range(tube_seek, 0, item->duration ? (int32_t)item->duration : 1);
+    lv_slider_set_value(tube_seek, 0, LV_ANIM_OFF);
+    seen_tube_player = ~0u;
+    tube_show_player(true);
+    tube_start(0);
+}
+static void tube_close(lv_event_t *event) { (void)event; tube_stop(); tube_show_player(false); }
+static void tube_toggle_event(lv_event_t *event) {
+    (void)event;
+    m3_tube_player_t player; m3_tube_player(&player);
+    if (player.active) m3_tube_pause(!player.paused);
+    else if (!tube_pending) tube_start(player.position_ms / 1000 >= tube_duration_s && tube_duration_s ? 0 : player.position_ms / 1000);
+}
+static void tube_skip(lv_event_t *event) {
+    m3_tube_player_t player; m3_tube_player(&player);
+    int target = (int)(player.position_ms / 1000) + (int)(intptr_t)lv_event_get_user_data(event);
+    if (target < 0) target = 0;
+    if (tube_duration_s && target >= (int)tube_duration_s) target = (int)tube_duration_s - 1;
+    lv_slider_set_value(tube_seek, target, LV_ANIM_OFF);
+    tube_start((unsigned)target);
+}
+static void tube_seek_event(lv_event_t *event) {
+    lv_event_code_t code = lv_event_get_code(event);
+    char text[16]; format_clock((unsigned)lv_slider_get_value(tube_seek), text, sizeof(text));
+    if (code == LV_EVENT_VALUE_CHANGED) lv_label_set_text(tube_time, text);
+    else if (code == LV_EVENT_RELEASED) tube_start((unsigned)lv_slider_get_value(tube_seek));
+}
+static void tube_channel_event(lv_event_t *event) {
+    (void)event;
+    if (!tube_channel_id[0]) return;
+    tube_stop(); tube_show_player(false);
+    m3_tube_channel(tube_channel_id, 1);
+}
+static void tube_frame_tick(lv_timer_t *timer) {
+    (void)timer;
+    if (current_app != APP_TUBE || !tube_in_player) return;
+    const uint8_t *frame = m3_tube_frame();
+    if (!frame) return;
+    lv_obj_set_style_transform_scale(tube_video, 256, 0);
+    lv_canvas_set_buffer(tube_video, (void *)frame, M3_TUBE_VIDEO_W, M3_TUBE_VIDEO_H, LV_COLOR_FORMAT_RGB565);
+}
+static void tube_render_rows(void) {
+    char text[64];
+    for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) {
+        tube_row_t *row = &tube_rows[i];
+        if (i >= tube_list.count) { lv_obj_add_flag(row->button, LV_OBJ_FLAG_HIDDEN); continue; }
+        const m3_tube_item_t *item = &tube_list.items[i];
+        lv_label_set_text(row->title, item->title);
+        lv_label_set_text(row->channel, item->channel);
+        if (item->live) snprintf(text, sizeof(text), "%s", tr(T_TUBE_LIVE));
+        else format_clock(item->duration, text, sizeof(text));
+        lv_label_set_text(row->badge, text);
+        if (item->live || item->duration) lv_obj_remove_flag(row->badge, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(row->badge, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(row->badge, lv_color_hex(item->live ? 0xdc2626 : 0x000000), 0);
+        if (item->views) { format_views(item->views, text, sizeof(text)); lv_label_set_text(row->meta, text); }
+        else lv_label_set_text(row->meta, "");
+        lv_obj_remove_flag(row->button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+static void update_tube(const m3_audio_state_t *audio) {
+    m3_tube_list(&tube_list);
+    if (tube_list.revision != seen_tube_list) {
+        seen_tube_list = tube_list.revision;
+        char text[128];
+        if (tube_list.thumb_set != seen_tube_set) {
+            seen_tube_set = tube_list.thumb_set; seen_tube_thumbs = 0;
+            for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) lv_obj_add_flag(tube_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
+        }
+        tube_render_rows();
+        if (tube_list.channel) snprintf(text, sizeof(text), tr(T_TUBE_CHANNEL_OF), tube_list.title[0] ? tube_list.title : tube_list.query);
+        else if (tube_list.count) snprintf(text, sizeof(text), tr(T_TUBE_RESULTS_FOR), tube_list.query);
+        else text[0] = 0;
+        lv_label_set_text(tube_heading, text);
+        if (tube_list.channel && tube_last_query[0]) lv_obj_remove_flag(tube_back_search, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(tube_back_search, LV_OBJ_FLAG_HIDDEN);
+        const char *status = !m3_tube_configured() ? tr(T_TUBE_NOT_CONFIGURED) :
+            tube_list.status == M3_TUBE_LIST_LOADING ? tr(T_TUBE_LOADING) :
+            tube_list.status == M3_TUBE_LIST_ERROR ? status_text(tube_list.message) :
+            tube_list.status == M3_TUBE_LIST_READY && !tube_list.count ? tr(T_TUBE_NO_RESULTS) :
+            tube_list.status == M3_TUBE_LIST_IDLE ? tr(T_TUBE_EMPTY) : "";
+        lv_label_set_text(tube_status, status);
+        if (status[0]) lv_obj_remove_flag(tube_status, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(tube_status, LV_OBJ_FLAG_HIDDEN);
+        set_ink(tube_status, tube_list.status == M3_TUBE_LIST_ERROR ? RED : MUTED);
+        snprintf(text, sizeof(text), tr(T_TUBE_PAGE), tube_list.page);
+        lv_label_set_text(tube_page, text);
+        if (tube_list.count && (tube_list.page > 1 || tube_list.more)) lv_obj_remove_flag(tube_pager, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(tube_pager, LV_OBJ_FLAG_HIDDEN);
+        if (tube_list.page > 1) lv_obj_remove_state(tube_prev, LV_STATE_DISABLED); else lv_obj_add_state(tube_prev, LV_STATE_DISABLED);
+        if (tube_list.more) lv_obj_remove_state(tube_next, LV_STATE_DISABLED); else lv_obj_add_state(tube_next, LV_STATE_DISABLED);
+    }
+    if (tube_list.thumbs != seen_tube_thumbs) {
+        for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) {
+            const uint8_t *thumb = m3_tube_thumb(&tube_list, i);
+            if (!thumb || (seen_tube_thumbs & (1u << i))) continue;
+            lv_canvas_set_buffer(tube_rows[i].canvas, (void *)thumb, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H, LV_COLOR_FORMAT_RGB565);
+            lv_obj_remove_flag(tube_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
+        }
+        seen_tube_thumbs = tube_list.thumbs;
+    }
+    m3_tube_player_t player; m3_tube_player(&player);
+    if (tube_pending && !audio->playing && !player.active) {
+        tube_pending = false;
+        if (!m3_tube_play(tube_id, tube_start_s)) lv_label_set_text(tube_overlay, tr(T_TUBE_NOT_CONFIGURED));
+    } else if (tube_pending && esp_timer_get_time() > tube_pending_until) {
+        tube_pending = false; lv_label_set_text(tube_overlay, tr(T_TUBE_BUSY));
+    }
+    if (player.revision != seen_tube_player || player.active) {
+        seen_tube_player = player.revision;
+        char text[64];
+        if (player.active && !strcmp(player.id, tube_id)) {
+            if (player.duration_s && player.duration_s != tube_duration_s) {
+                tube_duration_s = player.duration_s; lv_slider_set_range(tube_seek, 0, (int32_t)tube_duration_s);
+            }
+            if (player.channel_id[0] && !tube_channel_id[0]) {
+                snprintf(tube_channel_id, sizeof(tube_channel_id), "%s", player.channel_id);
+                lv_obj_remove_state(tube_channel_button, LV_STATE_DISABLED);
+            }
+            if (!lv_obj_has_state(tube_seek, LV_STATE_PRESSED)) {
+                lv_slider_set_value(tube_seek, (int32_t)(player.position_ms / 1000), LV_ANIM_OFF);
+                format_clock(player.position_ms / 1000, text, sizeof(text)); set_text(tube_time, text);
+            }
+        }
+        format_clock(tube_duration_s, text, sizeof(text)); set_text(tube_total, tube_duration_s ? text : "--:--");
+        bool playing = player.active && !player.paused;
+        lv_label_set_text(lv_obj_get_child(tube_toggle, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+        const char *overlay = tube_pending ? tr(T_TUBE_CONNECTING) : !player.active ? NULL :
+            player.buffering ? tr(T_TUBE_BUFFERING) : player.paused ? tr(T_TUBE_PAUSED) : !player.video ? tr(T_TUBE_AUDIO_ONLY) : NULL;
+        if (overlay) {
+            if (player.buffering && !tube_pending) snprintf(text, sizeof(text), "%s  %u%%", overlay, player.buffer_percent);
+            else snprintf(text, sizeof(text), "%s", overlay);
+            set_text(tube_overlay, text); lv_obj_remove_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN);
+        } else if (!lv_obj_has_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN) && strcmp(lv_label_get_text(tube_overlay), tr(T_TUBE_BUSY)) &&
+                   strcmp(lv_label_get_text(tube_overlay), tr(T_TUBE_NOT_CONFIGURED))) lv_obj_add_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+    activity_set(tube_wait, tube_in_player && (tube_pending || (player.active && player.buffering)));
+    if (tube_in_player) set_text(tube_player_status, status_text(audio->message));
+}
+
+
+static void update_activity(const m3_agent_state_t *agent, const m3_voice_state_t *voice, const m3_audio_state_t *audio) {
+    unsigned phase = tts_phase(audio);
+    bool thinking = agent->busy && lv_obj_has_flag(agent_thinking, LV_OBJ_FLAG_HIDDEN);
+    bool done = !agent->busy && !lv_obj_has_flag(agent_thinking, LV_OBJ_FLAG_HIDDEN);
+    activity_set(agent_thinking, agent->busy);
+    /* The previous answer fades while a new one is generated (text opacity needs no layer). */
+    if (thinking || done) lv_obj_set_style_text_opa(agent_answer, thinking ? LV_OPA_40 : LV_OPA_COVER, 0);
+    if (thinking) lv_obj_scroll_to_y(agent_output, 0, LV_ANIM_ON);
+    activity_set(agent_voice, phase != 0);
+    if (voice_target && voice->recording) lv_obj_remove_flag(voice_meter, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(voice_meter, LV_OBJ_FLAG_HIDDEN);
+    activity_set(voice_think, voice_target && voice->busy && !voice->recording);
+    activity_set(tts_wait, phase == 1);
+    activity_set(tts_talk, phase == 2);
+}
+/* Each tab retains its own meaning, including when its address is unavailable. */
+static void web_tab_changed(lv_event_t *event) {
+    (void)event; web_address_kind = segment_value(web_tabs); web_qr_dirty = true;
+}
+static void web_retry_ipv6(lv_event_t *event) {
+    (void)event;
+    bool accepted = m3_runtime_wifi(M3_WIFI_IPV6, NULL);
+    set_text(web_hint, tr(accepted ? T_WEB_RETRY_SENT : T_WIFI_BUSY));
+    web_qr_dirty = true;
+}
+static m3_text_t web_explanation(void) {
+    if (web_address_kind == M3_WEB_DOMAIN) {
+        if (snapshot.cloud) return T_WEB_DOMAIN_READY;
+        if (!strcmp(snapshot.cloud_status, "factory_missing")) return T_WEB_PROVISION;
+        if (!strcmp(snapshot.cloud_status, "waiting_wifi")) return T_WEB_NO_WIFI;
+        if (!strcmp(snapshot.cloud_status, "waiting_time")) return T_WEB_CLOCK;
+        if (!strcmp(snapshot.cloud_status, "waiting_memory")) return T_WEB_MEMORY;
+        if (!strcmp(snapshot.cloud_status, "paused_ai")) return T_WEB_PAUSED;
+        return T_WEB_DOMAIN_WAIT;
+    }
+    if (web_address_kind == M3_WEB_IPV6) {
+        if (snapshot.ipv6_url[0] && snapshot.mode == NET_MODE_STA_CONNECTED) return T_WEB_IPV6_HINT;
+        if (!strcmp(snapshot.ipv6_status, "disabled")) return T_WEB_IPV6_DISABLED;
+        if (snapshot.mode != NET_MODE_STA_CONNECTED) return T_WEB_NO_WIFI;
+        if (!strcmp(snapshot.ipv6_status, "no_global_prefix")) return T_WEB_NO_PREFIX;
+        return T_WEB_IPV6_WAIT;
+    }
+    return web_address_kind == M3_WEB_MDNS ? T_WEB_MDNS_HINT : T_WEB_IPV4_HINT;
+}
+static void update_web(void) {
+    char text[96];
+    const char *url = m3_web_address_url(&snapshot, web_address_kind);
+    if (web_qr_dirty || strcmp(seen_web_url, url)) {
+        web_qr_dirty = false;
+        snprintf(seen_web_url, sizeof(seen_web_url), "%s", url);
+        web_qr_ok = url[0] && lv_qrcode_update(web_qr, url, strlen(url)) == LV_RESULT_OK;
+        if (web_qr_ok) lv_obj_remove_flag(web_frame, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(web_frame, LV_OBJ_FLAG_HIDDEN);
+    }
+    set_text(web_url, url[0] ? url : tr(T_QR_WAIT));
+    bool ready = snapshot.web && url[0] && (web_address_kind != M3_WEB_DOMAIN || snapshot.cloud);
+    set_text(web_state, tr(!snapshot.web ? T_WEB_STARTING : ready ? T_WEB_RUNNING : T_WEB_WAIT));
+    set_bg(web_dot, ready && web_qr_ok ? GREEN : AMBER);
+    set_text(web_hint, tr(url[0] && !web_qr_ok ? T_WEB_QR_ERROR :
+        web_address_kind == M3_WEB_IPV6 && snapshot.wifi_busy ? T_WEB_RETRY_SENT : web_explanation()));
+    if (web_address_kind == M3_WEB_IPV6) lv_obj_remove_flag(web_retry, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(web_retry, LV_OBJ_FLAG_HIDDEN);
+    if (snapshot.wifi_busy || snapshot.mode != NET_MODE_STA_CONNECTED) lv_obj_add_state(web_retry, LV_STATE_DISABLED);
+    else lv_obj_remove_state(web_retry, LV_STATE_DISABLED);
+    snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests);
+    set_text(web_requests, text);
+}
+
+
+/* 40 ms: bar heights from the live microphone level. A centre-weighted profile with a
+ * slow ripple keeps the shape lively, but silence always draws a flat line. */
+static void voice_meter_tick(lv_timer_t *timer) {
+    (void)timer;
+    if (!voice_target || lv_obj_has_flag(voice_meter, LV_OBJ_FLAG_HIDDEN)) return;
+    static const uint8_t profile[METER_BARS] = {34, 48, 62, 76, 90, 100, 90, 76, 62, 48, 34};
+    static const uint8_t ripple[8] = {100, 86, 94, 78, 97, 84, 91, 80};
+    unsigned level = m3_voice_level();
+    ++meter_phase;
+    for (unsigned i = 0; i < METER_BARS; ++i) {
+        unsigned shape = profile[i] * ripple[(meter_phase + i * 3) % 8] / 100;
+        int32_t height = METER_MIN + (int32_t)((METER_MAX - METER_MIN) * level * shape / 10000);
+        if (lv_obj_get_height(voice_meter_bars[i]) != height) lv_obj_set_height(voice_meter_bars[i], height);
+    }
+    /* Quiet input shows grey, speech red; near clipping amber. */
+    uint32_t color = level < 12 ? MUTED : level > 92 ? AMBER : RED;
+    for (unsigned i = 0; i < METER_BARS; ++i) set_bg(voice_meter_bars[i], color);
+    char text[24]; int dbfs = m3_voice_dbfs();
+    if (dbfs <= -90) snprintf(text, sizeof(text), "-- dB");
+    else snprintf(text, sizeof(text), "%d dB", dbfs);
+    set_text(voice_db, text);
+}
+
+/* ---------- Periodic refresh (250 ms). ---------- */
+static const char *mode_text(void) {
+    return tr(snapshot.mode == NET_MODE_STA_CONNECTED ? T_NET_ONLINE : snapshot.mode == NET_MODE_AP_CAPTIVE ? T_NET_SETUP : T_NET_STARTING);
+}
+static uint32_t mode_color(void) {
+    return snapshot.mode == NET_MODE_STA_CONNECTED ? GREEN : snapshot.mode == NET_MODE_AP_CAPTIVE ? MAGENTA : AMBER;
+}
+static void update_clock(char *text, size_t size) {
+    time_t now = time(NULL);
+    if (now >= 1735689600) {
+        /* Convert to Korea time without changing the process-wide TLS timezone. */
+        now += 9 * 3600;
+        struct tm local; gmtime_r(&now, &local);
+        strftime(text, size, "%H:%M", &local);
+        set_text(status_clock, text); set_text(home_clock, text);
+        static const char *const days_en[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        static const char *const days_ko[] = {"일", "월", "화", "수", "목", "금", "토"};
+        static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        if (m3_i18n_language() == M3_LANG_KO)
+            snprintf(text, size, "%d년 %d월 %d일 %s요일", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, days_ko[local.tm_wday % 7]);
+        else if (m3_i18n_language() == M3_LANG_JA) {
+            static const char *const days_ja[] = {"日", "月", "火", "水", "木", "金", "土"};
+            snprintf(text, size, "%d年%d月%d日 %s曜日", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, days_ja[local.tm_wday % 7]);
+        }
+        else snprintf(text, size, "%s, %s %d %d", days_en[local.tm_wday % 7], months[local.tm_mon % 12], local.tm_mday, local.tm_year + 1900);
+        set_text(home_date, text);
+    } else {
+        set_text(status_clock, "--:--"); set_text(home_clock, "--:--");
+        set_text(home_date, tr(T_HOME_NO_TIME));
+    }
+}
+static void update_home(const m3_audio_state_t *audio) {
+    char text[384];
+    bool online = snapshot.mode == NET_MODE_STA_CONNECTED;
+    snprintf(text, sizeof(text), "%s  " LV_SYMBOL_BULLET "  %s", mode_text(), snapshot.ip[0] ? snapshot.ip : tr(T_NET_PENDING));
+    set_text(home_net, text);
+    set_ink(home_net_icon, mode_color());
+    if (audio->playing) snprintf(text, sizeof(text), "%s  %s", LV_SYMBOL_AUDIO, status_text(audio->message));
+    else if (online && snapshot.url[0]) snprintf(text, sizeof(text), tr(T_HOME_WEB), snapshot.url);
+    else snprintf(text, sizeof(text), "%s", tr(snapshot.mode == NET_MODE_AP_CAPTIVE ? T_HOME_SETUP : T_HOME_WAITING));
+    set_text(home_detail, text);
+}
+static void update_metrics(lv_timer_t *timer) {
+    (void)timer;
+    m3_runtime_state(&snapshot);
+    update_music();
+    static M3_PSRAM_BSS m3_agent_state_t agent; m3_agent_state(&agent);
+    if (agent.revision != seen_agent) {
+        seen_agent = agent.revision;
+        set_text(agent_info, status_text(agent.message));
+        lv_label_set_text(agent_answer, agent.answer[0] ? agent.answer : tr(T_AGENT_EMPTY));
+        lv_obj_set_style_text_color(agent_answer, lv_color_hex(agent.answer[0] ? TEXT : MUTED), 0);
+        lv_label_set_text(agent_trace, agent.tools);
+        if (agent.tools[0]) lv_obj_remove_flag(agent_trace, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(agent_trace, LV_OBJ_FLAG_HIDDEN);
+        if (agent.answer[0]) lv_obj_scroll_to_y(agent_output, 0, LV_ANIM_OFF);
+    }
+    set_bg(agent_dot, agent.busy ? AMBER : agent.key_ready ? GREEN : RED);
+    static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    if (voice.revision != seen_voice) {
+        seen_voice = voice.revision;
+        if (voice_target) {
+            lv_label_set_text(voice_info, status_text(voice.message));
+            lv_label_set_text(voice_text, voice.text);
+        }
+    }
+    set_bg(voice_dot, voice.recording ? RED : voice.busy ? AMBER : MUTED);
+    update_wifi();
+    m3_audio_state_t audio; m3_audio_state(&audio);
+    if (radio_pending && !audio.playing) { radio_pending = false; start_radio(NULL); }
+    else if (radio_pending && esp_timer_get_time() > radio_pending_until) { radio_pending = false; lv_label_set_text(radio_info, tr(T_RADIO_FAIL)); }
+    if (memory_game && memory_second >= 0 && (uint64_t)esp_timer_get_time() >= memory_hide_at) {
+        memory_visible[memory_first] = memory_visible[memory_second] = false;
+        memory_first = memory_second = -1; render_game();
+    }
+    size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t psram_total = esp_psram_get_size();
+    unsigned used = psram_total ? (unsigned)((psram_total - psram) * 100 / psram_total) : 0;
+    static char text[768]; /* UI task only; keeps this 250 ms path off the 16 KiB stack */
+    set_text(status, mode_text());
+    unsigned levels = snapshot.mode == NET_MODE_STA_CONNECTED ? wifi_bars(snapshot.rssi) : 0;
+    bool ap = snapshot.mode == NET_MODE_AP_CAPTIVE;
+    for (unsigned i = 0; i < 4; ++i)
+        set_bg(wifi_levels[i], ap ? MAGENTA : i < levels ? TEXT : 0x3a4656);
+    if (audio.playing) lv_obj_remove_flag(status_audio, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
+    size_t internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    usage_update(0, internal_total > internal ? internal_total - internal : 0, internal_total);
+    usage_update(1, psram_total > psram ? psram_total - psram : 0, psram_total);
+    uint64_t flash_files = snapshot.flash.total > snapshot.flash.reserved ? snapshot.flash.total - snapshot.flash.reserved : 0;
+    usage_update(2, snapshot.flash.used, snapshot.flash.error == ESP_OK ? flash_files : 0);
+    job_update(0, tr(T_JOB_APP), tr(app_names[current_app]), current_app != APP_HOME);
+    job_update(1, tr(T_JOB_AUDIO), status_text(audio.message), audio.playing && !voice.busy);
+    job_update(2, tr(T_JOB_VOICE), voice.busy ? status_text(voice.message) : tr(voice.text[0] ? T_JOB_REVIEW : T_JOB_WAITING), voice.busy);
+    job_update(3, tr(T_JOB_WIFI), snapshot.wifi_busy ? status_text(snapshot.wifi_message) : mode_text(), snapshot.wifi_busy);
+    snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests);
+    job_update(4, tr(T_JOB_WEB), snapshot.web ? text : tr(T_JOB_NOT_STARTED), snapshot.web);
+    job_update(5, tr(T_JOB_AGENT), status_text(agent.message), agent.busy);
+    update_clock(text, sizeof(text));
+    update_home(&audio);
+    update_calendar();
+    update_photos();
+    snprintf(text, sizeof(text), "%s\n%.0f KiB\n%s\n%.1f / %.0f MiB", tr(T_MON_INTERNAL), internal / 1024.0,
+        tr(T_MON_PSRAM), psram / 1048576.0, psram_total / 1048576.0);
+    set_text(memory, text); lv_bar_set_value(heap_bar, used, LV_ANIM_ON);
+    if (++chart_tick % 4 == 0) {
+        lv_chart_set_next_value(chart, heap_series, (int)(internal / 1024));
+        lv_chart_set_next_value(chart, psram_series, (int)(psram / 65536));
+    }
+    snprintf(text, sizeof(text), tr(T_MON_STATS), snapshot.requests, snapshot.disconnects, snapshot.rssi,
+        heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024.0,
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024.0);
+    set_text(monitor_info, text);
+    set_text(net_title, mode_text());
+    set_bg(net_dot, mode_color());
+    snprintf(text, sizeof(text), "IPv4  %s\n%s  %d dBm\n%s\n%s", snapshot.ip[0] ? snapshot.ip : tr(T_NET_PENDING),
+        tr(T_NET_SIGNAL), snapshot.rssi, tr(snapshot.cloud ? T_NET_CLOUD : T_NET_LOCAL), status_text(snapshot.message));
+    set_text(network, text);
+    if (snapshot.url[0] && strcmp(seen_url, snapshot.url)) {
+        snprintf(seen_url, sizeof(seen_url), "%s", snapshot.url);
+        lv_qrcode_update(qr, seen_url, strlen(seen_url)); lv_label_set_text(qr_url, seen_url);
+        lv_obj_remove_flag(qr, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (seen_files != snapshot.file_revision) { seen_files = snapshot.file_revision; update_files(); }
+    snprintf(text, sizeof(text), "%s", audio.ready ? (audio.volume ? status_text(audio.message) : tr(T_AUDIO_MUTED)) : tr(T_AUDIO_UNAVAILABLE));
+    set_text(audio_info, text); lv_bar_set_value(audio_bar, audio.progress, LV_ANIM_ON);
+    lv_bar_set_value(radio_bar, audio.progress, LV_ANIM_ON);
+    if (strcmp(seen_audio, audio.message)) {
+        snprintf(seen_audio, sizeof(seen_audio), "%s", audio.message);
+        if (!radio_pending) lv_label_set_text(radio_info, status_text(audio.message));
+        lv_label_set_text(tts_info, status_text(audio.message));
+    }
+    /* Volume can also change from the AI agent; mirror it unless a slider is held. */
+    if (audio.volume != shown_volume) {
+        bool held = false;
+        for (unsigned i = 0; i < VOLUME_ROWS; ++i) held |= lv_obj_has_state(volume_sliders[i], LV_STATE_PRESSED);
+        if (!held) shown_volume = audio.volume;
+        snprintf(text, sizeof(text), "%u%%", audio.volume);
+        for (unsigned i = 0; i < VOLUME_ROWS; ++i) {
+            if (!held) lv_slider_set_value(volume_sliders[i], audio.volume, LV_ANIM_OFF);
+            lv_label_set_text(volume_values[i], text);
+            set_ink(volume_values[i], audio.volume > 100 ? AMBER : TEXT);
+        }
+    }
+    esp_chip_info_t chip; esp_chip_info(&chip);
+    snprintf(text, sizeof(text), tr(T_ABOUT),
+        chip.cores, chip.revision / 100, chip.revision % 100, esp_get_idf_version(),
+        tr(m3_board_touch_ready() ? T_READY : T_NOT_DETECTED), tr(audio.ready ? T_READY : T_NOT_READY),
+        tr(snapshot.sd ? T_MOUNTED : T_NOT_MOUNTED), psram_total / 1048576.0);
+    set_text(system_info, text);
+    update_tube(&audio);
+    update_activity(&agent, &voice, &audio);
+    update_web();
+    int requested_app = m3_agent_take_open_app();
+    if (requested_app >= 0 && requested_app < APP_COUNT) show_app((app_id_t)requested_app);
+}
+
+/* ---------- App icons: symbol glyphs on colored tiles. ---------- */
+static lv_obj_t *icon_part(lv_obj_t *parent, int x, int y, int w, int h, int radius) {
+    lv_obj_t *part = bare(parent);
+    lv_obj_set_pos(part, x, y); lv_obj_set_size(part, w, h);
+    lv_obj_set_style_radius(part, radius, 0); lv_obj_set_style_bg_opa(part, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(part, lv_color_hex(0xffffff), 0);
+    return part;
+}
+static const struct { app_id_t app; uint32_t top, bottom; const char *glyph; } app_icons[] = {
+    {APP_MONITOR, 0x2dd4bf, 0x0f766e, LV_SYMBOL_CHARGE},
+    {APP_AGENT, 0x8b5cf6, 0x5b21b6, "AI"},
+    {APP_WIFI, 0x38bdf8, 0x1d4ed8, LV_SYMBOL_WIFI},
+    {APP_RADIO, 0xfb923c, 0xc2410c, LV_SYMBOL_AUDIO},
+    {APP_GAMES, 0x4ade80, 0x15803d, NULL},
+    {APP_FILES, 0xfbbf24, 0xb45309, LV_SYMBOL_DIRECTORY},
+    {APP_AUDIO, 0xf472b6, 0xbe185d, LV_SYMBOL_VOLUME_MAX},
+    {APP_TTS, 0x818cf8, 0x4338ca, "가"},
+    {APP_SYSTEM, 0x94a3b8, 0x475569, LV_SYMBOL_SETTINGS},
+    {APP_TUBE, 0xf87171, 0xb91c1c, LV_SYMBOL_PLAY},
+    {APP_MUSIC, 0x22d3ee, 0x0369a1, LV_SYMBOL_AUDIO},
+};
+static void draw_app_icon(lv_obj_t *icon, unsigned index) {
+    lv_obj_set_style_bg_color(icon, lv_color_hex(app_icons[index].top), 0);
+    lv_obj_set_style_bg_grad_color(icon, lv_color_hex(app_icons[index].bottom), 0);
+    lv_obj_set_style_bg_grad_dir(icon, LV_GRAD_DIR_VER, 0);
+    if (!app_icons[index].glyph) {
+        for (int i = 0; i < 4; ++i) {
+            lv_obj_t *part = icon_part(icon, 21 + (i % 2) * 20, 21 + (i / 2) * 20, 16, 16, 4);
+            if (i == 3) lv_obj_set_style_bg_opa(part, LV_OPA_60, 0);
+        }
+        return;
+    }
+    lv_obj_t *glyph = lv_label_create(icon);
+    lv_label_set_text(glyph, app_icons[index].glyph);
+    lv_obj_set_style_text_color(glyph, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(glyph, app_icons[index].app == APP_TTS ? FONT_TITLE : FONT_ICON, 0);
+    if (app_icons[index].app == APP_TTS) {
+        /* The title font is 22 px; scale the single glyph around its center to icon size. */
+        lv_obj_set_style_transform_scale(glyph, 360, 0);
+        lv_obj_set_style_transform_pivot_x(glyph, LV_PCT(50), 0); lv_obj_set_style_transform_pivot_y(glyph, LV_PCT(50), 0);
+    }
+    lv_obj_center(glyph);
+    if (app_icons[index].app == APP_TUBE) lv_obj_align(glyph, LV_ALIGN_CENTER, 3, 0);
+}
+
+/* ---------- Activity shade. ---------- */
+static void create_shade(lv_obj_t *screen) {
+    shade_scrim = lv_obj_create(screen); lv_obj_remove_style_all(shade_scrim); lv_obj_set_pos(shade_scrim, 0, 0);
+    lv_obj_set_size(shade_scrim, 480, HOME_TOP); lv_obj_set_style_bg_color(shade_scrim, lv_color_hex(0), 0);
+    lv_obj_remove_flag(shade_scrim, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(shade_scrim, shade_close, LV_EVENT_CLICKED, NULL);
+    shade = lv_obj_create(screen); lv_obj_remove_style_all(shade); lv_obj_set_size(shade, 480, HOME_TOP);
+    lv_obj_set_style_bg_opa(shade, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(shade, lv_color_hex(0x111824), 0);
+    lv_obj_set_style_bg_grad_color(shade, lv_color_hex(0x1a1426), 0);
+    lv_obj_set_style_bg_grad_dir(shade, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_radius(shade, 24, 0); lv_obj_set_style_text_color(shade, lv_color_hex(TEXT), 0);
+    lv_obj_remove_flag(shade, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(shade, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(shade, shade_touch, LV_EVENT_ALL, NULL);
+    lv_obj_t *handle = icon_part(shade, 205, 12, 70, 5, 3); lv_obj_set_style_bg_opa(handle, LV_OPA_40, 0);
+    lv_obj_t *title = text(shade, T_SHADE_TITLE, TEXT); lv_obj_set_pos(title, 20, 36); lv_obj_add_style(title, &st_title, 0);
+    static const m3_text_t names[] = {T_SHADE_RAM, T_SHADE_PSRAM, T_SHADE_FLASH};
+    static const uint32_t colors[] = {CYAN, MAGENTA, AMBER};
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_t *panel = bare(shade); lv_obj_set_pos(panel, 16 + i * 152, 80); lv_obj_set_size(panel, 144, 200);
+        lv_obj_set_style_bg_color(panel, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(panel, LV_OPA_10, 0);
+        lv_obj_set_style_radius(panel, 18, 0);
+        lv_obj_t *name = text(panel, names[i], MUTED);
+        lv_obj_set_pos(name, 0, 12); lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+        usage_arcs[i] = lv_arc_create(panel); lv_obj_set_pos(usage_arcs[i], 22, 40);
+        lv_obj_set_size(usage_arcs[i], 100, 100); lv_arc_set_rotation(usage_arcs[i], 270);
+        lv_arc_set_bg_angles(usage_arcs[i], 0, 360); lv_arc_set_range(usage_arcs[i], 0, 100);
+        lv_arc_set_value(usage_arcs[i], 0); lv_obj_remove_style(usage_arcs[i], NULL, LV_PART_KNOB);
+        lv_obj_remove_flag(usage_arcs[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_arc_width(usage_arcs[i], 9, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(usage_arcs[i], 9, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(usage_arcs[i], lv_color_hex(SURFACE_HI), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(usage_arcs[i], lv_color_hex(colors[i]), LV_PART_INDICATOR);
+        usage_values[i] = label(panel, "--", TEXT); lv_obj_set_pos(usage_values[i], 0, 80);
+        lv_obj_set_style_text_font(usage_values[i], &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_align(usage_values[i], LV_TEXT_ALIGN_CENTER, 0);
+        usage_details[i] = label(panel, "", MUTED); lv_obj_set_pos(usage_details[i], 4, 152);
+        lv_obj_set_width(usage_details[i], 136); lv_obj_set_style_text_align(usage_details[i], LV_TEXT_ALIGN_CENTER, 0);
+    }
+    title = text(shade, T_SHADE_RUNNING, CYAN); lv_obj_set_pos(title, 20, 298);
+    for (unsigned i = 0; i < 6; ++i) {
+        job_cards[i] = bare(shade); lv_obj_set_pos(job_cards[i], 16 + (i % 2) * 228, 328 + (i / 2) * 98);
+        lv_obj_set_size(job_cards[i], 220, 88); lv_obj_set_style_radius(job_cards[i], 14, 0);
+        lv_obj_set_style_pad_all(job_cards[i], 12, 0); lv_obj_set_style_border_width(job_cards[i], 1, 0);
+        lv_obj_set_style_bg_opa(job_cards[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(job_cards[i], lv_color_hex(SURFACE), 0);
+        job_labels[i] = label(job_cards[i], "", TEXT);
+        lv_obj_set_height(job_labels[i], 64); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+    }
+    title = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(title, 20, 628); lv_obj_set_width(title, 440);
+    lv_obj_t *close = button(shade, LV_SYMBOL_UP, T_SHADE_CLOSE, BTN_SECONDARY, shade_close, NULL);
+    lv_obj_set_pos(close, 16, 684); lv_obj_set_width(close, 448);
+    shade_motion(shade, -HOME_TOP);
+}
+
+/* ---------- Screen construction. ---------- */
+static lv_obj_t *app_page(lv_obj_t *parent) {
+    lv_obj_t *page = lv_obj_create(parent);
+    lv_obj_remove_style_all(page); lv_obj_add_style(page, &st_page, 0);
+    lv_obj_set_size(page, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_ACTIVE);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+    return page;
+}
+static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data) {
+    lv_obj_t *obj = lv_button_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_add_style(obj, &st_list, 0); lv_obj_add_style(obj, &st_btn_pressed, LV_STATE_PRESSED);
+    lv_obj_add_style(obj, &st_list_checked, LV_STATE_CHECKED); lv_obj_add_style(obj, &st_disabled, LV_STATE_DISABLED);
+    lv_obj_t *icon = lv_label_create(obj); lv_obj_set_width(icon, 22);
+    lv_obj_t *name = lv_label_create(obj); grow(name); lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *meta = lv_label_create(obj); lv_obj_add_style(meta, &st_caption, 0);
+    (void)icon;
+    lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
+    return obj;
+}
+static void home_apps(lv_obj_t *home, unsigned first, int top) {
+    static const app_id_t apps[] = {APP_MONITOR, APP_AGENT, APP_WIFI, APP_RADIO, APP_GAMES, APP_FILES, APP_AUDIO, APP_TTS, APP_SYSTEM, APP_TUBE, APP_MUSIC};
+    _Static_assert(sizeof(apps) / sizeof(apps[0]) == sizeof(app_icons) / sizeof(app_icons[0]), "one icon per app");
+    unsigned end = first + HOME_APPS_PER_PAGE;
+    if (end > sizeof(apps) / sizeof(apps[0])) end = sizeof(apps) / sizeof(apps[0]);
+    for (unsigned i = first; i < end; ++i) {
+        int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * 148;
+        lv_obj_t *icon = lv_button_create(home); lv_obj_remove_style_all(icon);
+        lv_obj_set_pos(icon, x, y); lv_obj_set_size(icon, 76, 76);
+        lv_obj_set_style_radius(icon, 22, 0); lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
+        lv_obj_set_style_shadow_width(icon, 18, 0); lv_obj_set_style_shadow_offset_y(icon, 6, 0);
+        lv_obj_set_style_shadow_opa(icon, LV_OPA_30, 0);
+        lv_obj_set_style_shadow_color(icon, lv_color_hex(app_icons[i].bottom), 0);
+        lv_obj_set_style_transform_scale(icon, 236, LV_STATE_PRESSED);
+        lv_obj_set_style_transform_pivot_x(icon, 38, 0); lv_obj_set_style_transform_pivot_y(icon, 38, 0);
+        lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(icon, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+        lv_obj_add_event_cb(icon, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)apps[i]);
+        draw_app_icon(icon, i);
+        lv_obj_t *name = text(home, app_names[apps[i]], TEXT);
+        lv_obj_set_pos(name, x - 18, y + 84); lv_obj_set_width(name, 112);
+        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    }
+}
+static void build_home_main(lv_obj_t *home) {
+    /* The main tile keeps the clock, network status and six primary apps. */
+    lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0);
+    lv_obj_set_style_pad_all(home, 0, 0);
+    lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(home, lv_color_hex(0x0b1424), 0);
+    lv_obj_set_style_bg_grad_color(home, lv_color_hex(0x1d0f2c), 0);
+    lv_obj_set_style_bg_grad_dir(home, LV_GRAD_DIR_VER, 0);
+    /* Clip decorative circles in a dedicated back layer. Content is a later
+     * sibling, so neither wallpaper geometry nor child order can cover widgets. */
+    lv_obj_t *wallpaper = bare(home); lv_obj_set_size(wallpaper, 480, 660);
+    lv_obj_set_pos(wallpaper, 0, 0);
+    lv_obj_t *orb = icon_part(wallpaper, -140, 300, 460, 460, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_color(orb, lv_color_hex(0x0891b2), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_20, 0);
+    orb = icon_part(wallpaper, 250, -120, 340, 340, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_color(orb, lv_color_hex(MAGENTA), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_10, 0);
+    lv_obj_t *foreground = bare(home); lv_obj_set_size(foreground, 480, 660);
+    lv_obj_set_pos(foreground, 0, 0); lv_obj_add_flag(foreground, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    home = foreground;
+    home_clock = label(home, "--:--", 0xffffff); lv_obj_set_pos(home_clock, 0, 34);
+    lv_obj_set_style_text_align(home_clock, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(home_clock, &m3_font_clock, 0);
+    home_date = label(home, "", 0xc8d2e0); lv_obj_set_pos(home_date, 0, 120);
+    lv_obj_set_style_text_align(home_date, LV_TEXT_ALIGN_CENTER, 0);
+    /* Glass status card: network state and now playing; tap for Wi-Fi details. */
+    lv_obj_t *status_card = lv_button_create(home); lv_obj_remove_style_all(status_card);
+    lv_obj_set_pos(status_card, 20, 166); lv_obj_set_size(status_card, 440, 84);
+    lv_obj_set_style_bg_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_style_bg_opa(status_card, LV_OPA_20, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(status_card, 22, 0);
+    lv_obj_set_style_border_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_border_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_style_border_width(status_card, 1, 0);
+    lv_obj_add_event_cb(status_card, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WIFI);
+    lv_obj_t *badge = bare(status_card); lv_obj_set_pos(badge, 16, 16); lv_obj_set_size(badge, 52, 52);
+    lv_obj_set_style_radius(badge, 16, 0); lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(badge, lv_color_hex(0x0b1220), 0); lv_obj_set_style_bg_opa(badge, LV_OPA_60, 0);
+    home_net_icon = lv_label_create(badge); lv_label_set_text(home_net_icon, LV_SYMBOL_WIFI);
+    lv_obj_set_style_text_font(home_net_icon, &lv_font_montserrat_20, 0); lv_obj_center(home_net_icon);
+    home_net = label(status_card, "", TEXT); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
+    lv_label_set_long_mode(home_net, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    home_detail = label(status_card, "", 0xaab6c6); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
+    lv_label_set_long_mode(home_detail, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, 0xaab6c6); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
+    lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -16, 0);
+    home_apps(home, 0, 296);
+}
+static m3_text_t home_page_title(unsigned index) {
+    return index == 0 ? T_CAL_TITLE : index == 1 ? T_APP_HOME : index == HOME_PHOTOS ? T_PHOTO_TITLE : T_HOME_MORE;
+}
+static void home_page_update(void) {
+    if (!home_tiles) return;
+    for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) {
+        lv_obj_t *mark = lv_obj_get_child(home_dots[i], 0);
+        lv_obj_set_width(mark, i == home_index ? 24 : 8);
+        lv_obj_set_style_bg_color(mark, lv_color_hex(i == home_index ? CYAN : 0x526175), 0);
+        lv_obj_center(mark);
+    }
+    set_text(home_page_name, tr(home_page_title(home_index)));
+    m3_photos_activate(current_app == APP_HOME && home_index == HOME_PHOTOS);
+}
+static void home_tile_changed(lv_event_t *event) {
+    (void)event;
+    lv_obj_t *active = lv_tileview_get_tile_active(home_tiles);
+    for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) if (home_sheets[i] == active) home_index = i;
+    home_page_update();
+}
+static void home_page_tap(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index >= HOME_PAGE_COUNT) return;
+    lv_tileview_set_tile_by_index(home_tiles, index, 0, LV_ANIM_ON);
+}
+static void calendar_move(lv_event_t *event) {
+    int direction = (int)(intptr_t)lv_event_get_user_data(event);
+    if (!direction) calendar_follow = true;
+    else if (calendar_year) { m3_calendar_shift(&calendar_year, &calendar_month, direction); calendar_follow = false; }
+    calendar_stamp = 0; update_calendar();
+}
+static void update_calendar(void) {
+    if (!calendar_heading) return;
+    time_t now = time(NULL);
+    if (now < 1735689600) {
+        set_text(calendar_heading, "-- / --"); set_text(calendar_hint, tr(T_CAL_WAIT)); return;
+    }
+    now += 9 * 3600;
+    struct tm local; gmtime_r(&now, &local);
+    unsigned year = local.tm_year + 1900, month = local.tm_mon + 1;
+    if (calendar_follow || !calendar_year) { calendar_year = year; calendar_month = month; }
+    unsigned stamp = ((calendar_year * 12 + calendar_month) * 32 + local.tm_mday) * 2 + m3_i18n_language() + 1;
+    unsigned today_stamp = year * 10000 + month * 100 + local.tm_mday;
+    if (stamp == calendar_stamp && today_stamp == calendar_today_stamp) return;
+    calendar_stamp = stamp; calendar_today_stamp = today_stamp;
+    char text[80]; snprintf(text, sizeof(text), tr(T_CAL_MONTH), calendar_year, calendar_month);
+    set_text(calendar_heading, text); set_text(calendar_hint, tr(T_HOME_SLIDE));
+    static const char *const ko[] = {"일", "월", "화", "수", "목", "금", "토"};
+    static const char *const en[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *const ja[] = {"日", "月", "火", "水", "木", "金", "土"};
+    for (unsigned i = 0; i < 7; ++i) set_text(calendar_weekdays[i], m3_i18n_language() == M3_LANG_KO ? ko[i] : m3_i18n_language() == M3_LANG_JA ? ja[i] : en[i]);
+    unsigned start = m3_calendar_first(calendar_year, calendar_month), days = m3_calendar_days(calendar_year, calendar_month);
+    for (unsigned i = 0; i < 42; ++i) {
+        unsigned day = i >= start && i - start < days ? i - start + 1 : 0;
+        bool today = day && calendar_year == year && calendar_month == month && day == (unsigned)local.tm_mday;
+        snprintf(text, sizeof(text), "%u", day);
+        set_text(lv_obj_get_child(calendar_cells[i], 0), day ? text : "");
+        lv_obj_set_style_bg_opa(calendar_cells[i], today ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        set_bg(calendar_cells[i], CYAN);
+        set_ink(lv_obj_get_child(calendar_cells[i], 0), today ? ON_ACCENT : i % 7 == 0 ? MAGENTA : i % 7 == 6 ? CYAN : TEXT);
+    }
+}
+static void build_home_calendar(lv_obj_t *tile) {
+    lv_obj_t *heading = text(tile, T_CAL_TITLE, TEXT); lv_obj_set_pos(heading, 24, 22);
+    lv_obj_set_width(heading, 432);
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    lv_obj_t *previous = icon_button(tile, LV_SYMBOL_LEFT, calendar_move, (void *)(intptr_t)-1);
+    lv_obj_set_pos(previous, 24, 72); lv_obj_set_size(previous, 44, 44);
+    lv_obj_t *next = icon_button(tile, LV_SYMBOL_RIGHT, calendar_move, (void *)(intptr_t)1);
+    lv_obj_set_pos(next, 412, 72); lv_obj_set_size(next, 44, 44);
+    calendar_heading = label(tile, "-- / --", TEXT); lv_obj_set_pos(calendar_heading, 76, 84); lv_obj_set_width(calendar_heading, 328);
+    lv_obj_set_style_text_align(calendar_heading, LV_TEXT_ALIGN_CENTER, 0);
+    for (unsigned i = 0; i < 7; ++i) {
+        calendar_weekdays[i] = label(tile, "", i == 0 ? MAGENTA : i == 6 ? CYAN : MUTED);
+        lv_obj_set_pos(calendar_weekdays[i], 26 + i * 62, 152); lv_obj_set_width(calendar_weekdays[i], 56);
+        lv_obj_set_style_text_align(calendar_weekdays[i], LV_TEXT_ALIGN_CENTER, 0);
+    }
+    for (unsigned i = 0; i < 42; ++i) {
+        calendar_cells[i] = bare(tile); lv_obj_set_size(calendar_cells[i], 54, 48);
+        lv_obj_set_pos(calendar_cells[i], 27 + (i % 7) * 62, 188 + (i / 7) * 55);
+        lv_obj_set_style_radius(calendar_cells[i], 18, 0);
+        lv_obj_t *day = label(calendar_cells[i], "", TEXT); lv_obj_set_width(day, 54);
+        lv_obj_set_style_text_align(day, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(day);
+    }
+    lv_obj_t *today = button(tile, NULL, T_CAL_TODAY, BTN_PRIMARY, calendar_move, NULL);
+    lv_obj_set_pos(today, 150, 552); lv_obj_set_size(today, 180, 44);
+    calendar_hint = label(tile, tr(T_CAL_WAIT), MUTED); lv_obj_set_pos(calendar_hint, 20, 618); lv_obj_set_width(calendar_hint, 440);
+    lv_obj_set_style_text_align(calendar_hint, LV_TEXT_ALIGN_CENTER, 0);
+}
+static void photo_step(lv_event_t *event) { m3_photos_step((int)(intptr_t)lv_event_get_user_data(event)); }
+static void photo_toggle(lv_event_t *event) { (void)event; m3_photos_pause(); }
+static void photo_refresh(lv_event_t *event) { (void)event; m3_photos_refresh(); }
+static void update_photos(void) {
+    if (!photo_canvas || current_app != APP_HOME || home_index != HOME_PHOTOS) return;
+    m3_photos_state(&photo_snapshot);
+    static const m3_text_t statuses[] = {T_PHOTO_HINT, T_PHOTO_LOADING, T_PHOTO_HINT, T_PHOTO_EMPTY,
+        T_PHOTO_BUSY, T_PHOTO_INVALID, T_PHOTO_MEMORY, T_PHOTO_NO_SD};
+    unsigned state = photo_snapshot.status;
+    if (state >= sizeof(statuses) / sizeof(statuses[0])) state = M3_PHOTO_INVALID;
+    set_text(photo_name, photo_snapshot.name);
+    char text[128];
+    if (state == M3_PHOTO_READY) snprintf(text, sizeof(text), tr(T_PHOTO_COUNT), photo_snapshot.index + 1, photo_snapshot.count,
+        tr(photo_snapshot.paused ? T_PHOTO_PAUSED : T_PHOTO_RUNNING));
+    else snprintf(text, sizeof(text), "%s", tr(statuses[state]));
+    set_text(photo_info, text); set_text(photo_empty, tr(statuses[state]));
+    set_text(lv_obj_get_child(photo_pause, 0), tr(photo_snapshot.paused ? T_MUSIC_RESUME : T_MUSIC_PAUSE));
+    const uint8_t *frame = m3_photos_frame();
+    if (frame && frame != photo_frame) {
+        photo_frame = frame;
+        lv_canvas_set_buffer(photo_canvas, (void *)frame, M3_PHOTO_W, M3_PHOTO_H, LV_COLOR_FORMAT_RGB565);
+    }
+    bool visible = frame && (state == M3_PHOTO_READY || state == M3_PHOTO_LOADING || state == M3_PHOTO_BUSY);
+    if (visible) { lv_obj_remove_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(photo_empty, LV_OBJ_FLAG_HIDDEN); }
+    else { lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(photo_empty, LV_OBJ_FLAG_HIDDEN); }
+}
+static void build_home_photos(lv_obj_t *tile) {
+    lv_obj_t *heading = text(tile, T_PHOTO_TITLE, TEXT); lv_obj_set_pos(heading, 24, 14);
+    lv_obj_set_width(heading, 432);
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    photo_canvas = lv_canvas_create(tile); lv_obj_set_pos(photo_canvas, 24, 68);
+    lv_obj_set_size(photo_canvas, M3_PHOTO_W, M3_PHOTO_H);
+    lv_obj_remove_flag(photo_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN);
+    photo_empty = label(tile, tr(T_PHOTO_EMPTY), MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
+    lv_obj_set_style_text_align(photo_empty, LV_TEXT_ALIGN_CENTER, 0);
+    photo_name = label(tile, "", TEXT); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
+    lv_label_set_long_mode(photo_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    photo_info = label(tile, tr(T_PHOTO_HINT), MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
+    lv_label_set_long_mode(photo_info, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *previous = button(tile, LV_SYMBOL_PREV, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)-1);
+    lv_obj_set_pos(previous, 24, 614); lv_obj_set_size(previous, 64, 40);
+    photo_pause = button(tile, NULL, T_MUSIC_PAUSE, BTN_SECONDARY, photo_toggle, NULL);
+    lv_obj_set_pos(photo_pause, 100, 614); lv_obj_set_size(photo_pause, 150, 40);
+    lv_obj_t *next = button(tile, LV_SYMBOL_NEXT, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)1);
+    lv_obj_set_pos(next, 262, 614); lv_obj_set_size(next, 64, 40);
+    lv_obj_t *refresh = button(tile, NULL, T_MUSIC_REFRESH, BTN_SECONDARY, photo_refresh, NULL);
+    lv_obj_set_pos(refresh, 338, 614); lv_obj_set_size(refresh, 118, 40);
+}
+static void build_home(lv_obj_t *home) {
+    lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0); lv_obj_set_style_pad_all(home, 0, 0);
+    lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
+    home_tiles = lv_tileview_create(home); lv_obj_remove_style_all(home_tiles);
+    lv_obj_set_pos(home_tiles, 0, 0); lv_obj_set_size(home_tiles, 480, 660);
+    lv_obj_set_scrollbar_mode(home_tiles, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_snap_x(home_tiles, LV_SCROLL_SNAP_CENTER);
+    lv_obj_set_scroll_snap_y(home_tiles, LV_SCROLL_SNAP_NONE);
+    lv_obj_set_style_anim_duration(home_tiles, 240, 0);
+    lv_obj_add_flag(home_tiles, LV_OBJ_FLAG_SCROLL_ONE);
+    for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) {
+        lv_dir_t direction = i == 0 ? LV_DIR_RIGHT : i == HOME_PAGE_COUNT - 1 ? LV_DIR_LEFT : LV_DIR_HOR;
+        home_sheets[i] = lv_tileview_add_tile(home_tiles, i, 0, direction);
+        lv_obj_set_style_pad_all(home_sheets[i], 0, 0); lv_obj_set_style_layout(home_sheets[i], LV_LAYOUT_NONE, 0);
+        lv_obj_remove_flag(home_sheets[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(home_sheets[i], LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+        lv_obj_set_style_bg_color(home_sheets[i], lv_color_hex(0x0b1424), 0);
+        lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_COVER, 0);
+    }
+    build_home_calendar(home_sheets[0]); build_home_main(home_sheets[1]);
+    for (unsigned i = 2; i < HOME_PHOTOS; ++i) {
+        lv_obj_t *heading = text(home_sheets[i], T_HOME_MORE, TEXT); lv_obj_set_pos(heading, 24, 30);
+        lv_obj_set_width(heading, 432);
+        lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+        home_apps(home_sheets[i], (i - 1) * HOME_APPS_PER_PAGE, 116);
+        lv_obj_t *hint = text(home_sheets[i], T_HOME_SLIDE, MUTED); lv_obj_set_pos(hint, 24, 600);
+    }
+    build_home_photos(home_sheets[HOME_PHOTOS]);
+    for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) {
+        home_dots[i] = lv_button_create(home); lv_obj_remove_style_all(home_dots[i]);
+        lv_obj_set_size(home_dots[i], 40, 28); lv_obj_set_pos(home_dots[i], (480 - HOME_PAGE_COUNT * 40) / 2 + i * 40, 664);
+        lv_obj_remove_flag(home_dots[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(home_dots[i], home_page_tap, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_t *mark = bare(home_dots[i]); lv_obj_set_size(mark, 8, 6);
+        lv_obj_set_style_radius(mark, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, 0);
+    }
+    home_page_name = label(home, "", MUTED); lv_obj_set_pos(home_page_name, 0, 694);
+    lv_obj_set_style_text_align(home_page_name, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_event_cb(home_tiles, home_tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
+    home_index = 1; home_page_update();
+}
+static void build_wifi(lv_obj_t *net) {
+    lv_obj_t *box = card(net, T_SEC_STATUS);
+    lv_obj_t *line = row(box);
+    net_dot = dot(line, AMBER);
+    net_title = label(line, "", TEXT); grow(net_title); lv_obj_add_style(net_title, &st_title, 0);
+    network = label(box, "", MUTED); lv_obj_set_style_text_line_space(network, 4, 0);
+    line = row(box); lv_obj_set_style_pad_column(line, 16, 0);
+    qr = lv_qrcode_create(line); lv_qrcode_set_size(qr, 120);
+    lv_qrcode_set_dark_color(qr, lv_color_hex(0x000000)); lv_qrcode_set_light_color(qr, lv_color_hex(0xffffff));
+    lv_obj_set_style_border_width(qr, 8, 0); lv_obj_set_style_border_color(qr, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_radius(qr, 8, 0);
+    lv_obj_add_flag(qr, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *column = bare(line); grow(column); lv_obj_set_height(column, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(column, 8, 0);
+    caption(column, T_QR_HINT);
+    qr_url = text(column, T_QR_WAIT, CYAN);
+    box = card(net, T_SEC_NEARBY);
+    wifi_actions[0] = button(box, LV_SYMBOL_REFRESH, T_WIFI_SCAN, BTN_SECONDARY, wifi_action, (void *)(uintptr_t)M3_WIFI_SCAN);
+    for (unsigned i = 0; i < M3_WIFI_RESULTS; ++i) {
+        scan_buttons[i] = list_row(box, select_network, (void *)(uintptr_t)i);
+        lv_label_set_text(lv_obj_get_child(scan_buttons[i], 0), LV_SYMBOL_WIFI);
+        lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    box = card(net, T_SEC_CONNECT);
+    wifi_info = text(box, T_WIFI_FORM_HINT, CYAN);
+    ssid_field = input_field(box, T_WIFI_SSID, 32, INPUT_TEXT, true);
+    pass_field = input_field(box, T_WIFI_PASSWORD, 63, INPUT_TEXT, false);
+    bind_text(pass_field, T_WIFI_PASSWORD_HINT, NULL, BIND_PLACEHOLDER);
+    lv_textarea_set_password_mode(pass_field, true);
+    icon_button(lv_obj_get_parent(pass_field), LV_SYMBOL_EYE_CLOSE, password_visibility, NULL);
+    line = row(box); lv_obj_set_style_pad_top(line, 6, 0);
+    lv_obj_t *texts = bare(line); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 2, 0);
+    text(texts, T_WIFI_STATIC, TEXT); caption(texts, T_WIFI_STATIC_HINT);
+    static_switch = lv_switch_create(line); lv_obj_set_size(static_switch, 60, 32);
+    lv_obj_set_style_bg_color(static_switch, lv_color_hex(SURFACE_HI), 0);
+    lv_obj_add_event_cb(static_switch, static_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    static_fields = bare(box); lv_obj_set_size(static_fields, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(static_fields, LV_FLEX_FLOW_ROW_WRAP); lv_obj_set_style_pad_column(static_fields, 12, 0);
+    lv_obj_set_style_pad_row(static_fields, 8, 0);
+    static const m3_text_t ip_titles[] = {T_WIFI_IP, T_WIFI_GATEWAY, T_WIFI_MASK, T_WIFI_DNS};
+    lv_obj_t **ip_fields[] = {&ip_field, &gateway_field, &mask_field, &dns_field};
+    for (unsigned i = 0; i < 4; ++i) {
+        lv_obj_t *cell = bare(static_fields); lv_obj_set_size(cell, 202, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(cell, 6, 0);
+        *ip_fields[i] = input_field(cell, ip_titles[i], 15, INPUT_NUMBER, false);
+    }
+    bind_text(dns_field, T_WIFI_DNS_HINT, NULL, BIND_PLACEHOLDER);
+    lv_textarea_set_text(mask_field, "255.255.255.0"); form_dirty = false;
+    lv_obj_add_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
+    wifi_actions[1] = button(box, LV_SYMBOL_OK, T_WIFI_CONNECT, BTN_PRIMARY, wifi_action, (void *)(uintptr_t)M3_WIFI_CONNECT);
+    wifi_actions[2] = button(box, LV_SYMBOL_GPS, T_WIFI_HOTSPOT, BTN_SECONDARY, wifi_action, (void *)(uintptr_t)M3_WIFI_SETUP);
+    box = card(net, T_SEC_HELP);
+    caption(box, T_WIFI_HELP);
+}
+static void build_files(lv_obj_t *files) {
+    static const m3_text_t tabs[] = {T_STORAGE_FLASH, T_STORAGE_SD};
+    storage_tabs = segmented(files, tabs, NULL, 2, 0, choose_storage);
+    lv_obj_t *box = card(files, T_NONE);
+    lv_obj_t *line = row(box);
+    icon_button(line, LV_SYMBOL_UP, parent_folder, NULL);
+    lv_obj_t *texts = bare(line); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 4, 0);
+    file_path = label(texts, "", TEXT); lv_label_set_long_mode(file_path, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    file_info = text(texts, T_FILES_READING, MUTED);
+    file_bar = bar(box, AMBER, 6);
+    box = card(files, T_NONE);
+    lv_obj_set_style_pad_row(box, 8, 0);
+    for (unsigned i = 0; i < STORAGE_VIEW_ROWS; ++i) {
+        file_buttons[i] = list_row(box, open_file, (void *)(uintptr_t)i);
+        lv_obj_add_flag(file_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    file_empty = caption(box, T_FILES_EMPTY); lv_obj_set_style_text_align(file_empty, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(file_empty, LV_OBJ_FLAG_HIDDEN);
+    line = row(box);
+    grow(button(line, LV_SYMBOL_LEFT, T_FILES_PREV, BTN_SECONDARY, previous_files, NULL));
+    file_page = label(line, "1 / 1", MUTED); lv_obj_set_width(file_page, 76);
+    lv_obj_set_style_text_align(file_page, LV_TEXT_ALIGN_CENTER, 0);
+    grow(button(line, NULL, T_FILES_NEXT, BTN_SECONDARY, next_files, NULL));
+    caption(files, T_FILES_HINT);
+}
+static void build_audio(lv_obj_t *audio, unsigned volume) {
+    lv_obj_t *box = card(audio, T_NOW_PLAYING);
+    audio_info = label(box, "", TEXT);
+    audio_bar = bar(box, MAGENTA, 6);
+    lv_obj_t *line = row(box);
+    grow(button(line, LV_SYMBOL_PLAY, T_AUDIO_TEST, BTN_SECONDARY, test_audio, NULL));
+    grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
+    box = card(audio, T_SEC_VOLUME);
+    volume_row(box, 0, volume);
+    box = card(audio, T_SEC_MEDIA);
+    button(box, LV_SYMBOL_SD_CARD, T_AUDIO_BROWSE, BTN_SECONDARY, media_folder, NULL);
+    caption(box, T_AUDIO_INFO);
+    caption(audio, T_AUDIO_CODEC);
+}
+static void build_radio(lv_obj_t *radio, unsigned volume) {
+    lv_obj_t *box = card(radio, T_NOW_PLAYING);
+    radio_now = label(box, "", TEXT); lv_obj_add_style(radio_now, &st_title, 0);
+    lv_label_set_long_mode(radio_now, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    radio_info = text(box, T_RADIO_IDLE, MUTED);
+    radio_bar = bar(box, MAGENTA, 6);
+    lv_obj_t *line = row(box);
+    grow(button(line, LV_SYMBOL_PLAY, T_RADIO_PLAY, BTN_PRIMARY, play_selected, NULL));
+    grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
+    box = card(radio, T_SEC_VOLUME);
+    volume_row(box, 1, volume);
+    box = card(radio, T_SEC_STATIONS);
+    lv_obj_set_style_pad_row(box, 8, 0);
+    for (unsigned i = 0; i < sizeof(radio_stations) / sizeof(radio_stations[0]); ++i) {
+        station_buttons[i] = list_row(box, station_tap, (void *)(uintptr_t)i);
+        const char *name = radio_stations[i].name, *slash = strstr(name, " / ");
+        char title[48]; m3_utf8_copy(title, sizeof(title), name);
+        char *separator = strstr(title, " / "); if (separator) *separator = 0;
+        lv_label_set_text(lv_obj_get_child(station_buttons[i], 0), LV_SYMBOL_AUDIO);
+        lv_obj_set_style_text_color(lv_obj_get_child(station_buttons[i], 0), lv_color_hex(radio_stations[i].aac ? MAGENTA : CYAN), 0);
+        lv_label_set_text(lv_obj_get_child(station_buttons[i], 1), title);
+        lv_label_set_text(lv_obj_get_child(station_buttons[i], 2), slash ? slash + 3 : "");
+    }
+    box = card(radio, T_SEC_CUSTOM);
+    radio_url = input_field(box, T_RADIO_URL, 512, INPUT_TEXT, false);
+    static const char *const codecs[] = {"MP3", "AAC / ADTS"};
+    radio_codec = segmented(box, NULL, codecs, 2, 0, NULL);
+    button(box, LV_SYMBOL_PLAY, T_RADIO_PLAY_URL, BTN_SECONDARY, play_custom, NULL);
+    caption(radio, T_RADIO_NOTES);
+}
+static void build_games(lv_obj_t *games) {
+    lv_obj_set_style_flex_cross_place(games, LV_FLEX_ALIGN_CENTER, 0);
+    static const m3_text_t modes[] = {T_GAME_2048, T_GAME_MEMORY};
+    game_tabs = segmented(games, modes, NULL, 2, 0, choose_game);
+    lv_obj_t *scores = row(games);
+    for (unsigned i = 0; i < 2; ++i) {
+        lv_obj_t *box = card(scores, T_NONE); grow(box); lv_obj_set_style_pad_row(box, 2, 0);
+        lv_obj_set_style_pad_ver(box, 12, 0);
+        score_titles[i] = label(box, "", MUTED);
+        score_values[i] = label(box, "0", TEXT); lv_obj_set_style_text_font(score_values[i], FONT_ICON, 0);
+    }
+    game_board = lv_obj_create(games); lv_obj_remove_style_all(game_board);
+    lv_obj_set_size(game_board, 400, 400); lv_obj_set_style_align(game_board, LV_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(game_board, lv_color_hex(SURFACE), 0); lv_obj_set_style_bg_opa(game_board, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(game_board, 18, 0);
+    lv_obj_remove_flag(game_board, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(game_board, LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_add_flag(game_board, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(game_board, game_touch, LV_EVENT_ALL, NULL);
+    for (unsigned i = 0; i < 16; ++i) {
+        game_tiles[i] = lv_button_create(game_board); lv_obj_remove_style_all(game_tiles[i]);
+        lv_obj_set_size(game_tiles[i], 88, 88); lv_obj_set_pos(game_tiles[i], 10 + (i % 4) * 96, 10 + (i / 4) * 96);
+        lv_obj_set_style_radius(game_tiles[i], 12, 0); lv_obj_set_style_bg_opa(game_tiles[i], LV_OPA_COVER, 0);
+        lv_obj_t *face = lv_label_create(game_tiles[i]); lv_obj_center(face);
+        lv_obj_add_event_cb(game_tiles[i], memory_card, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_add_flag(game_tiles[i], LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_PRESS_LOCK);
+        lv_obj_remove_flag(game_tiles[i], LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    }
+    game_info = label(games, "", MUTED); lv_obj_set_style_text_align(game_info, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t *arrows = row(games);
+    static const char *directions[] = {LV_SYMBOL_LEFT, LV_SYMBOL_RIGHT, LV_SYMBOL_UP, LV_SYMBOL_DOWN};
+    for (unsigned i = 0; i < 4; ++i) {
+        game_arrows[i] = grow(button(arrows, directions[i], T_NONE, BTN_SECONDARY, game_direction, (void *)(uintptr_t)i));
+    }
+    lv_obj_t *line = row(games);
+    game_undo = grow(button(line, LV_SYMBOL_LOOP, T_GAME_UNDO, BTN_SECONDARY, undo_move, NULL));
+    grow(button(line, LV_SYMBOL_REFRESH, T_GAME_NEW, BTN_PRIMARY, new_game, NULL));
+    new_game(NULL);
+}
+static void build_tts(lv_obj_t *tts, unsigned volume) {
+    lv_obj_t *box = card(tts, T_SEC_ENGINE);
+    static const m3_text_t engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE};
+    tts_provider = segmented(box, engines, NULL, 3, 0, tts_provider_changed);
+    caption(box, T_TTS_ENGINE_HINT);
+    box = card(tts, T_SEC_TEXT);
+    tts_text = input_field(box, T_NONE, 128, INPUT_KOREAN, true);
+    lv_obj_t *field_row = lv_obj_get_parent(tts_text);
+    lv_obj_set_style_flex_cross_place(field_row, LV_FLEX_ALIGN_START, 0);
+    lv_textarea_set_one_line(tts_text, false); lv_obj_set_height(tts_text, 110);
+    bind_text(tts_text, T_TTS_PLACEHOLDER, NULL, BIND_PLACEHOLDER);
+    lv_textarea_set_text(tts_text, "안녕하세요. 한국어 음성 합성 시험입니다.");
+    lv_obj_t *line = row(box);
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_t *chip = grow(button(line, NULL, (m3_text_t)(T_TTS_SAMPLE_1 + i), BTN_SECONDARY, tts_sample, (void *)(uintptr_t)i));
+        lv_obj_set_height(chip, 40); lv_obj_set_style_radius(chip, 20, 0);
+    }
+    tts_info = label(box, "", MUTED);
+    tts_wait = activity_create(box, ACTIVITY_DOTS, CYAN, T_TTS_PREPARING);
+    tts_talk = activity_create(box, ACTIVITY_BARS, MAGENTA, T_TTS_SPEAKING);
+    line = row(box);
+    grow(button(line, LV_SYMBOL_PLAY, T_TTS_SPEAK, BTN_PRIMARY, speak_text, NULL));
+    grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
+    box = card(tts, T_SEC_SPEED);
+    line = row(box);
+    tts_speed = lv_slider_create(line); style_slider(tts_speed); grow(tts_speed);
+    lv_slider_set_range(tts_speed, 100, 260); lv_slider_set_value(tts_speed, 165, LV_ANIM_OFF);
+    lv_obj_add_event_cb(tts_speed, tts_speed_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_style(tts_speed, &st_disabled, LV_STATE_DISABLED); lv_obj_add_state(tts_speed, LV_STATE_DISABLED);
+    tts_speed_value = label(line, "", TEXT); lv_obj_set_width(tts_speed_value, 56);
+    lv_obj_set_style_text_align(tts_speed_value, LV_TEXT_ALIGN_RIGHT, 0);
+    tts_speed_label();
+    caption(box, T_TTS_SPEED_HINT);
+    box = card(tts, T_SEC_VOLUME);
+    volume_row(box, 2, volume);
+    caption(tts, T_TTS_NOTES);
+}
+static void build_agent(lv_obj_t *agent) {
+    /* Index order matches m3_agent_model(): 0 Gemini 3.1 Flash-Lite, 1 Gemini 3.5 Flash-Lite. */
+    static const char *const models[] = {"Gemini 3.1 Flash-Lite", "Gemini 3.5 Flash-Lite"};
+    agent_model = segmented(agent, NULL, models, 2, 1, NULL);
+    lv_obj_t *box = card(agent, T_SEC_CONVERSATION);
+    lv_obj_t *line = row(box);
+    agent_dot = dot(line, MUTED);
+    agent_info = label(line, "", MUTED); grow(agent_info);
+    agent_voice = activity_create(line, ACTIVITY_BARS, MAGENTA, T_NONE);
+    agent_output = lv_obj_create(box); lv_obj_remove_style_all(agent_output);
+    lv_obj_set_size(agent_output, LV_PCT(100), 250);
+    lv_obj_set_style_bg_color(agent_output, lv_color_hex(FIELD), 0); lv_obj_set_style_bg_opa(agent_output, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(agent_output, 14, 0); lv_obj_set_style_pad_all(agent_output, 14, 0);
+    lv_obj_set_flex_flow(agent_output, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(agent_output, 8, 0);
+    agent_trace = label(agent_output, "", CYAN); lv_obj_add_flag(agent_trace, LV_OBJ_FLAG_HIDDEN);
+    agent_thinking = activity_create(agent_output, ACTIVITY_DOTS, CYAN, T_AGENT_THINKING);
+    agent_answer = label(agent_output, "", TEXT); lv_obj_set_style_text_line_space(agent_answer, 5, 0);
+    line = row(box);
+    grow(button(line, LV_SYMBOL_VOLUME_MAX, T_AGENT_READ, BTN_SECONDARY, agent_read, NULL));
+    grow(button(line, LV_SYMBOL_TRASH, T_AGENT_CLEAR, BTN_SECONDARY, agent_clear, NULL));
+    icon_button(line, LV_SYMBOL_STOP, stop_audio, NULL);
+    box = card(agent, T_NONE);
+    agent_prompt = input_field(box, T_NONE, 128, INPUT_KOREAN, true);
+    lv_obj_set_style_flex_cross_place(lv_obj_get_parent(agent_prompt), LV_FLEX_ALIGN_START, 0);
+    lv_textarea_set_one_line(agent_prompt, false); lv_obj_set_height(agent_prompt, 90);
+    bind_text(agent_prompt, T_AGENT_PLACEHOLDER, NULL, BIND_PLACEHOLDER);
+    line = row(box);
+    grow(button(line, LV_SYMBOL_UPLOAD, T_AGENT_SEND, BTN_PRIMARY, agent_send, NULL));
+    grow(button(line, LV_SYMBOL_CLOSE, T_AGENT_CANCEL, BTN_SECONDARY, agent_cancel, NULL));
+    caption(agent, T_AGENT_NOTES);
+}
+
+static void build_music(lv_obj_t *music, unsigned volume) {
+    lv_obj_t *box = card(music, T_NOW_PLAYING);
+    music_title = label(box, "", TEXT); lv_obj_add_style(music_title, &st_title, 0);
+    lv_label_set_long_mode(music_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    music_info = label(box, "", MUTED); music_time = label(box, "", MUTED); music_bar = bar(box, CYAN, 8);
+    lv_obj_t *line = row(box);
+    grow(button(line, LV_SYMBOL_PREV, T_FILES_PREV, BTN_SECONDARY, music_step_event, (void *)(intptr_t)-1));
+    music_pause_button = button(line, LV_SYMBOL_PAUSE, T_MUSIC_PAUSE, BTN_PRIMARY, music_pause_event, NULL); grow(music_pause_button);
+    grow(button(line, LV_SYMBOL_NEXT, T_FILES_NEXT, BTN_SECONDARY, music_step_event, (void *)(intptr_t)1));
+    button(box, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, music_stop_event, NULL);
+    box = card(music, T_SEC_VOLUME); volume_row(box, 4, volume);
+    box = card(music, T_SEC_MEDIA);
+    static const m3_text_t sources[] = {T_STORAGE_SD, T_STORAGE_FLASH};
+    music_source = segmented(box, sources, NULL, 2, 0, music_refresh_event);
+    button(box, LV_SYMBOL_REFRESH, T_MUSIC_REFRESH, BTN_SECONDARY, music_refresh_event, NULL);
+    static const m3_text_t repeats[] = {T_MUSIC_REPEAT_OFF, T_MUSIC_REPEAT_ON};
+    music_repeat = segmented(box, repeats, NULL, 2, 0, music_repeat_event);
+    music_empty = label(box, tr(T_MUSIC_EMPTY), MUTED);
+    for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
+        music_rows[i] = button(box, LV_SYMBOL_PLAY, T_NONE, BTN_SECONDARY, music_track_event, (void *)(uintptr_t)i);
+        music_labels[i] = lv_obj_get_child(music_rows[i], 0);
+        lv_obj_set_width(music_labels[i], LV_PCT(94)); lv_label_set_long_mode(music_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_style_text_align(music_labels[i], LV_TEXT_ALIGN_LEFT, 0); lv_obj_add_flag(music_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    line = row(box);
+    grow(button(line, LV_SYMBOL_LEFT, T_FILES_PREV, BTN_SECONDARY, music_page_event, (void *)(intptr_t)-1));
+    grow(button(line, LV_SYMBOL_RIGHT, T_FILES_NEXT, BTN_SECONDARY, music_page_event, (void *)(intptr_t)1));
+    caption(music, T_MUSIC_HINT);
+}
+
+static void build_tube(lv_obj_t *tube) {
+    /* Full-width video; the other content keeps the usual side margins. */
+    lv_obj_set_style_pad_hor(tube, 0, 0); lv_obj_set_style_pad_top(tube, 0, 0);
+    tube_search_view = bare(tube); lv_obj_set_size(tube_search_view, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(tube_search_view, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_hor(tube_search_view, 16, 0); lv_obj_set_style_pad_top(tube_search_view, 6, 0);
+    lv_obj_set_style_pad_row(tube_search_view, 12, 0);
+    tube_query = input_field(tube_search_view, T_NONE, 100, INPUT_KOREAN, true);
+    bind_text(tube_query, T_TUBE_PLACEHOLDER, NULL, BIND_PLACEHOLDER);
+    lv_obj_add_event_cb(tube_query, tube_search_event, LV_EVENT_READY, NULL);
+    lv_obj_t *go = icon_button(lv_obj_get_parent(tube_query), LV_SYMBOL_RIGHT, tube_search_event, NULL);
+    lv_obj_add_style(go, &st_primary, 0); lv_obj_add_style(go, &st_primary_pressed, LV_STATE_PRESSED);
+    lv_obj_t *chips = row(tube_search_view);
+    lv_obj_add_flag(chips, LV_OBJ_FLAG_SCROLLABLE); lv_obj_set_scroll_dir(chips, LV_DIR_HOR);
+    lv_obj_set_scrollbar_mode(chips, LV_SCROLLBAR_MODE_OFF); lv_obj_set_style_pad_column(chips, 8, 0);
+    for (unsigned i = 0; i < 6; ++i) {
+        m3_text_t topic = (m3_text_t)(T_TUBE_TOPIC_1 + i);
+        lv_obj_t *chip = button(chips, NULL, topic, BTN_SECONDARY, tube_chip, (void *)(uintptr_t)topic);
+        lv_obj_set_size(chip, LV_SIZE_CONTENT, 40); lv_obj_set_style_radius(chip, 20, 0); lv_obj_set_style_pad_hor(chip, 18, 0);
+        lv_obj_center(lv_obj_get_child(chip, 0));
+    }
+    lv_obj_t *line = row(tube_search_view);
+    tube_heading = label(line, "", TEXT); grow(tube_heading); lv_label_set_long_mode(tube_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_back_search = button(line, LV_SYMBOL_LEFT, T_TUBE_BACK_SEARCH, BTN_SECONDARY, tube_back_to_search, NULL);
+    lv_obj_set_size(tube_back_search, LV_SIZE_CONTENT, 40); lv_obj_set_style_pad_hor(tube_back_search, 14, 0);
+    lv_obj_add_flag(tube_back_search, LV_OBJ_FLAG_HIDDEN);
+    tube_status = caption(tube_search_view, T_TUBE_EMPTY);
+    for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) {
+        tube_row_t *item = &tube_rows[i];
+        item->button = lv_button_create(tube_search_view); lv_obj_remove_style_all(item->button);
+        lv_obj_add_style(item->button, &st_card, 0); lv_obj_add_style(item->button, &st_btn_pressed, LV_STATE_PRESSED);
+        lv_obj_set_style_pad_all(item->button, 8, 0); lv_obj_set_style_radius(item->button, 14, 0);
+        lv_obj_set_flex_flow(item->button, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(item->button, 12, 0);
+        lv_obj_add_event_cb(item->button, tube_open, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        item->thumb = bare(item->button); lv_obj_set_size(item->thumb, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H);
+        lv_obj_set_style_radius(item->thumb, 10, 0); lv_obj_set_style_clip_corner(item->thumb, true, 0);
+        lv_obj_set_style_bg_opa(item->thumb, LV_OPA_COVER, 0); lv_obj_set_style_bg_color(item->thumb, lv_color_hex(SURFACE_HI), 0);
+        lv_obj_t *placeholder = label(item->thumb, LV_SYMBOL_PLAY, LINE); lv_obj_set_width(placeholder, LV_SIZE_CONTENT);
+        lv_obj_set_style_text_font(placeholder, FONT_ICON, 0); lv_obj_center(placeholder);
+        item->canvas = lv_canvas_create(item->thumb); lv_obj_add_flag(item->canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(item->canvas, LV_OBJ_FLAG_CLICKABLE);
+        item->badge = label(item->thumb, "", 0xffffff); lv_obj_set_width(item->badge, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(item->badge, LV_OPA_80, 0); lv_obj_set_style_radius(item->badge, 4, 0);
+        lv_obj_set_style_pad_hor(item->badge, 5, 0); lv_obj_set_style_pad_ver(item->badge, 1, 0);
+        lv_obj_set_style_text_font(item->badge, &m3_font_korean, 0);
+        lv_obj_align(item->badge, LV_ALIGN_BOTTOM_RIGHT, -5, -5);
+        lv_obj_t *texts = bare(item->button); grow(texts); lv_obj_set_height(texts, M3_TUBE_THUMB_H);
+        lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 3, 0);
+        item->title = label(texts, "", TEXT); lv_obj_set_height(item->title, 42);
+        lv_label_set_long_mode(item->title, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_style_text_line_space(item->title, 2, 0);
+        item->channel = label(texts, "", MUTED); lv_label_set_long_mode(item->channel, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->channel, 20);
+        item->meta = label(texts, "", MUTED); lv_label_set_long_mode(item->meta, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->meta, 20);
+        lv_obj_add_flag(item->button, LV_OBJ_FLAG_HIDDEN);
+    }
+    tube_pager = row(tube_search_view);
+    tube_prev = grow(button(tube_pager, LV_SYMBOL_LEFT, T_FILES_PREV, BTN_SECONDARY, tube_page_turn, (void *)(intptr_t)-1));
+    tube_page = label(tube_pager, "", MUTED); lv_obj_set_width(tube_page, 90); lv_obj_set_style_text_align(tube_page, LV_TEXT_ALIGN_CENTER, 0);
+    tube_next = grow(button(tube_pager, NULL, T_FILES_NEXT, BTN_SECONDARY, tube_page_turn, (void *)(intptr_t)1));
+    lv_obj_add_flag(tube_pager, LV_OBJ_FLAG_HIDDEN);
+    caption(tube_search_view, T_TUBE_NOTES);
+
+    tube_player_view = bare(tube); lv_obj_set_size(tube_player_view, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(tube_player_view, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(tube_player_view, 12, 0);
+    lv_obj_t *screen = bare(tube_player_view); lv_obj_set_size(screen, M3_TUBE_VIDEO_W, M3_TUBE_VIDEO_H);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0); lv_obj_set_style_bg_color(screen, lv_color_hex(0), 0);
+    lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(screen, tube_toggle_event, LV_EVENT_CLICKED, NULL);
+    tube_video = lv_canvas_create(screen); lv_obj_center(tube_video); lv_obj_remove_flag(tube_video, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_transform_pivot_x(tube_video, LV_PCT(50), 0); lv_obj_set_style_transform_pivot_y(tube_video, LV_PCT(50), 0);
+    tube_overlay = label(screen, "", 0xffffff); lv_obj_set_width(tube_overlay, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(tube_overlay, LV_OPA_70, 0); lv_obj_set_style_bg_color(tube_overlay, lv_color_hex(0), 0);
+    lv_obj_set_style_radius(tube_overlay, 16, 0); lv_obj_set_style_pad_hor(tube_overlay, 16, 0); lv_obj_set_style_pad_ver(tube_overlay, 8, 0);
+    lv_obj_center(tube_overlay); lv_obj_add_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN);
+    tube_wait = activity_create(screen, ACTIVITY_DOTS, 0xffffff, T_NONE); lv_obj_align(tube_wait, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_t *body = bare(tube_player_view); lv_obj_set_size(body, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_hor(body, 16, 0); lv_obj_set_style_pad_row(body, 12, 0);
+    line = row(body);
+    tube_time = label(line, "0:00", MUTED); lv_obj_set_width(tube_time, 64);
+    tube_seek = lv_slider_create(line); style_slider(tube_seek); grow(tube_seek);
+    lv_slider_set_range(tube_seek, 0, 1);
+    lv_obj_add_event_cb(tube_seek, tube_seek_event, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(tube_seek, tube_seek_event, LV_EVENT_RELEASED, NULL);
+    tube_total = label(line, "--:--", MUTED); lv_obj_set_width(tube_total, 64); lv_obj_set_style_text_align(tube_total, LV_TEXT_ALIGN_RIGHT, 0);
+    line = row(body); lv_obj_set_style_flex_main_place(line, LV_FLEX_ALIGN_SPACE_EVENLY, 0);
+    lv_obj_t *back = icon_button(line, LV_SYMBOL_PREV, tube_skip, (void *)(intptr_t)-10); lv_obj_set_size(back, 64, 56);
+    tube_toggle = icon_button(line, LV_SYMBOL_PAUSE, tube_toggle_event, NULL);
+    lv_obj_add_style(tube_toggle, &st_primary, 0); lv_obj_add_style(tube_toggle, &st_primary_pressed, LV_STATE_PRESSED);
+    lv_obj_set_size(tube_toggle, 72, 72); lv_obj_set_style_radius(tube_toggle, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_text_font(lv_obj_get_child(tube_toggle, 0), FONT_ICON, 0);
+    lv_obj_t *forward = icon_button(line, LV_SYMBOL_NEXT, tube_skip, (void *)(intptr_t)10); lv_obj_set_size(forward, 64, 56);
+    lv_obj_t *list_button = icon_button(line, LV_SYMBOL_LIST, tube_close, NULL); lv_obj_set_size(list_button, 64, 56);
+    tube_title = label(body, "", TEXT); lv_obj_set_style_text_line_space(tube_title, 4, 0);
+    line = row(body);
+    tube_channel = label(line, "", MUTED); grow(tube_channel); lv_label_set_long_mode(tube_channel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_channel_button = button(line, LV_SYMBOL_LIST, T_TUBE_CHANNEL, BTN_SECONDARY, tube_channel_event, NULL);
+    lv_obj_set_size(tube_channel_button, LV_SIZE_CONTENT, 44); lv_obj_set_style_pad_hor(tube_channel_button, 14, 0);
+    tube_player_status = label(body, "", MUTED);
+    lv_obj_t *box = card(body, T_SEC_VOLUME);
+    volume_row(box, 3, (unsigned)lv_slider_get_value(volume_sliders[0]));
+    lv_obj_add_flag(tube_player_view, LV_OBJ_FLAG_HIDDEN);
+}
+static void build_monitor(lv_obj_t *monitor) {
+    lv_obj_t *box = card(monitor, T_SEC_WEB);
+    static const m3_text_t web_choices[] = {T_WEB_DOMAIN, T_WEB_IPV6, T_WEB_IPV4, T_WEB_MDNS};
+    web_tabs = segmented(box, web_choices, NULL, M3_WEB_COUNT, web_address_kind, web_tab_changed);
+    lv_obj_t *state_row = row(box);
+    web_dot = dot(state_row, AMBER);
+    web_state = label(state_row, "", TEXT); grow(web_state);
+    /* 32 px white quiet zone around the 216 px modules, independent of dark theme. */
+    lv_obj_t *qr_row = row(box);
+    lv_obj_set_flex_align(qr_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    web_frame = bare(qr_row); lv_obj_set_size(web_frame, 280, 280);
+    lv_obj_set_style_bg_color(web_frame, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(web_frame, LV_OPA_COVER, 0);
+    web_qr = lv_qrcode_create(web_frame); lv_qrcode_set_size(web_qr, 216);
+    lv_qrcode_set_dark_color(web_qr, lv_color_hex(0x000000)); lv_qrcode_set_light_color(web_qr, lv_color_hex(0xffffff));
+    lv_obj_center(web_qr); lv_obj_add_flag(web_frame, LV_OBJ_FLAG_HIDDEN);
+    web_url = label(box, "", CYAN);
+    lv_label_set_long_mode(web_url, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    web_hint = label(box, "", MUTED); lv_label_set_long_mode(web_hint, LV_LABEL_LONG_WRAP);
+    web_retry = button(box, NULL, T_WEB_RETRY, BTN_SECONDARY, web_retry_ipv6, NULL);
+    lv_obj_add_flag(web_retry, LV_OBJ_FLAG_HIDDEN);
+    web_requests = label(box, "", MUTED);
+    box = card(monitor, T_SEC_MEMORY);
+    memory = label(box, "", TEXT); lv_obj_set_style_text_line_space(memory, 4, 0);
+    heap_bar = bar(box, MAGENTA, 10);
+    box = card(monitor, T_SEC_HISTORY);
+    lv_obj_t *legend = caption(box, T_MON_LEGEND); (void)legend;
+    chart = lv_chart_create(box); lv_obj_set_size(chart, LV_PCT(100), 200);
+    lv_obj_set_style_bg_color(chart, lv_color_hex(FIELD), 0); lv_obj_set_style_border_width(chart, 0, 0);
+    lv_obj_set_style_radius(chart, 12, 0); lv_obj_set_style_line_color(chart, lv_color_hex(SURFACE_HI), 0);
+    lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR); lv_obj_set_style_line_width(chart, 3, LV_PART_ITEMS);
+    lv_chart_set_div_line_count(chart, 4, 0);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE); lv_chart_set_point_count(chart, 60);
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 640);
+    heap_series = lv_chart_add_series(chart, lv_color_hex(CYAN), LV_CHART_AXIS_PRIMARY_Y);
+    psram_series = lv_chart_add_series(chart, lv_color_hex(MAGENTA), LV_CHART_AXIS_PRIMARY_Y);
+    box = card(monitor, T_SEC_SERVICES);
+    monitor_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(monitor_info, 4, 0);
+}
+static void build_settings(lv_obj_t *system) {
+    lv_obj_t *box = card(system, T_SEC_LANGUAGE);
+    static const m3_text_t languages[] = {T_LANG_KO, T_LANG_EN, T_LANG_JA};
+    language_tabs = segmented(box, languages, NULL, M3_LANG_COUNT, m3_i18n_language(), language_changed);
+    box = card(system, T_SEC_VOICE);
+    m3_voice_state_t initial_voice; m3_voice_state(&initial_voice);
+    /* Index order matches m3_voice_set_provider(): 0 OpenAI mini-transcribe, 1 Gemini 3.1, 2 Gemini 3.5. */
+    static const char *const recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5"};
+    voice_provider = segmented(box, NULL, recognizers, 3, initial_voice.provider, voice_provider_changed);
+    caption(box, T_STT_HINT);
+    voice_key = input_field(box, T_STT_KEY, 255, INPUT_TEXT, false);
+    lv_textarea_set_password_mode(voice_key, true);
+    button(box, LV_SYMBOL_SAVE, T_STT_KEY_SAVE, BTN_SECONDARY, voice_save_key, NULL);
+    voice_key_info = label(box, "", MUTED);
+    voice_key_status();
+    box = card(system, T_SEC_ABOUT);
+    system_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(system_info, 4, 0);
+}
+static void build_voice_panel(lv_obj_t *screen) {
+    voice_panel = lv_obj_create(screen); lv_obj_remove_style_all(voice_panel);
+    lv_obj_set_pos(voice_panel, 0, 0); lv_obj_set_size(voice_panel, 480, HOME_TOP);
+    lv_obj_set_style_bg_color(voice_panel, lv_color_hex(0), 0); lv_obj_set_style_bg_opa(voice_panel, LV_OPA_60, 0);
+    lv_obj_remove_flag(voice_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *sheet = card(voice_panel, T_NONE);
+    lv_obj_set_width(sheet, 456); lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_style_radius(sheet, 24, 0); lv_obj_set_style_pad_all(sheet, 20, 0);
+    lv_obj_set_style_border_color(sheet, lv_color_hex(LINE), 0); lv_obj_set_style_border_width(sheet, 1, 0);
+    lv_obj_t *line = row(sheet);
+    voice_dot = dot(line, RED); lv_obj_set_size(voice_dot, 14, 14);
+    lv_obj_t *title = text(line, T_VOICE_TITLE, TEXT); grow(title); lv_obj_add_style(title, &st_title, 0);
+    icon_button(line, LV_SYMBOL_SETTINGS, voice_settings, NULL);
+    voice_info = label(sheet, "", MUTED);
+    /* Live microphone meter: bar heights follow the measured loudness. */
+    voice_meter = row(sheet); lv_obj_set_style_pad_column(voice_meter, 14, 0);
+    lv_obj_t *bars = row(voice_meter);
+    lv_obj_set_size(bars, LV_SIZE_CONTENT, METER_MAX); lv_obj_set_style_pad_column(bars, 4, 0);
+    for (unsigned i = 0; i < METER_BARS; ++i) {
+        voice_meter_bars[i] = bare(bars); lv_obj_set_size(voice_meter_bars[i], 6, METER_MIN);
+        lv_obj_set_style_radius(voice_meter_bars[i], 3, 0); lv_obj_set_style_bg_opa(voice_meter_bars[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(voice_meter_bars[i], lv_color_hex(RED), 0);
+    }
+    lv_obj_t *meter_text = bare(voice_meter); grow(meter_text); lv_obj_set_height(meter_text, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(meter_text, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(meter_text, 2, 0);
+    text(meter_text, T_VOICE_RECORDING, TEXT);
+    voice_db = label(meter_text, "", MUTED);
+    lv_obj_add_flag(voice_meter, LV_OBJ_FLAG_HIDDEN);
+    voice_think = activity_create(sheet, ACTIVITY_DOTS, AMBER, T_VOICE_RECOGNIZING);
+    lv_obj_t *box = bare(sheet); lv_obj_set_size(box, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(box, 110, 0);
+    lv_obj_set_style_bg_color(box, lv_color_hex(FIELD), 0); lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(box, 14, 0); lv_obj_set_style_pad_all(box, 14, 0);
+    voice_text = label(box, "", TEXT); lv_obj_set_style_text_line_space(voice_text, 5, 0);
+    button(sheet, LV_SYMBOL_STOP, T_VOICE_FINISH, BTN_PRIMARY, voice_finish, NULL);
+    line = row(sheet);
+    grow(button(line, LV_SYMBOL_OK, T_VOICE_USE, BTN_SECONDARY, voice_apply, NULL));
+    grow(button(line, LV_SYMBOL_REFRESH, T_VOICE_RETRY, BTN_SECONDARY, voice_retry, NULL));
+    button(sheet, LV_SYMBOL_CLOSE, T_VOICE_CANCEL, BTN_DANGER, voice_cancel, NULL);
+    lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void style_keyboard(void) {
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x0d121a), 0); lv_obj_set_style_bg_opa(keyboard, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(keyboard, 0, 0); lv_obj_set_style_radius(keyboard, 0, 0);
+    lv_obj_set_style_pad_all(keyboard, 6, 0); lv_obj_set_style_pad_gap(keyboard, 6, 0);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x2a3445), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_radius(keyboard, 8, LV_PART_ITEMS); lv_obj_set_style_border_width(keyboard, 0, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(keyboard, 0, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x18202c), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(0xc3cede), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(CYAN), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(ON_ACCENT), LV_PART_ITEMS | LV_STATE_PRESSED);
+}
+/* Re-render every bound label, control and status after a language switch. */
+static void apply_language(void) {
+    for (unsigned i = 0; i < binding_count; ++i) bind_apply(i);
+    for (unsigned i = 0; i < segment_count; ++i) segment_refresh(&segments[i]);
+    lv_label_set_text(app_title, tr(app_names[current_app]));
+    seen_agent = seen_voice = seen_wifi = seen_scan = seen_files = ~0u;
+    web_qr_dirty = true;
+    seen_url[0] = seen_audio[0] = seen_web_url[0] = 0; /* Re-apply live QR URL and audio status over the static captions. */
+    render_game(); voice_key_status(); update_metrics(NULL);
+    calendar_stamp = 0; update_calendar(); home_page_update();
+}
+esp_err_t m3_ui_start(void) {
+    if (!m3_board_display() || !lvgl_port_lock(1000)) return ESP_ERR_INVALID_STATE;
+    m3_i18n_load();
+    styles_init();
+    lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
+    lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), true, &m3_font_korean);
+    lv_display_set_theme(m3_board_display(), theme);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(INK), 0);
+    lv_obj_set_style_text_font(screen, &m3_font_korean, 0);
+    lv_obj_set_style_text_color(screen, lv_color_hex(TEXT), 0);
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    /* Status bar: time left, network/audio state right. Pull down for the activity shade. */
+    status_strip = lv_obj_create(screen); lv_obj_remove_style_all(status_strip);
+    lv_obj_set_pos(status_strip, 0, 0); lv_obj_set_size(status_strip, 480, 44);
+    lv_obj_remove_flag(status_strip, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(status_strip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(status_strip, shade_touch, LV_EVENT_ALL, NULL);
+    status_clock = label(status_strip, "--:--", TEXT); lv_obj_set_pos(status_clock, 22, 13); lv_obj_set_width(status_clock, 80);
+    status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 150, 13); lv_obj_set_width(status, 230);
+    lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
+    status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 392, 13);
+    lv_obj_set_width(status_audio, 20); lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 420, 8); lv_obj_set_size(signal, 44, 28);
+    for (unsigned i = 0; i < 4; ++i) wifi_levels[i] = icon_part(signal, 8 + i * 8, 22 - (i + 1) * 5, 5, (i + 1) * 5, 2);
+    /* App header: back control and title. */
+    back_button = button(screen, LV_SYMBOL_LEFT, T_NONE, BTN_SECONDARY, go_home, NULL);
+    lv_obj_set_pos(back_button, 16, 48); lv_obj_set_size(back_button, 44, 44);
+    lv_obj_set_style_radius(back_button, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_pad_all(back_button, 0, 0);
+    lv_obj_set_ext_click_area(back_button, 10);
+    app_title = label(screen, "", TEXT); lv_obj_set_pos(app_title, 74, 58); lv_obj_set_width(app_title, 390);
+    lv_label_set_long_mode(app_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_add_style(app_title, &st_title, 0);
+    viewport = lv_obj_create(screen); lv_obj_remove_style_all(viewport); lv_obj_set_pos(viewport, 0, CONTENT_TOP);
+    lv_obj_set_size(viewport, 480, HOME_TOP - CONTENT_TOP);
+    lv_obj_remove_flag(viewport, LV_OBJ_FLAG_SCROLLABLE);
+    for (unsigned i = 0; i < APP_COUNT; ++i) {
+        pages[i] = app_page(viewport);
+        if (i) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    /* Root siblings keep the keyboard and home gesture strip outside app scrolling. */
+    keyboard = lv_keyboard_create(screen); lv_obj_set_size(keyboard, 480, KEYBOARD_HEIGHT);
+    configure_keyboard(); style_keyboard();
+    lv_obj_align(keyboard, LV_ALIGN_TOP_LEFT, 0, HOME_TOP - KEYBOARD_HEIGHT);
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    home_strip = lv_obj_create(screen); lv_obj_remove_style_all(home_strip); lv_obj_set_pos(home_strip, 0, HOME_TOP);
+    lv_obj_set_size(home_strip, 480, 44);
+    lv_obj_set_style_bg_color(home_strip, lv_color_hex(INK), 0); lv_obj_set_style_bg_opa(home_strip, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(home_strip, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(home_strip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(home_strip, home_gesture, LV_EVENT_ALL, NULL);
+    home_hint = caption(home_strip, T_SWIPE_HOME);
+    lv_obj_set_style_text_align(home_hint, LV_TEXT_ALIGN_CENTER, 0); lv_obj_set_pos(home_hint, 0, 4);
+    home_pill = lv_obj_create(home_strip); lv_obj_remove_style_all(home_pill);
+    lv_obj_set_style_bg_opa(home_pill, LV_OPA_COVER, 0); lv_obj_set_style_radius(home_pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_remove_flag(home_pill, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    home_feedback(home_pill, 0);
+    build_voice_panel(screen);
+    m3_audio_state_t initial_audio; m3_audio_state(&initial_audio);
+    build_home(pages[APP_HOME]);
+    build_wifi(pages[APP_WIFI]);
+    build_files(pages[APP_FILES]);
+    build_audio(pages[APP_AUDIO], initial_audio.volume);
+    build_monitor(pages[APP_MONITOR]);
+    build_settings(pages[APP_SYSTEM]);
+    build_radio(pages[APP_RADIO], initial_audio.volume);
+    build_games(pages[APP_GAMES]);
+    build_tts(pages[APP_TTS], initial_audio.volume);
+    build_agent(pages[APP_AGENT]);
+    build_tube(pages[APP_TUBE]);
+    build_music(pages[APP_MUSIC], initial_audio.volume);
+    radio_select(0);
+    create_shade(screen);
+    show_app(APP_HOME);
+    lv_timer_create(update_metrics, 250, NULL);
+    lv_timer_create(tube_frame_tick, 30, NULL);
+    lv_timer_create(voice_meter_tick, 40, NULL);
+    update_metrics(NULL);
+    lvgl_port_unlock();
+    return ESP_OK;
+}

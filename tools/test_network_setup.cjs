@@ -63,6 +63,6 @@ async function run(){
   assert(settings.includes('getpeername(socket_fd'));assert(settings.includes('ESP_ERR_NVS_NOT_FOUND'));
   const m1=read(path.join(root,'mini-WEB (M1-ESP-IDF_ver)/main/onboard_ui.c'));
   assert(m1.includes('if(!saved) c.op=4;'));assert(m1.includes('Failed saved/manual Wi-Fi must leave a usable setup portal'));
-  console.log('PASS: 20 invalid address cases, DHCP/static form, UTF-8 limits, encoded credentials, save failure/retry, scan safety, five firmware copies, NVS/DNS/IP integration and M1 SoftAP fallback.');
+  console.log('PASS: 20 invalid address cases, DHCP/static form, UTF-8 limits, encoded credentials, save failure/retry, scan safety, all firmware copies including M3, NVS/DNS/IP integration and M1 SoftAP fallback.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

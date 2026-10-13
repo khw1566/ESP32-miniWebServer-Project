@@ -1,0 +1,38 @@
+{
+  "en_dict": {
+    "size": 168204,
+    "sha256": "1053f74a34af38abb6fbd64b7838dacbc655a687c48ce1bb663d364a127b05de"
+  },
+  "intonations": {
+    "size": 2312,
+    "sha256": "031a105bf6bb2ebcd73a2c579ccfb42469b27266db0078af65ae298fd3588b21"
+  },
+  "ko_dict": {
+    "size": 47523,
+    "sha256": "93e8fb2972126a3d10185fe177955a81f2fe3a580995f3b8eb9357327d9a9d66"
+  },
+  "lang/gmw/en": {
+    "size": 140,
+    "sha256": "4605d5330801de3641c6e366d15f129ea1f5ffbce8722642aba01ace07ab9c83"
+  },
+  "lang/gmw/en-US": {
+    "size": 257,
+    "sha256": "41534c2a22df5dd4f1052ff9e1a33a3ea7bff5a26b5c02bdad5ba8ddb7524704"
+  },
+  "lang/ko": {
+    "size": 51,
+    "sha256": "c2dfbf88d9aa2ac9bf2f30e92e260120e4f2c21123a02265014ae98d59d5774e"
+  },
+  "phondata": {
+    "size": 554740,
+    "sha256": "a0b643b155cb6b12628d9e7865b57d9fca0d35844614f2594a5e009c80c80bb4"
+  },
+  "phonindex": {
+    "size": 43316,
+    "sha256": "384e5fa6f714ba5356c58008249b78699c31c1ad044b243068d263fb806b7d73"
+  },
+  "phontab": {
+    "size": 58652,
+    "sha256": "1b40690667e1e9aa1ba5e5234773c799e7e72ea751426e5150423d53c3f24fa2"
+  }
+}

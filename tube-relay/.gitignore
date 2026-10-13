@@ -1,0 +1,7 @@
+config.json
+cache/
+*.log
+cloudflared.yml
+cloudflared.log
+relay.log
+M3TubeRelay.exe

@@ -27,6 +27,7 @@ ESP-IDF 기반 ESP32 웹 서버와 온보드 UI 프로젝트입니다.
 - `mini-WEB (S3-N16R8-SD-ESP-IDF_ver)`: 16MB 플래시·8MB PSRAM 및 SDMMC 슬롯용 S3 펌웨어. M1의 SD 관리자와 클라우드 기능을 이식했으며 카메라는 사용하지 않습니다.
 - `mini-WEB (C3-ESP-IDF_ver)`: ESP32-C3용 펌웨어.
 - `mini-WEB (P4-ESP-IDF_ver)`: Waveshare ESP32-P4-Module-DEV-KIT용 C6 무선 웹 서버. ESP32-P4NRW32, 16MB 플래시·32MB PSRAM, Wi-Fi SoftAP 설정 및 SD 파일 관리. 호환되는 C6 펌웨어 설치가 필요합니다.
+- [mini-WEB (M3-ESP-IDF_ver)](mini-WEB%20(M3-ESP-IDF_ver)/README.md): GUITION JC-ESP32P4-M3 / JC4880P443C_I_W용 480×800 스마트폰식 앱 런처, 홈 복귀 제스처, Wi-Fi·서버 IP 설정, 인터넷 라디오(MP3/AAC), 2048·카드 짝 맞추기, 한국어 로컬 TTS·한글 키보드, ES8311 스피커·SD WAV 재생. 16MB Flash·32MB PSRAM. 소스 및 호스트 검사 단계이며 펌웨어 빌드·실기기 검증은 별도입니다.
 - `mini-WEB (M1-ESP-IDF_ver)`: ESP32-2432S028용 LCD·터치 UI, 가상 키보드, Wi-Fi 및 SoftAP 접속과 QR 안내. 자세한 사용법은 폴더 내부 README를 참고하세요.
 
 ESP-IDF 개발 환경에서 해당 펌웨어 폴더를 열어 사용합니다. 타깃, 파티션 및 보드 배선을 확인한 뒤 빌드·업로드하세요. 빌드 산출물과 다운로드된 의존성은 저장소에서 제외합니다.

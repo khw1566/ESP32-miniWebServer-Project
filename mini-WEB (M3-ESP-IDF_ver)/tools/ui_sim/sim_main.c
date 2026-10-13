@@ -1,0 +1,288 @@
+/* Host-only LVGL renderer for the M3 touch UI. It links the real m3_ui.c with
+ * mocked services and writes RGB565 frames that tools/ui_sim/to_png.py turns
+ * into PNG files. It is a layout preview, not a firmware or hardware test. */
+#include "lvgl.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <dbghelp.h>
+#include "nvs.h"
+#include "time_compat.h"
+
+#include "../../main/m3_ui.c"
+
+/* Photo widget mocks: a bounded RGB565 test card, no SD or JPEG hardware. */
+static bool sim_photos_active, sim_photos_paused, sim_photos_empty, sim_photos_busy;
+static unsigned sim_photo_index;
+static uint8_t sim_photo_pixels[M3_PHOTO_BYTES];
+void m3_photos_activate(bool enabled) { sim_photos_active = enabled; }
+void m3_photos_step(int direction) { sim_photo_index = (sim_photo_index + (direction < 0 ? 2 : 1)) % 3; }
+void m3_photos_pause(void) { sim_photos_paused = !sim_photos_paused; }
+void m3_photos_refresh(void) { sim_photos_empty = false; sim_photos_busy = false; }
+void m3_photos_poll(void) {}
+void m3_photos_state(m3_photo_state_t *out) {
+    memset(out, 0, sizeof(*out)); out->count = sim_photos_empty ? 0 : 3; out->index = sim_photo_index;
+    out->paused = sim_photos_paused; out->status = sim_photos_empty ? M3_PHOTO_EMPTY : sim_photos_busy ? M3_PHOTO_BUSY : M3_PHOTO_READY;
+    snprintf(out->name, sizeof(out->name), "春の写真（%u）.jpg", sim_photo_index + 1);
+}
+const uint8_t *m3_photos_frame(void) {
+    if (!sim_photos_active || sim_photos_empty) return NULL;
+    for (unsigned y = 0; y < M3_PHOTO_H; ++y) for (unsigned x = 0; x < M3_PHOTO_W; ++x) {
+        uint16_t color = ((x / 48 + y / 48) & 1) ? 0x04df : 0xb815;
+        unsigned offset = (y * M3_PHOTO_W + x) * 2;
+        sim_photo_pixels[offset] = color; sim_photo_pixels[offset + 1] = color >> 8;
+    }
+    return sim_photo_pixels;
+}
+
+/* Music catalog and player mocks; no storage device is accessed. */
+static unsigned sim_music_revision = 1, sim_music_page, sim_music_selected;
+static bool sim_music_sd = true, sim_music_active, sim_music_paused, sim_music_repeat;
+void m3_music_state(m3_music_state_t *out) {
+    memset(out, 0, sizeof(*out)); out->sd = sim_music_sd; out->count = 7; out->catalog_revision = 1;
+    out->page = sim_music_page; out->revision = sim_music_revision; out->selected = sim_music_selected;
+    out->active = sim_music_active; out->paused = sim_music_paused; out->repeat = sim_music_repeat;
+    out->progress = sim_music_active ? 37 : 0; out->seconds = sim_music_active ? 46 : 0;
+    snprintf(out->title, sizeof(out->title), "%s", sim_music_active ? "春の音楽 - ひらがなとカタカナの長いファイル名（特別版）.mp3" : "");
+    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
+    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
+    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
+    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    out->mdns_ready = true;
+    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
+    snprintf(out->message, sizeof(out->message), "%s", sim_music_active ? "Local music playing" : "Music catalog ready");
+    for (unsigned i = sim_music_page * M3_MUSIC_ROWS; i < 7 && out->shown < M3_MUSIC_ROWS; ++i) {
+        m3_music_item_t *item = &out->items[out->shown++]; item->index = i;
+        static const char *titles[] = {"春の音楽 - ひらがなとカタカナの長いファイル名（特別版）.mp3", "カタカナ・テスト.wav", "韓國漢字 - 音樂.aac",
+            "特別篇（第①章）.mp3", "Café £10 €5.wav", "𠮟る・夏の歌.mp3", "半角ｶﾀｶﾅ.wav"};
+        snprintf(item->name, sizeof(item->name), "%s", titles[i]);
+    }
+}
+void m3_music_refresh(bool sd) { sim_music_sd = sd; sim_music_page = 0; ++sim_music_revision; }
+void m3_music_poll(void) {}
+void m3_music_page(int direction) { sim_music_page = direction > 0 ? 1 : 0; ++sim_music_revision; }
+bool m3_music_play(unsigned index, unsigned revision) { (void)revision; sim_music_selected = index; sim_music_active = true; ++sim_music_revision; return true; }
+bool m3_music_next(int direction) { sim_music_selected = (sim_music_selected + (direction > 0 ? 1 : 6)) % 7; sim_music_active = true; ++sim_music_revision; return true; }
+void m3_music_pause(void) { sim_music_paused = !sim_music_paused; ++sim_music_revision; }
+void m3_music_repeat(bool enabled) { sim_music_repeat = enabled; ++sim_music_revision; }
+void m3_music_stop(void) { sim_music_active = false; ++sim_music_revision; }
+
+/* YouTube mocks. tube_sim_data.inc (optional, generated from a real relay listing) supplies items and images. */
+#if __has_include("tube_sim_data.inc")
+#include "tube_sim_data.inc"
+#else
+static const m3_tube_item_t sim_items[] = {{"aaaaaaaaaaa", "Sample video", "Channel", "UCaaaaaaaaaaaaaaaaaaaaaa", 201, 123456, false}};
+static const unsigned sim_item_count = 1;
+static uint8_t sim_thumbs[1][160 * 90 * 2], sim_frame[480 * 272 * 2];
+#endif
+static m3_tube_list_t sim_tube;
+static m3_tube_player_t sim_player;
+bool m3_tube_configured(void) { return true; }
+esp_err_t m3_tube_start(void) { return ESP_OK; }
+static bool sim_listing(bool channel, const char *text, unsigned page) {
+    sim_tube.status = M3_TUBE_LIST_READY; sim_tube.channel = channel; sim_tube.page = page; sim_tube.more = true;
+    sim_tube.count = sim_item_count > M3_TUBE_ITEMS ? M3_TUBE_ITEMS : sim_item_count;
+    memcpy(sim_tube.items, sim_items, sizeof(m3_tube_item_t) * sim_tube.count);
+    snprintf(sim_tube.query, sizeof(sim_tube.query), "%s", text);
+    snprintf(sim_tube.title, sizeof(sim_tube.title), "%s", channel ? sim_items[0].channel : "");
+    sim_tube.thumbs = (uint16_t)((1u << sim_tube.count) - 1); sim_tube.thumb_set ^= 1; ++sim_tube.revision;
+    return true;
+}
+bool m3_tube_search(const char *query, unsigned page) { return sim_listing(false, query, page); }
+bool m3_tube_channel(const char *id, unsigned page) { return sim_listing(true, id, page); }
+void m3_tube_list(m3_tube_list_t *out) { *out = sim_tube; }
+const uint8_t *m3_tube_thumb(const m3_tube_list_t *list, unsigned index) {
+    return index < sim_item_count && (list->thumbs & (1u << index)) ? sim_thumbs[index] : NULL;
+}
+bool m3_tube_play(const char *id, unsigned start) {
+    sim_player.active = true; sim_player.video = true; sim_player.position_ms = 63000 + start * 1000; sim_player.duration_s = 201;
+    snprintf(sim_player.id, sizeof(sim_player.id), "%s", id); ++sim_player.revision; return true;
+}
+void m3_tube_pause(bool paused) { sim_player.paused = paused; ++sim_player.revision; }
+void m3_tube_player(m3_tube_player_t *out) { *out = sim_player; }
+const uint8_t *m3_tube_frame(void) { return sim_player.active ? sim_frame : NULL; }
+
+static lv_display_t *display;
+static uint16_t frame[480 * 800];
+static int sim_lang = -1;
+lv_display_t *m3_board_display(void) { return display; }
+bool m3_board_touch_ready(void) { return true; }
+bool lvgl_port_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
+void lvgl_port_unlock(void) {}
+size_t heap_caps_get_free_size(unsigned caps) { return caps & MALLOC_CAP_SPIRAM ? 27u << 20 : 182u << 10; }
+size_t heap_caps_get_total_size(unsigned caps) { (void)caps; return 420u << 10; }
+size_t heap_caps_get_minimum_free_size(unsigned caps) { (void)caps; return 151u << 10; }
+size_t heap_caps_get_largest_free_block(unsigned caps) { (void)caps; return 96u << 10; }
+size_t esp_psram_get_size(void) { return 32u << 20; }
+int64_t esp_timer_get_time(void) { return (int64_t)GetTickCount64() * 1000; }
+void esp_chip_info(esp_chip_info_t *info) { info->cores = 2; info->revision = 302; }
+const char *esp_get_idf_version(void) { return "v5.5.5"; }
+uint32_t esp_random(void) { return (uint32_t)rand() * 7919u + 13u; }
+esp_err_t nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *out) { (void)name; (void)mode; *out = 1; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *out) {
+    (void)h; (void)key; if (sim_lang < 0) return ESP_FAIL; *out = (uint8_t)sim_lang; return ESP_OK;
+}
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; (void)key; sim_lang = value; return ESP_OK; }
+esp_err_t nvs_commit(nvs_handle_t h) { (void)h; return ESP_OK; }
+void nvs_close(nvs_handle_t h) { (void)h; }
+bool network_settings_valid(const network_settings_t *settings) { return settings->ssid[0] != 0; }
+
+/* Service mocks. The scenario selects online/offline and busy states. */
+static bool sim_online = true, sim_playing = true, sim_agent_busy, sim_voice_recording = true, sim_voice_busy;
+static const char *sim_audio_message;
+static bool sim_ipv6_ready = true;
+void m3_runtime_state(m3_runtime_state_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->initialized = out->web = out->sd = out->wifi_ready = true;
+    out->cloud = sim_online;
+    out->mode = sim_online ? NET_MODE_STA_CONNECTED : NET_MODE_AP_CAPTIVE;
+    out->rssi = -58; out->requests = 42;
+    snprintf(out->ip, sizeof(out->ip), "%s", sim_online ? "192.168.0.42" : "192.168.4.1");
+    snprintf(out->url, sizeof(out->url), "%s", sim_online ? "http://192.168.0.42/" : "http://192.168.4.1/setup");
+    snprintf(out->cloud_url, sizeof(out->cloud_url), "%s", sim_online ? "https://m3-a1b2c3d4e5f6.audreaming.com/" : "");
+    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
+    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
+    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
+    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    out->mdns_ready = true;
+    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
+    snprintf(out->message, sizeof(out->message), "Services ready");
+    snprintf(out->wifi_message, sizeof(out->wifi_message), "Tap a network, enter its password, then connect.");
+    out->scan_revision = 1; out->scan_count = 4; out->settings_revision = 1; out->wifi_revision = 1;
+    static const char *names[] = {"KT_GiGA_5G_Home", "iptime-guest", "Cafe Free WiFi", "U+Net3F21"};
+    static const int rssi[] = {-48, -63, -71, -82};
+    for (int i = 0; i < 4; ++i) {
+        snprintf(out->networks[i].ssid, sizeof(out->networks[i].ssid), "%s", names[i]);
+        out->networks[i].rssi = (int8_t)rssi[i]; out->networks[i].authmode = i == 2 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    }
+    snprintf(out->settings.ssid, sizeof(out->settings.ssid), "KT_GiGA_5G_Home");
+    snprintf(out->settings.netmask, sizeof(out->settings.netmask), "255.255.255.0");
+    out->browse_sd = true; out->file_revision = 1;
+    snprintf(out->folder, sizeof(out->folder), "/media");
+    out->files.total = 31914704896ull; out->files.used = 1288490188ull; out->files.count = 12; out->files.shown = 5;
+    static const char *files[] = {"音楽アルバム", "春の歌（特別版）.wav", "韓國漢字 - 音樂.wav", "ひらがな・カタカナ.wav", "Café £10 €5.txt"};
+    for (int i = 0; i < 5; ++i) {
+        snprintf(out->files.entries[i].name, sizeof(out->files.entries[i].name), "%s", files[i]);
+        out->files.entries[i].directory = i == 0; out->files.entries[i].bytes = 524288ull * (i + 1) + 1234;
+    }
+    out->flash.total = 8192000; out->flash.used = 1843200; out->flash.reserved = 0;
+}
+bool m3_runtime_browse(bool sd, const char *folder, unsigned offset) { (void)sd; (void)folder; (void)offset; return false; }
+bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings) { (void)action; (void)settings; return true; }
+static unsigned sim_volume = 40;
+void m3_audio_state(m3_audio_state_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->ready = true; out->playing = sim_playing; out->volume = sim_volume; out->progress = sim_playing ? 38 : 0;
+    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
+    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
+    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
+    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    out->mdns_ready = true;
+    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
+    snprintf(out->message, sizeof(out->message), "%s", sim_audio_message ? sim_audio_message :
+        sim_playing ? "Radio / MP3 / net 412 KiB / PCM 740 ms / gaps 0" : "Ready / PCM16 WAV");
+}
+bool m3_audio_play(const char *name) { (void)name; return true; }
+bool m3_audio_test(void) { return true; }
+bool m3_audio_radio(const char *url, bool aac) { (void)url; (void)aac; return true; }
+void m3_audio_tts_provider(unsigned provider) { (void)provider; }
+bool m3_audio_speak(const char *text, unsigned speed) { (void)text; (void)speed; return true; }
+bool m3_audio_voice(void) { return true; }
+void m3_audio_stop(void) {}
+void m3_audio_volume(unsigned percent) { sim_volume = percent; }
+void m3_voice_state(m3_voice_state_t *out) {
+    memset(out, 0, sizeof(*out)); out->key_ready = true; out->revision = 3; out->recording = sim_voice_recording; out->busy = sim_voice_busy;
+    snprintf(out->text, sizeof(out->text), "%s", "내일 날씨 알려줘");
+    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
+    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
+    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
+    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    out->mdns_ready = true;
+    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
+    snprintf(out->message, sizeof(out->message), "Recording 3 / 8 seconds / level 2210");
+}
+static unsigned sim_mic_level;
+unsigned m3_voice_level(void) { return sim_mic_level; }
+int m3_voice_dbfs(void) { return sim_mic_level ? (int)sim_mic_level / 2 - 60 : -90; }
+bool m3_voice_set_provider(unsigned provider) { (void)provider; return true; }
+bool m3_voice_set_key(const char *key) { (void)key; return true; }
+void m3_voice_finish(void) {}
+void m3_agent_state(m3_agent_state_t *out) {
+    memset(out, 0, sizeof(*out)); out->ready = out->key_ready = true; out->revision = sim_agent_busy ? 5 : 2; out->model = 1;
+    out->busy = sim_agent_busy;
+    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
+    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
+    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
+    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    out->mdns_ready = true;
+    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
+    snprintf(out->message, sizeof(out->message), "%s", sim_agent_busy ? "Gemini thinking..." : "Ready");
+    snprintf(out->answer, sizeof(out->answer), "%s",
+        "\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94! \xED\x98\x84\xEC\x9E\xAC Wi-Fi\xEB\x8A\x94 \xEC\x97\xB0\xEA\xB2\xB0\xEB\x90\x98\xEC\x96\xB4 \xEC\x9E\x88\xEA\xB3\xA0 "
+        "\xEC\x9D\x8C\xEB\x9F\x89\xEC\x9D\x80 40%\xEC\x9E\x85\xEB\x8B\x88\xEB\x8B\xA4. \xEB\x9D\xBC\xEB\x94\x94\xEC\x98\xA4\xEB\xA5\xBC \xEC\xBC\x9C \xEB\x93\x9C\xEB\xA6\xB4\xEA\xB9\x8C\xEC\x9A\x94?");
+    snprintf(out->tools, sizeof(out->tools), "get_status -> ok");
+}
+bool m3_agent_submit(const char *prompt, unsigned model) { (void)prompt; (void)model; return true; }
+void m3_agent_cancel(bool clear) { (void)clear; }
+int m3_agent_take_open_app(void) { return -1; }
+
+static void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *pixels) {
+    const uint16_t *source = (const uint16_t *)pixels;
+    int width = lv_area_get_width(area);
+    for (int y = area->y1; y <= area->y2; ++y)
+        memcpy(&frame[y * 480 + area->x1], &source[(y - area->y1) * width], (size_t)width * 2);
+    lv_display_flush_ready(disp);
+}
+static void settle(unsigned ms) {
+    for (unsigned t = 0; t < ms; t += 10) { lv_tick_inc(10); lv_timer_handler(); }
+}
+static void capture(const char *dir, const char *name) {
+    lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+    char path[512]; snprintf(path, sizeof(path), "%s/%s.rgb565", dir, name);
+    FILE *file = fopen(path, "wb"); if (!file) { perror(path); exit(1); }
+    fwrite(frame, sizeof(frame), 1, file); fclose(file);
+    printf("captured %s\n", name);
+}
+#include "scenarios.inc"
+
+/* Prints the faulting function on a crash (build has /Zi and links dbghelp). */
+static LONG WINAPI crash_report(EXCEPTION_POINTERS *info) {
+    HANDLE process = GetCurrentProcess(); SymInitialize(process, NULL, TRUE);
+    char storage[sizeof(SYMBOL_INFO) + 256]; SYMBOL_INFO *symbol = (SYMBOL_INFO *)storage;
+    symbol->SizeOfStruct = sizeof(SYMBOL_INFO); symbol->MaxNameLen = 255;
+    fprintf(stderr, "crash 0x%08lx\n", info->ExceptionRecord->ExceptionCode);
+    CONTEXT context = *info->ContextRecord;
+    STACKFRAME64 frame = {0};
+    frame.AddrPC.Offset = context.Rip; frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Rbp; frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Rsp; frame.AddrStack.Mode = AddrModeFlat;
+    for (int depth = 0; depth < 16 && StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, GetCurrentThread(), &frame, &context,
+            NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL); ++depth) {
+        IMAGEHLP_LINE64 line = {.SizeOfStruct = sizeof(line)}; DWORD offset = 0;
+        const char *name = SymFromAddr(process, frame.AddrPC.Offset, NULL, symbol) ? symbol->Name : "?";
+        if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &offset, &line)) fprintf(stderr, "  %s (%s:%lu)\n", name, line.FileName, line.LineNumber);
+        else fprintf(stderr, "  %s\n", name);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+int main(int argc, char **argv) {
+    SetUnhandledExceptionFilter(crash_report);
+    const char *dir = argc > 1 ? argv[1] : ".";
+    if (argc > 2) sim_lang = atoi(argv[2]);
+    srand(7);
+    lv_init();
+    display = lv_display_create(480, 800);
+    static uint16_t buffer[480 * 800];
+    lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_flush_cb(display, flush);
+    if (m3_ui_start() != ESP_OK) { puts("UI start failed"); return 1; }
+    settle(600);
+    lv_mem_monitor_t memory; lv_mem_monitor(&memory);
+    printf("LVGL heap used after UI start: %u bytes\n", (unsigned)(memory.total_size - memory.free_size));
+    printf("text bindings %u/%u, segments %u/%u\n", binding_count, (unsigned)(sizeof(bindings) / sizeof(bindings[0])),
+        segment_count, (unsigned)(sizeof(segments) / sizeof(segments[0])));
+    run_scenarios(dir);
+    return 0;
+}

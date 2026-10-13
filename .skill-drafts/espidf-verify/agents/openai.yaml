@@ -1,0 +1,6 @@
+interface:
+  display_name: "ESP-IDF Verification"
+  short_description: "Check ESP-IDF APIs, CMake linking and PSRAM placement"
+  default_prompt: "Use $espidf-verify to check this firmware change against the installed SDK and permitted validation steps."
+policy:
+  allow_implicit_invocation: true

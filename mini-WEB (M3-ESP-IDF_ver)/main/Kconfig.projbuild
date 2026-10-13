@@ -1,0 +1,28 @@
+menu "Mini WebServer M3"
+    config M3_TOUCH_RESET
+        int "GT911 reset GPIO (-1 if unconnected)"
+        range -1 54
+        default 3
+    config M3_TOUCH_MIRROR_X
+        bool "Mirror touchscreen X"
+        default n
+    config M3_TOUCH_MIRROR_Y
+        bool "Mirror touchscreen Y"
+        default n
+endmenu
+
+menu "Mini WEB automatic cloud connection"
+    config MINI_WEB_RELAY_URL
+        string "Factory cloud relay HTTPS endpoint"
+        default "https://relay.audreaming.com"
+    config MINI_WEB_PUBLIC_DOMAIN
+        string "Factory public domain"
+        default "audreaming.com"
+    config MINI_WEB_PUBLIC_HOST
+        string "Optional factory hostname"
+        default ""
+        help
+            Empty uses m3-<board MAC>.PUBLIC_DOMAIN. Configure the matching
+            Worker domain before shipment. Device token comes from factory
+            NVS, never Wi-Fi UI.
+endmenu

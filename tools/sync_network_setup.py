@@ -1,4 +1,4 @@
-"""Sync standalone network setup sources to all five firmware projects (no build)."""
+"""Sync standalone network setup sources to all supported firmware projects (no build)."""
 from pathlib import Path
 import json
 root = Path(__file__).resolve().parent.parent
