@@ -13,7 +13,8 @@ function(m3_memory_policy)
     set(updated "${original}")
     foreach(setting IN ITEMS "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0" "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=131072"
             "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y"
-            "CONFIG_FATFS_API_ENCODING_UTF_8=y" "CONFIG_LV_USE_TILEVIEW=y")
+            "CONFIG_FATFS_API_ENCODING_UTF_8=y" "CONFIG_LV_USE_TILEVIEW=y"
+            "CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=y" "CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y")
         string(REGEX REPLACE "=.*$" "" key "${setting}")
         if(updated MATCHES "(^|\n)# ${key} is not set")
             string(REGEX REPLACE "(^|\n)# ${key} is not set" "\\1${setting}" updated "${updated}")
@@ -25,7 +26,7 @@ function(m3_memory_policy)
     endforeach()
     # These are alternatives in the TLS allocator choice, not independent flags.
     foreach(key IN ITEMS CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC CONFIG_MBEDTLS_CUSTOM_MEM_ALLOC
-            CONFIG_FATFS_API_ENCODING_ANSI_OEM)
+            CONFIG_FATFS_API_ENCODING_ANSI_OEM CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_40 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360)
         string(REGEX REPLACE "(^|\n)${key}=[^\n]*" "\\1# ${key} is not set" updated "${updated}")
     endforeach()
     if(NOT updated STREQUAL original)

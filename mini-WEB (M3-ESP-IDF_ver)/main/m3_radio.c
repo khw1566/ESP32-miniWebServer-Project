@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "m3_audio_apps.h"
 #include "network_manager.h"
 #include "https_memory.h"
@@ -295,7 +296,8 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
         if (!error) error = "Radio ended before buffering";
         goto done;
     }
-    if (xTaskCreatePinnedToCore(radio_decode, "m3_radio_dec", 24576, &dec, 3, NULL, 0) != pdPASS) {
+    /* Same priority as LVGL on core 1 so UI redraws time-slice with decoding instead of starving it. */
+    if (xTaskCreatePinnedToCore(radio_decode, "m3_radio_dec", 24576, &dec, 4, NULL, M3_CORE_MEDIA) != pdPASS) {
         error = "Radio decoder task allocation failed"; goto done;
     }
     decoder_started = true;

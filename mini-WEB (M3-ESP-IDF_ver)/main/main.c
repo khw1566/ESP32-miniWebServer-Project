@@ -1,4 +1,5 @@
 #include "m3_board.h"
+#include "m3_boot_splash.h"
 #include "m3_ui.h"
 #include "m3_audio.h"
 #include "m3_runtime.h"
@@ -28,6 +29,7 @@ void app_main(void) {
     bool force_setup = gpio_get_level(35) == 0;
     err = m3_board_init();
     if (err == ESP_OK) {
+        if (m3_boot_splash_start() != ESP_OK) ESP_LOGW("M3", "Boot splash skipped");
         if (m3_agent_start() != ESP_OK) ESP_LOGW("M3", "Agent task unavailable");
         if (m3_audio_start() != ESP_OK) ESP_LOGW("M3", "Audio task unavailable");
         if (m3_tube_start() != ESP_OK) ESP_LOGW("M3", "YouTube worker unavailable");

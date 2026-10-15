@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "network_manager.h"
 #include "m3_google_audio.h"
 #include "m3_audio.h"
@@ -368,7 +369,7 @@ esp_err_t m3_audio_start(void) {
     requests = xQueueCreate(1, sizeof(request_t));
     if (!requests) return ESP_ERR_NO_MEM;
     /* eSpeak's translation/synthesis calls need a larger C stack than WAV playback. */
-    if (xTaskCreatePinnedToCore(audio_worker, "m3_audio", 65536, NULL, 4, NULL, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(audio_worker, "m3_audio", 65536, NULL, 4, NULL, M3_CORE_MEDIA) != pdPASS) {
         vQueueDelete(requests); requests = NULL; return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

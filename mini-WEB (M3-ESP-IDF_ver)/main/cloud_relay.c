@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "cloud_relay.h"
 #include "https_memory.h"
 #include "sd_media.h"
@@ -281,5 +282,5 @@ esp_err_t cloud_relay_start(void) {
     if (CONFIG_MINI_WEB_PUBLIC_HOST[0]) n = snprintf(public_url, sizeof(public_url), "https://%s/", CONFIG_MINI_WEB_PUBLIC_HOST);
     else n = snprintf(public_url, sizeof(public_url), "https://%s.%s/", device_id, CONFIG_MINI_WEB_PUBLIC_DOMAIN);
     if (n < 0 || (size_t)n >= sizeof(public_url)) { public_url[0] = 0; return ESP_ERR_INVALID_SIZE; }
-    return xTaskCreate(relay_task, "cloud_relay", 10240, NULL, 3, &relay_task_handle) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+    return xTaskCreatePinnedToCore(relay_task, "cloud_relay", 10240, NULL, 3, &relay_task_handle, M3_CORE_NET) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }

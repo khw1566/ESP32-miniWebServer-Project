@@ -8,6 +8,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_netif_sntp.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -23,6 +24,28 @@ static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_runtime_state_t state;
 static bool setup_requested;
 static bool clock_started;
+/* Logs each HP core's busy share every 30 s from the idle tasks' run-time
+ * counters (microseconds with the default esp_timer clock), so core placement
+ * can be checked on the board with real apps running. */
+static void log_core_load(void) {
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    static int64_t last_us;
+    static configRUN_TIME_COUNTER_TYPE last_idle[2];
+    int64_t now = esp_timer_get_time();
+    if (last_us && now - last_us < 30000000) return;
+    unsigned busy[2] = {0};
+    for (int core = 0; core < 2; ++core) {
+        configRUN_TIME_COUNTER_TYPE idle = ulTaskGetRunTimeCounter(xTaskGetIdleTaskHandleForCore(core));
+        if (last_us && now > last_us) {
+            uint64_t share = (uint64_t)(idle - last_idle[core]) * 100 / (uint64_t)(now - last_us);
+            busy[core] = share >= 100 ? 0 : 100 - (unsigned)share;
+        }
+        last_idle[core] = idle;
+    }
+    if (last_us) ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]);
+    last_us = now;
+#endif
+}
 /* One service task owns SNTP, including when cloud access is unprovisioned. */
 static void start_network_clock(void) {
     if (clock_started || network_get_mode() != NET_MODE_STA_CONNECTED) return;
@@ -154,6 +177,7 @@ static void services(void *unused) {
     for (;;) {
         if (xQueueReceive(browse_queue, &browse, pdMS_TO_TICKS(1000)) == pdTRUE) refresh = true;
         m3_music_poll();
+        log_core_load();
         m3_photos_poll();
         wifi_request_t request;
         if (xQueueReceive(wifi_queue, &request, 0) == pdTRUE) wifi_execute(&next, &request);
