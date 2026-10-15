@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_ipc.h"
 #include "esp_netif_sntp.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -26,7 +27,11 @@ static bool setup_requested;
 static bool clock_started;
 /* Logs each HP core's busy share every 30 s from the idle tasks' run-time
  * counters (microseconds with the default esp_timer clock), so core placement
- * can be checked on the board with real apps running. */
+ * can be checked on the board with real apps running. IDF 5.5's kernel only
+ * reads the calling core's idle counter, so each read runs on its own core. */
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+static void read_idle_counter(void *out) { *(configRUN_TIME_COUNTER_TYPE *)out = ulTaskGetIdleRunTimeCounter(); }
+#endif
 static void log_core_load(void) {
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
     static int64_t last_us;
@@ -35,7 +40,8 @@ static void log_core_load(void) {
     if (last_us && now - last_us < 30000000) return;
     unsigned busy[2] = {0};
     for (int core = 0; core < 2; ++core) {
-        configRUN_TIME_COUNTER_TYPE idle = ulTaskGetRunTimeCounter(xTaskGetIdleTaskHandleForCore(core));
+        configRUN_TIME_COUNTER_TYPE idle = 0;
+        if (esp_ipc_call_blocking(core, read_idle_counter, &idle) != ESP_OK) return;
         if (last_us && now > last_us) {
             uint64_t share = (uint64_t)(idle - last_idle[core]) * 100 / (uint64_t)(now - last_us);
             busy[core] = share >= 100 ? 0 : 100 - (unsigned)share;
