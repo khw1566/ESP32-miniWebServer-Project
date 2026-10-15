@@ -4,6 +4,8 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <math.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 extern const lv_font_t m3_font_splash, m3_font_splash_small;
@@ -15,17 +17,44 @@ static const char *TAG = "m3_splash";
 #define PITCH 11.6f
 #define DOT_RADIUS 4.3f
 #define WAVE_PX 7.0f
-#define HOLD_MS 3800
+#define MIN_HOLD_MS 3400  /* Text intro length, counted from when the intro starts. */
+#define MAX_HOLD_MS 30000 /* Safety net if a boot step never reports. */
+#define MAX_FRAME_MS 50   /* Logo clock step cap, so a stalled LVGL task does not skip the ripple. */
+#define BAR_W 300
+#define BAR_Y 724
 #define FADE_MS 450
 #define BG 0x050B1A
 #define ACCENT 0x22D3EE
 #define ACCENT_2 0xE879F9
 
-static lv_obj_t *root, *canvas, *headline_2;
+static lv_obj_t *root, *canvas, *caption, *english, *headline_1, *headline_2, *bar_fill, *status;
 static lv_timer_t *frame_timer;
 static uint16_t *pixels;
-static uint32_t started_ms;
-static bool leaving;
+static uint32_t started_ms, last_frame_ms, intro_ms, logo_ms;
+static bool leaving, intro_started;
+static float shown_percent;
+static int shown_step = -1, shown_label = -1;
+/* Written by any boot task, read by the LVGL timer. */
+static atomic_int reached_step = -1;
+static atomic_bool active;
+
+/* Keep these strings in sync with STATUS in tools/generate_boot_splash.py. */
+static const struct { uint8_t percent; const char *text; } steps[] = {
+    [M3_BOOT_DISPLAY] = {8, "화면 준비 중"},
+    [M3_BOOT_WORKERS] = {20, "음성·미디어 엔진 시작"},
+    [M3_BOOT_UI] = {40, "홈 화면 구성 중"},
+    [M3_BOOT_STORAGE] = {58, "저장소 확인 중"},
+    [M3_BOOT_NETWORK] = {70, "Wi-Fi 모듈 시작"},
+    [M3_BOOT_CONNECT] = {82, "Wi-Fi 연결 중"},
+    [M3_BOOT_WEB] = {94, "웹 서버 시작"},
+    [M3_BOOT_READY] = {100, "준비 완료"},
+};
+
+void m3_boot_splash_step(m3_boot_step_t step) {
+    if (!atomic_load(&active) || (unsigned)step > M3_BOOT_READY) return;
+    int seen = atomic_load(&reached_step);
+    while (seen < (int)step && !atomic_compare_exchange_weak(&reached_step, &seen, (int)step)) {}
+}
 
 static inline uint16_t rgb565(unsigned r, unsigned g, unsigned b) {
     return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
@@ -91,7 +120,6 @@ static void set_rise(void *obj, int32_t v) { lv_obj_set_style_translate_y(obj, v
 static void set_scale(void *obj, int32_t v) { lv_obj_set_style_transform_scale(obj, v, 0); }
 /* Separate callback: LVGL replaces a running animation with the same var and exec_cb. */
 static void set_pulse(void *obj, int32_t v) { lv_obj_set_style_transform_scale(obj, v, 0); }
-static void set_width(void *obj, int32_t v) { lv_obj_set_width(obj, v); lv_obj_set_x(obj, (M3_WIDTH - v) / 2); }
 static void set_glow(void *obj, int32_t v) {
     lv_obj_set_style_text_color(obj, lv_color_mix(lv_color_hex(0xFFFFFF), lv_color_hex(ACCENT), (lv_opa_t)v), 0);
 }
@@ -116,19 +144,65 @@ static void leave(void) {
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in); lv_anim_set_completed_cb(&a, finished);
     lv_anim_start(&a);
 }
+/* The bar eases toward the last reported step and creeps a little past it while
+ * a slow step (Wi-Fi) runs, but never shows 100 % before boot is ready. */
+static void update_progress(int step) {
+    float goal = step < 0 ? 0 : steps[step].percent;
+    if (step >= 0 && step < M3_BOOT_READY) {
+        float next = steps[step + 1].percent - 2;
+        if (shown_percent >= goal - 0.5f && shown_percent < next) goal = shown_percent + 0.06f;
+    }
+    shown_percent += goal > shown_percent ? (goal - shown_percent) * 0.14f + 0.04f : 0;
+    if (shown_percent > goal && step == M3_BOOT_READY) shown_percent = goal;
+    lv_obj_set_width(bar_fill, (int32_t)(BAR_W * shown_percent / 100));
+    int percent = (int)shown_percent;
+    if (step != shown_step || percent != shown_label) {
+        shown_step = step; shown_label = percent;
+        char line[64];
+        snprintf(line, sizeof(line), "%s  %d%%", step < 0 ? steps[0].text : steps[step].text, percent);
+        lv_label_set_text(status, line);
+    }
+}
+/* College name, then the headline, then the product name lands large and pulses. */
+static void start_intro(void) {
+    intro_started = true;
+    intro_ms = lv_tick_get();
+    animate(caption, set_opa, 0, 255, 100, 400, lv_anim_path_ease_out, 0, 0);
+    animate(english, set_opa, 0, 255, 250, 400, lv_anim_path_ease_out, 0, 0);
+    animate(headline_1, set_opa, 0, 255, 400, 450, lv_anim_path_ease_out, 0, 0);
+    animate(headline_1, set_rise, 24, 0, 400, 450, lv_anim_path_ease_out, 0, 0);
+    animate(headline_2, set_opa, 0, 255, 800, 300, lv_anim_path_linear, 0, 0);
+    animate(headline_2, set_scale, 460, 256, 800, 650, lv_anim_path_overshoot, 0, 0);
+    animate(headline_2, set_pulse, 256, 284, 1700, 260, lv_anim_path_ease_in_out, 260, 2);
+    animate(headline_2, set_glow, 0, 255, 1700, 260, lv_anim_path_ease_in_out, 260, 2);
+}
 static void tick(lv_timer_t *timer) {
     (void)timer;
-    uint32_t elapsed = lv_tick_elaps(started_ms);
-    render_frame(elapsed / 1000.0f);
-    if (elapsed >= HOLD_MS) leave();
+    uint32_t dt = lv_tick_elaps(last_frame_ms);
+    last_frame_ms = lv_tick_get();
+    logo_ms += dt < MAX_FRAME_MS ? dt : MAX_FRAME_MS;
+    render_frame(logo_ms / 1000.0f);
+    int step = atomic_load(&reached_step);
+    /* m3_ui_start builds the home UI under the LVGL lock and stalls every frame
+     * meanwhile, so the text intro waits until that build is over. */
+    if (!intro_started && step >= M3_BOOT_STORAGE) start_intro();
+    update_progress(step);
+    bool ready = step == M3_BOOT_READY && shown_percent >= 99.5f;
+    if ((ready && intro_started && lv_tick_elaps(intro_ms) >= MIN_HOLD_MS) || lv_tick_elaps(started_ms) >= MAX_HOLD_MS)
+        leave();
 }
-static void touched(lv_event_t *e) { (void)e; if (lv_tick_elaps(started_ms) > 600) leave(); }
+/* Touch skips the splash only once the home UI exists underneath it. */
+static void touched(lv_event_t *e) {
+    (void)e;
+    if (atomic_load(&reached_step) >= M3_BOOT_STORAGE && lv_tick_elaps(started_ms) > 600) leave();
+}
 static void deleted(lv_event_t *e) {
     (void)e;
+    atomic_store(&active, false);
     if (frame_timer) lv_timer_delete(frame_timer);
     frame_timer = NULL;
     heap_caps_free(pixels);
-    pixels = NULL; root = canvas = headline_2 = NULL;
+    pixels = NULL; root = canvas = caption = english = headline_1 = headline_2 = bar_fill = status = NULL;
 }
 
 static lv_obj_t *text(const char *value, const lv_font_t *font, uint32_t colour, int y) {
@@ -149,7 +223,8 @@ esp_err_t m3_boot_splash_start(void) {
     pixels = heap_caps_aligned_alloc(64, CANVAS_W * CANVAS_H * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!pixels) { ESP_LOGW(TAG, "No PSRAM for splash; skipping"); return ESP_ERR_NO_MEM; }
     if (!lvgl_port_lock(1000)) { heap_caps_free(pixels); pixels = NULL; return ESP_ERR_TIMEOUT; }
-    leaving = false;
+    leaving = intro_started = false;
+    shown_percent = 0; shown_step = shown_label = -1; logo_ms = 0;
     root = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, M3_WIDTH, M3_HEIGHT);
@@ -162,39 +237,38 @@ esp_err_t m3_boot_splash_start(void) {
 
     canvas = lv_canvas_create(root);
     lv_obj_set_pos(canvas, (M3_WIDTH - CANVAS_W) / 2, CANVAS_Y);
-    started_ms = lv_tick_get();
+    started_ms = last_frame_ms = lv_tick_get();
     render_frame(0);
 
-    lv_obj_t *caption = text("울산과학대학교", &m3_font_splash_small, 0xE2E8F0, CANVAS_Y + CANVAS_H + 6);
-    lv_obj_t *english = text("ULSAN COLLEGE", &m3_font_splash_small, 0x94A3B8, CANVAS_Y + CANVAS_H + 36);
+    caption = text("울산과학대학교", &m3_font_splash_small, 0xE2E8F0, CANVAS_Y + CANVAS_H + 6);
+    english = text("ULSAN COLLEGE", &m3_font_splash_small, 0x94A3B8, CANVAS_Y + CANVAS_H + 36);
     lv_obj_set_style_text_letter_space(english, 4, 0);
-    lv_obj_t *headline_1 = text("창업경진대회", &m3_font_splash, 0xF8FAFC, 594);
+    headline_1 = text("창업경진대회", &m3_font_splash, 0xF8FAFC, 594);
     headline_2 = text("MiniWEB 시제품", &m3_font_splash, ACCENT, 650);
     lv_obj_set_style_transform_pivot_x(headline_2, M3_WIDTH / 2, 0);
     lv_obj_set_style_transform_pivot_y(headline_2, m3_font_splash.line_height / 2, 0);
-    lv_obj_t *bar = lv_obj_create(root);
-    lv_obj_remove_style_all(bar);
-    lv_obj_set_size(bar, 0, 4);
-    lv_obj_set_pos(bar, M3_WIDTH / 2, 712);
-    lv_obj_set_style_radius(bar, 2, 0);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(ACCENT), 0);
-    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(ACCENT_2), 0);
-    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, 0);
-
-    animate(caption, set_opa, 0, 255, 500, 400, lv_anim_path_ease_out, 0, 0);
-    animate(english, set_opa, 0, 255, 650, 400, lv_anim_path_ease_out, 0, 0);
-    animate(headline_1, set_opa, 0, 255, 800, 450, lv_anim_path_ease_out, 0, 0);
-    animate(headline_1, set_rise, 24, 0, 800, 450, lv_anim_path_ease_out, 0, 0);
-    /* The product name lands large, settles, then pulses and glows twice. */
-    animate(headline_2, set_opa, 0, 255, 1200, 300, lv_anim_path_linear, 0, 0);
-    animate(headline_2, set_scale, 460, 256, 1200, 650, lv_anim_path_overshoot, 0, 0);
-    animate(headline_2, set_pulse, 256, 284, 2100, 260, lv_anim_path_ease_in_out, 260, 2);
-    animate(headline_2, set_glow, 0, 255, 2100, 260, lv_anim_path_ease_in_out, 260, 2);
-    animate(bar, set_width, 0, 300, 1600, 550, lv_anim_path_ease_out, 0, 0);
+    lv_obj_t *track = lv_obj_create(root);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_size(track, BAR_W, 8);
+    lv_obj_set_pos(track, (M3_WIDTH - BAR_W) / 2, BAR_Y);
+    lv_obj_set_style_radius(track, 4, 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0x1E293B), 0);
+    lv_obj_remove_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+    bar_fill = lv_obj_create(track);
+    lv_obj_remove_style_all(bar_fill);
+    lv_obj_set_size(bar_fill, 0, 8);
+    lv_obj_set_style_radius(bar_fill, 4, 0);
+    lv_obj_set_style_bg_opa(bar_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(bar_fill, lv_color_hex(ACCENT), 0);
+    lv_obj_set_style_bg_grad_color(bar_fill, lv_color_hex(ACCENT_2), 0);
+    lv_obj_set_style_bg_grad_dir(bar_fill, LV_GRAD_DIR_HOR, 0);
+    status = text(steps[0].text, &m3_font_splash_small, 0x94A3B8, BAR_Y + 18);
+    lv_obj_set_style_opa(status, LV_OPA_COVER, 0); /* Progress is visible from the first frame. */
 
     frame_timer = lv_timer_create(tick, 33, NULL);
     if (!frame_timer) lv_obj_delete(root); /* Never leave a splash that cannot dismiss itself. */
+    else { atomic_store(&reached_step, -1); atomic_store(&active, true); m3_boot_splash_step(M3_BOOT_DISPLAY); }
     lvgl_port_unlock();
     return pixels ? ESP_OK : ESP_ERR_NO_MEM;
 }

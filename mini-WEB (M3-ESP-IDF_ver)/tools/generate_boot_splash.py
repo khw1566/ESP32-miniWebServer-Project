@@ -2,7 +2,7 @@
 
 main/m3_boot_logo.inc      : GRID x GRID palette-indexed dots (0 = empty) for m3_boot_splash.c
 main/m3_font_splash.c      : 40 px semibold glyphs for the headline strings
-main/m3_font_splash_small.c: 22 px glyphs for the caption
+main/m3_font_splash_small.c: 22 px glyphs for the caption and progress status
 
 Usage:
   python tools/generate_boot_splash.py                  # built-in placeholder emblem
@@ -25,6 +25,9 @@ GRID = 33
 # Keep in sync with the strings in main/m3_boot_splash.c.
 HEADLINE = ['창업경진대회', 'MiniWEB 시제품']
 CAPTION = ['울산과학대학교', 'ULSAN COLLEGE']
+# Progress status lines under the bar, plus the percentage digits.
+STATUS = ['화면 준비 중', '음성·미디어 엔진 시작', '홈 화면 구성 중', '저장소 확인 중', 'Wi-Fi 모듈 시작',
+          'Wi-Fi 연결 중', '웹 서버 시작', '준비 완료', '0123456789%']
 
 
 def placeholder():
@@ -113,7 +116,7 @@ def main():
     dots, palette = from_logo(args.logo) if args.logo else placeholder()
     write_logo(dots, palette, Path(args.logo).name if args.logo else 'placeholder emblem')
     big = write_font('m3_font_splash', HEADLINE, 40, 3, 'Semibold 40 px boot splash headline.')
-    small = write_font('m3_font_splash_small', CAPTION, 22, 1, '22 px boot splash caption.')
+    small = write_font('m3_font_splash_small', CAPTION + STATUS, 22, 1, '22 px boot splash caption and progress status.')
     print(f'logo: {sum(1 for d in dots if d)} dots, {len(palette)} colours; '
           f'headline {big[0]} glyphs / {big[1]:,} B; caption {small[0]} glyphs / {small[1]:,} B')
 

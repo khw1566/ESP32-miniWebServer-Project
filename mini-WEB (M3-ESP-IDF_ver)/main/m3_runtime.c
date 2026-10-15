@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_ipc.h"
+#include "m3_boot_splash.h"
 #include "esp_netif_sntp.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -152,26 +153,31 @@ static void services(void *unused) {
     (void)unused;
     m3_runtime_state_t next = {0};
     snprintf(next.message, sizeof(next.message), "Starting storage and C6 Wi-Fi"); publish(&next);
+    m3_boot_splash_step(M3_BOOT_STORAGE);
     esp_err_t storage = web_server_storage_init();
     if (storage != ESP_OK) ESP_LOGW("M3", "Flash storage: %s", esp_err_to_name(storage));
     next.sd = sd_media_init() == ESP_OK;
+    m3_boot_splash_step(M3_BOOT_NETWORK);
     esp_err_t net = network_init();
     next.wifi_ready = net == ESP_OK;
     if (net == ESP_OK) {
         char ssid[64] = {0}, pass[64] = {0};
-        bool connected = !setup_requested && network_has_saved_credentials(ssid, sizeof(ssid), pass, sizeof(pass)) &&
-                         network_connect_sta(ssid, pass) == ESP_OK;
+        bool saved = !setup_requested && network_has_saved_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
+        if (saved) m3_boot_splash_step(M3_BOOT_CONNECT);
+        bool connected = saved && network_connect_sta(ssid, pass) == ESP_OK;
         memset(pass, 0, sizeof(pass));
         if (!connected) {
             net = network_start_softap();
             if (net == ESP_OK) dns_server_start();
         }
         if (net == ESP_OK) {
+            m3_boot_splash_step(M3_BOOT_WEB);
             next.web = web_server_start() == ESP_OK;
             cloud_relay_start();
         }
     }
     next.initialized = true;
+    m3_boot_splash_step(M3_BOOT_READY);
     network_settings_load(&next.settings);
     memset(next.settings.pass, 0, sizeof(next.settings.pass));
     next.settings_revision = 1;
