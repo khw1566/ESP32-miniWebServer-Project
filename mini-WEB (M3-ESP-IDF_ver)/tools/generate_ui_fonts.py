@@ -81,16 +81,21 @@ def emit(name, glyphs, ascent, descent, fallback, comment):
     return len(blob)
 
 
-chars = title_characters()
-glyphs, ascent, descent = render(chars, 22, 4, 3)
-# The ink box includes antialiasing and the semibold stroke, unlike TTF metrics.
-ascent = max(g[3] + g[5] for g in glyphs) + 1
-descent = max(0, -min(g[5] for g in glyphs)) + 1
-title_bytes = emit('m3_font_title', glyphs, ascent, descent, '&m3_font_large',
-                   'Semibold 22 px Hangul for UI titles.')
-glyphs, ascent, descent = render(list('-0123456789:'), 84, 4, 0)
-# Digits have no descenders: fit the line box to the inked height so the clock sits tightly.
-ascent = max(g[5] + g[3] for g in glyphs) + 2
-descent = max(0, -min(g[5] for g in glyphs)) + 2
-clock_bytes = emit('m3_font_clock', glyphs, ascent, descent, 'NULL', '84 px clock digits.')
-print(f'title: {len(chars)} Hangul glyphs / {title_bytes:,} bitmap bytes; clock: {clock_bytes:,} bitmap bytes')
+def main():
+    chars = title_characters()
+    glyphs, ascent, descent = render(chars, 22, 4, 3)
+    # The ink box includes antialiasing and the semibold stroke, unlike TTF metrics.
+    ascent = max(g[3] + g[5] for g in glyphs) + 1
+    descent = max(0, -min(g[5] for g in glyphs)) + 1
+    title_bytes = emit('m3_font_title', glyphs, ascent, descent, '&m3_font_large',
+                       'Semibold 22 px Hangul for UI titles.')
+    glyphs, ascent, descent = render(list('-0123456789:'), 84, 4, 0)
+    # Digits have no descenders: fit the line box to the inked height so the clock sits tightly.
+    ascent = max(g[5] + g[3] for g in glyphs) + 2
+    descent = max(0, -min(g[5] for g in glyphs)) + 2
+    clock_bytes = emit('m3_font_clock', glyphs, ascent, descent, 'NULL', '84 px clock digits.')
+    print(f'title: {len(chars)} Hangul glyphs / {title_bytes:,} bitmap bytes; clock: {clock_bytes:,} bitmap bytes')
+
+
+if __name__ == '__main__':
+    main()

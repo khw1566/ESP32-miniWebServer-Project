@@ -1,5 +1,6 @@
 #include "m3_memory.h"
 #include "m3_agent.h"
+#include "m3_preferences.h"
 #include "m3_gemini_config.h"
 #include "m3_audio.h"
 #include "m3_audio_apps.h"
@@ -36,7 +37,7 @@ static const char declarations[] =
     "[{\"name\":\"get_device_status\",\"description\":\"Read this board's current network, memory, audio and voice state.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{}}},"
     "{\"name\":\"set_volume\",\"description\":\"Set speaker volume, integer 0 through 150.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"percent\":{\"type\":\"INTEGER\",\"minimum\":0,\"maximum\":150}},\"required\":[\"percent\"]}},"
     "{\"name\":\"stop_audio\",\"description\":\"Stop current radio, TTS, WAV or microphone job.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{}}},"
-    "{\"name\":\"open_app\",\"description\":\"Request an app to open on the physical display.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"app\":{\"type\":\"STRING\",\"enum\":[\"home\",\"wifi\",\"files\",\"audio\",\"monitor\",\"settings\",\"radio\",\"games\",\"tts\",\"agent\",\"youtube\",\"music\"]}},\"required\":[\"app\"]}},"
+    "{\"name\":\"open_app\",\"description\":\"Request an app to open on the physical display.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"app\":{\"type\":\"STRING\",\"enum\":[\"home\",\"wifi\",\"files\",\"recorder\",\"monitor\",\"settings\",\"radio\",\"games\",\"tts\",\"agent\",\"youtube\",\"music\"]}},\"required\":[\"app\"]}},"
     "{\"name\":\"speak_text\",\"description\":\"Queue a short Korean sentence on the selected TTS speaker after the response; maximum 384 UTF-8 bytes. Reports queued, not completed.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"text\":{\"type\":\"STRING\"}},\"required\":[\"text\"]}}]";
 const char *m3_agent_model(unsigned index) { return index < 2 ? models[index] : NULL; }
 static bool key_valid(const char *key) {
@@ -60,6 +61,7 @@ static void update(unsigned token, const char *message, const char *answer, cons
     portEXIT_CRITICAL(&lock);
 }
 bool m3_agent_submit(const char *prompt, unsigned model) {
+    if (m3_preferences_restarting()) return false;
     if (!requests || !m3_agent_model(model) || !m3_tts_text_valid(prompt) ||
         !key_valid(M3_GEMINI_API_KEY) || network_get_mode() != NET_MODE_STA_CONNECTED) return false;
     bool expected = false;
@@ -132,7 +134,7 @@ static cJSON *execute_tool(const char *name, cJSON *args, unsigned token) {
     }
     if (!strcmp(name, "stop_audio")) { deferred_speech[0] = 0; m3_audio_stop(); return tool_result(true, "Audio cancellation requested"); }
     if (!strcmp(name, "open_app")) {
-        static const char *apps[] = {"home", "wifi", "files", "audio", "monitor", "settings", "radio", "games", "tts", "agent", "youtube", "music"};
+        static const char *apps[] = {"home", "wifi", "files", "recorder", "monitor", "settings", "radio", "games", "tts", "agent", "youtube", "music"};
         cJSON *app = cJSON_GetObjectItemCaseSensitive(args, "app");
         if (cJSON_IsString(app)) for (unsigned i = 0; i < sizeof(apps) / sizeof(apps[0]); ++i) if (!strcmp(app->valuestring, apps[i])) {
             atomic_store(&open_generation, token); atomic_store(&open_app, i); return tool_result(true, "App opening requested on display");

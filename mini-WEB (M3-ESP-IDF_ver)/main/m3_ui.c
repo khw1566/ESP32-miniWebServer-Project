@@ -1,4 +1,5 @@
 #include "m3_music.h"
+#include "m3_sd_apps.h"
 #include "m3_photos.h"
 #include "m3_calendar.h"
 #include "m3_kana.h"
@@ -10,6 +11,11 @@
 #include "m3_web_address.h"
 #include "m3_audio.h"
 #include "m3_2048.h"
+#include "m3_crossing.h"
+#include "m3_recorder.h"
+#include "m3_calculator.h"
+#include "m3_gallery.h"
+#include "m3_preferences.h"
 #include "m3_hangul.h"
 #include "m3_voice.h"
 #include "m3_agent.h"
@@ -23,6 +29,7 @@
 #include "esp_random.h"
 #include "lvgl.h"
 #include <time.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -46,11 +53,11 @@ extern const lv_font_t m3_font_korean, m3_font_title, m3_font_clock;
 #define FONT_TITLE (&m3_font_title)
 #define FONT_ICON (&lv_font_montserrat_28)
 
-typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_AUDIO, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_COUNT } app_id_t;
+typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_RECORDER, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_COUNT } app_id_t;
 _Static_assert(APP_AGENT == 9, "Agent app dispatch IDs must match the UI enum");
 enum { CONTENT_TOP = 100, HOME_TOP = 756, KEYBOARD_HEIGHT = 270 };
-static const m3_text_t app_names[] = {T_APP_HOME, T_APP_WIFI, T_APP_FILES, T_APP_AUDIO, T_APP_MONITOR,
-    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC};
+static const m3_text_t app_names[] = {T_APP_HOME, T_APP_WIFI, T_APP_FILES, T_APP_RECORDER, T_APP_MONITOR,
+    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC, T_APP_GALLERY, T_APP_CALCULATOR, T_APP_YTMUSIC};
 
 static lv_obj_t *pages[APP_COUNT], *viewport, *app_title, *back_button, *keyboard;
 static lv_obj_t *home_strip, *home_pill, *home_hint;
@@ -87,19 +94,22 @@ static lv_obj_t *net_title, *net_dot, *network, *qr, *qr_url;
 static lv_obj_t *ssid_field, *pass_field, *ip_field, *gateway_field, *mask_field, *dns_field;
 static lv_obj_t *static_switch, *static_fields, *wifi_info, *wifi_actions[3], *scan_buttons[M3_WIFI_RESULTS];
 static unsigned seen_scan, seen_settings, seen_wifi;
+static bool wifi_open_selected;
+static char wifi_selected_ssid[33];
 static lv_obj_t *storage_tabs, *file_path, *file_info, *file_bar, *file_page, *file_buttons[STORAGE_VIEW_ROWS], *file_empty;
 static unsigned seen_files;
 static bool selected_sd;
 static char selected_folder[256];
 static unsigned selected_offset;
-enum { VOLUME_ROWS = 5 };
-static lv_obj_t *audio_info, *audio_bar, *volume_sliders[VOLUME_ROWS], *volume_values[VOLUME_ROWS];
+enum { VOLUME_ROWS = 8 };
+static lv_obj_t *recorder_info, *recorder_meter, *recorder_time, *recorder_path, *recorder_actions[4];
+static lv_obj_t *volume_sliders[VOLUME_ROWS], *volume_values[VOLUME_ROWS];
 static unsigned shown_volume = 1000;
 static lv_obj_t *memory, *heap_bar, *chart, *monitor_info, *system_info;
 static lv_chart_series_t *heap_series, *psram_series;
 static unsigned chart_tick;
 static char seen_url[96], seen_audio[96];
-static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[8];
+static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[12], *radio_region;
 static int radio_selected = -1;
 static bool radio_pending;
 static int64_t radio_pending_until;
@@ -122,19 +132,36 @@ static void voice_input(lv_event_t *event);
 static void apply_language(void);
 static void update_metrics(lv_timer_t *timer);
 static void tube_leave(void);
+static void sd_apps_close(lv_event_t *event);
+static void sd_apps_tick(lv_timer_t *timer);
+static lv_obj_t *builtin_games, *sd_launcher, *sd_panel, *sd_list, *sd_stage, *sd_canvas, *sd_status;
+static lv_obj_t *sd_rows[M3_SD_APP_COUNT], *sd_faces[M3_SD_APP_COUNT];
+static M3_PSRAM_BSS m3_sd_apps_state_t sd_snapshot;
+static uint16_t *sd_pixels;
+static lv_obj_t *sd_frame_holder;
+static lv_obj_t *sd_restart;
+static bool sd_launch_failed;
 
-/* Direct links published by SomaFM and Radio Swiss on 2026-10-13. */
-static const struct { const char *name, *url; bool aac; } radio_stations[] = {
-    {"SomaFM Groove Salad / MP3 128k", "https://ice5.somafm.com/groovesalad-128-mp3", false},
-    {"SomaFM Groove Salad / AAC 64k", "https://ice5.somafm.com/groovesalad-64-aac", true},
-    {"SomaFM Drone Zone / MP3 128k", "https://ice5.somafm.com/dronezone-128-mp3", false},
-    {"SomaFM Secret Agent / MP3 128k", "https://ice5.somafm.com/secretagent-128-mp3", false},
-    {"Radio Swiss Jazz / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128", false},
-    {"Radio Swiss Classic / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128", false},
-    {"Radio Swiss Pop / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128", false}
+/* World presets retained; KR/JP direct MP3 endpoints checked on 2026-10-15. */
+static const struct { const char *name, *url; bool aac; unsigned region; } radio_stations[] = {
+    {"SomaFM Groove Salad / MP3 128k", "https://ice5.somafm.com/groovesalad-128-mp3", false, 0},
+    {"SomaFM Groove Salad / AAC 64k", "https://ice5.somafm.com/groovesalad-64-aac", true, 0},
+    {"SomaFM Drone Zone / MP3 128k", "https://ice5.somafm.com/dronezone-128-mp3", false, 0},
+    {"SomaFM Secret Agent / MP3 128k", "https://ice5.somafm.com/secretagent-128-mp3", false, 0},
+    {"Radio Swiss Jazz / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128", false, 0},
+    {"Radio Swiss Classic / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128", false, 0},
+    {"Radio Swiss Pop / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128", false, 0},
+    {"Korea Big B K-pop / MP3", "https://antares.dribbcast.com/proxy/kpop?mp=/s", false, 1},
+    {"Japan FM Setagaya / MP3", "https://fmsetagaya834.out.airtime.pro/fmsetagaya834_a", false, 2},
+    {"Japan Big B J-pop / MP3", "https://antares.dribbcast.com/proxy/jpop?mp=/s", false, 2}
 };
-_Static_assert(sizeof(radio_stations) / sizeof(radio_stations[0]) <= 8, "station buttons");
+_Static_assert(sizeof(radio_stations) / sizeof(radio_stations[0]) <= 12, "station buttons");
 static lv_obj_t *game_board, *game_tiles[16], *game_info, *game_arrows[4], *game_tabs, *game_undo;
+static lv_obj_t *cross_scene, *cross_lanes[M3_CROSS_ROWS], *cross_objects[M3_CROSS_ROWS][3];
+static lv_obj_t *cross_windows[M3_CROSS_ROWS][3], *cross_player, *cross_body;
+static m3_crossing_t crossing;
+static bool crossing_game;
+static uint32_t crossing_best;
 static lv_obj_t *score_titles[2], *score_values[2];
 static m3_2048_t game, undo_game;
 static bool undo_available, memory_game, memory_visible[16], memory_solved[16];
@@ -149,6 +176,13 @@ static bool game_drag;
 static lv_style_t st_page, st_card, st_row, st_btn, st_btn_pressed, st_primary, st_primary_pressed, st_danger,
     st_disabled, st_field, st_field_focus, st_seg, st_seg_item, st_seg_checked, st_list, st_list_checked,
     st_caption, st_track, st_indicator, st_knob, st_title, st_bare;
+static m3_preferences_t ui_preferences = {1, 100, 30, 1, 0, 40, 40, 0};
+static lv_obj_t *brightness_slider, *fps_slider, *brightness_value, *fps_value;
+static lv_obj_t *mute_switch, *animation_switch, *focus_switch, *settings_info;
+static unsigned applied_brightness = 255, applied_fps = 255, applied_animations = 255;
+static void update_preferences(void);
+static uint32_t ui_duration(uint32_t ms) { return ui_preferences.animations ? ms : 0; }
+static lv_anim_enable_t ui_animation(void) { return ui_preferences.animations ? LV_ANIM_ON : LV_ANIM_OFF; }
 static void styles_init(void) {
     lv_style_init(&st_bare);
     lv_style_set_bg_opa(&st_bare, LV_OPA_TRANSP); lv_style_set_border_width(&st_bare, 0);
@@ -394,6 +428,7 @@ static void activity_set(lv_obj_t *box, bool on) {
         lv_obj_t *part = lv_obj_get_child(indicator, (int32_t)i);
         lv_anim_delete(part, NULL);
         if (!on) { if (kind == ACTIVITY_DOTS) dot_bounce(part, 0); else bar_level(part, 6); continue; }
+        if (!ui_preferences.animations) { if (kind == ACTIVITY_DOTS) dot_bounce(part, 0); else bar_level(part, 12); continue; }
         lv_anim_t animation; lv_anim_init(&animation);
         lv_anim_set_var(&animation, part);
         lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
@@ -401,14 +436,14 @@ static void activity_set(lv_obj_t *box, bool on) {
         if (kind == ACTIVITY_DOTS) {
             /* A wave: each dot starts 140 ms after the previous one and they stay in step. */
             lv_anim_set_exec_cb(&animation, dot_bounce); lv_anim_set_values(&animation, 0, 7);
-            lv_anim_set_duration(&animation, 280); lv_anim_set_playback_duration(&animation, 280);
+            lv_anim_set_duration(&animation, ui_duration(280)); lv_anim_set_playback_duration(&animation, 280);
             lv_anim_set_delay(&animation, i * 140); lv_anim_set_repeat_delay(&animation, 280);
         } else {
             /* Bars at unrelated periods read as a live level meter. */
             static const uint16_t periods[] = {230, 310, 270, 350, 290};
             static const uint8_t peaks[] = {18, 26, 22, 26, 16};
             lv_anim_set_exec_cb(&animation, bar_level); lv_anim_set_values(&animation, 6, peaks[i % 5]);
-            lv_anim_set_duration(&animation, periods[i % 5]); lv_anim_set_playback_duration(&animation, periods[i % 5]);
+            lv_anim_set_duration(&animation, ui_duration(periods[i % 5])); lv_anim_set_playback_duration(&animation, periods[i % 5]);
         }
         lv_anim_start(&animation);
     }
@@ -428,7 +463,7 @@ static unsigned tts_phase(const m3_audio_state_t *audio) {
 
 /* Segmented control on a button matrix: translated labels, exactly one choice. */
 typedef struct { lv_obj_t *obj; const char *const *fixed; const char *map[5]; m3_text_t ids[4]; uint8_t count, selected; } segment_t;
-static segment_t segments[12];
+static segment_t segments[16];
 static unsigned segment_count;
 static segment_t *segment_of(lv_obj_t *obj) {
     for (unsigned i = 0; i < segment_count; ++i) if (segments[i].obj == obj) return &segments[i];
@@ -486,6 +521,10 @@ static lv_obj_t *volume_row(lv_obj_t *parent, unsigned index, unsigned volume) {
 
 static lv_obj_t *music_source, *music_repeat, *music_title, *music_info, *music_time, *music_bar, *music_pause_button;
 static lv_obj_t *music_rows[M3_MUSIC_ROWS], *music_labels[M3_MUSIC_ROWS], *music_empty;
+static lv_obj_t *music_shuffle, *music_library, *music_eq_panel, *music_eq_sliders[3], *music_eq_values[3];
+static lv_obj_t *music_rays[24];
+static lv_point_precise_t music_ray_points[24][2];
+static float music_display_bands[3];
 static M3_PSRAM_BSS m3_music_state_t music_snapshot;
 static unsigned seen_music = ~0u;
 static void music_refresh_event(lv_event_t *event) {
@@ -499,19 +538,71 @@ static void music_track_event(lv_event_t *event) {
         set_text(music_info, tr(T_MUSIC_FAIL));
 }
 static void music_step_event(lv_event_t *event) { if (!m3_music_next((intptr_t)lv_event_get_user_data(event))) set_text(music_info, tr(T_MUSIC_FAIL)); }
-static void music_pause_event(lv_event_t *event) { (void)event; m3_music_pause(); }
+static void music_pause_event(lv_event_t *event) {
+    (void)event;
+    if (music_snapshot.active) m3_music_pause();
+    else if (!m3_music_play(music_snapshot.selected, music_snapshot.catalog_revision)) set_text(music_info, tr(T_MUSIC_FAIL));
+}
+static void music_player_event(lv_event_t *event) {
+    (void)event;
+    lv_obj_add_flag(music_library, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(music_eq_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_scroll_to_y(pages[APP_MUSIC], 0, LV_ANIM_ON);
+}
 static void music_stop_event(lv_event_t *event) { (void)event; m3_music_stop(); }
-static void music_repeat_event(lv_event_t *event) { (void)event; m3_music_repeat(segment_value(music_repeat) == 1); }
+static void music_repeat_event(lv_event_t *event) { (void)event; m3_music_repeat_mode((m3_music_repeat_t)segment_value(music_repeat)); }
+static void music_shuffle_event(lv_event_t *event) { (void)event; m3_music_shuffle(segment_value(music_shuffle) == 1); }
+static void music_panel_event(lv_event_t *event) {
+    lv_obj_t *panel = (uintptr_t)lv_event_get_user_data(event) ? music_eq_panel : music_library;
+    if (lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN); lv_obj_scroll_to_view(panel, LV_ANIM_ON);
+    } else lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void music_eq_event(lv_event_t *event) {
+    unsigned band = (uintptr_t)lv_event_get_user_data(event);
+    m3_music_equalizer(band, lv_slider_get_value(music_eq_sliders[band]));
+}
+static void music_eq_reset(lv_event_t *event) {
+    (void)event; for (unsigned b = 0; b < 3; ++b) m3_music_equalizer(b, 0);
+}
+static void music_swipe_event(lv_event_t *event) {
+    lv_indev_t *input = lv_event_get_indev(event); if (!input) return;
+    lv_dir_t dir = lv_indev_get_gesture_dir(input);
+    if ((dir == LV_DIR_LEFT || dir == LV_DIR_RIGHT) && !m3_music_next(dir == LV_DIR_LEFT ? 1 : -1))
+        set_text(music_info, tr(T_MUSIC_FAIL));
+}
+static void music_visual_update(lv_timer_t *timer) {
+    (void)timer; if (current_app != APP_MUSIC) return;
+    m3_music_state(&music_snapshot);
+    for (unsigned b = 0; b < 3; ++b) {
+        float target = music_snapshot.active && !music_snapshot.paused ? music_snapshot.bands[b] : 0;
+        music_display_bands[b] += (target - music_display_bands[b]) * 0.45f;
+    }
+    for (unsigned i = 0; i < 24; ++i) {
+        float angle = (i * 15.0f - 90.0f) * 0.017453293f;
+        float radius = 64 + music_display_bands[i / 8] * 0.28f;
+        music_ray_points[i][0] = (lv_point_precise_t){100 + cosf(angle) * 58, 100 + sinf(angle) * 58};
+        music_ray_points[i][1] = (lv_point_precise_t){100 + cosf(angle) * radius, 100 + sinf(angle) * radius};
+        lv_line_set_points(music_rays[i], music_ray_points[i], 2);
+    }
+}
 static void update_music(void) {
     m3_music_state(&music_snapshot);
     if (seen_music == music_snapshot.revision && current_app != APP_MUSIC) return;
     seen_music = music_snapshot.revision;
+    segment_select(music_repeat, music_snapshot.repeat_mode);
+    segment_select(music_shuffle, music_snapshot.shuffle ? 1 : 0);
+    for (unsigned b = 0; b < 3; ++b) {
+        if (!lv_obj_has_state(music_eq_sliders[b], LV_STATE_PRESSED))
+            lv_slider_set_value(music_eq_sliders[b], music_snapshot.eq_db[b], LV_ANIM_OFF);
+        char value[16]; snprintf(value, sizeof(value), "%+d dB", music_snapshot.eq_db[b]);
+        set_text(music_eq_values[b], value);
+    }
     set_text(music_title, music_snapshot.title[0] ? music_snapshot.title : tr(T_MUSIC_EMPTY));
     set_text(music_info, music_snapshot.active && music_snapshot.paused ? tr(T_MUSIC_PAUSE) : status_text(music_snapshot.message));
     lv_bar_set_value(music_bar, music_snapshot.progress, LV_ANIM_OFF);
     char time[80]; snprintf(time, sizeof(time), tr(T_MUSIC_STATUS), music_snapshot.seconds / 60, music_snapshot.seconds % 60,
         music_snapshot.progress, music_snapshot.count); set_text(music_time, time);
-    lv_label_set_text(lv_obj_get_child(music_pause_button, 0), tr(music_snapshot.active && music_snapshot.paused ? T_MUSIC_RESUME : T_MUSIC_PAUSE));
+    lv_label_set_text(lv_obj_get_child(music_pause_button, 0), tr(!music_snapshot.active ? T_RADIO_PLAY : music_snapshot.paused ? T_MUSIC_RESUME : T_MUSIC_PAUSE));
     for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
         if (i < music_snapshot.shown) {
             set_text(music_labels[i], music_snapshot.items[i].name);
@@ -538,7 +629,7 @@ static void home_settle(void) {
     lv_anim_delete(home_pill, home_feedback);
     lv_anim_t animation; lv_anim_init(&animation);
     lv_anim_set_var(&animation, home_pill); lv_anim_set_exec_cb(&animation, home_feedback);
-    lv_anim_set_values(&animation, home_progress, 0); lv_anim_set_duration(&animation, 220);
+    lv_anim_set_values(&animation, home_progress, 0); lv_anim_set_duration(&animation, ui_duration(220));
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
 }
 static void hide_keyboard(void) {
@@ -552,9 +643,11 @@ static void hide_keyboard(void) {
 }
 /* Translation only: page-wide opacity would force a full-screen layer on every frame. */
 static void page_motion(void *obj, int32_t x) { lv_obj_set_style_translate_x(obj, x, 0); }
+static void phone_enter(app_id_t app);
 static void show_app(app_id_t app) {
     if (app >= APP_COUNT) return;
     if (current_app == APP_TUBE && app != APP_TUBE) tube_leave();
+    if (current_app == APP_GAMES && app != APP_GAMES && sd_panel) sd_apps_close(NULL);
     if (voice_target) { m3_audio_stop(); voice_target = NULL; }
     if (voice_panel) lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
     if (shade) shade_set(false);
@@ -567,7 +660,9 @@ static void show_app(app_id_t app) {
         if (i == app) lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
     }
+    if (current_app == APP_GALLERY && app != APP_GALLERY) m3_gallery_close();
     current_app = app;
+    phone_enter(app);
     if (app == APP_HOME && home_tiles) {
         home_index = 1;
         lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
@@ -590,7 +685,7 @@ static void show_app(app_id_t app) {
     lv_label_set_text(app_title, tr(app_names[app]));
     lv_anim_t animation; lv_anim_init(&animation);
     lv_anim_set_var(&animation, pages[app]); lv_anim_set_exec_cb(&animation, page_motion);
-    lv_anim_set_values(&animation, home ? 0 : 36, 0); lv_anim_set_duration(&animation, 180);
+    lv_anim_set_values(&animation, home ? 0 : 36, 0); lv_anim_set_duration(&animation, ui_duration(180));
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
 }
 static void launch_app(lv_event_t *event) { show_app((app_id_t)(uintptr_t)lv_event_get_user_data(event)); }
@@ -773,12 +868,12 @@ static void edit_field(lv_event_t *event) {
     lv_obj_move_to_index(home_strip, -1);
     lv_obj_set_height(viewport, HOME_TOP - CONTENT_TOP - KEYBOARD_HEIGHT);
     lv_obj_update_layout(viewport);
-    lv_obj_scroll_to_view_recursive(field, LV_ANIM_ON);
+    lv_obj_scroll_to_view_recursive(field, ui_animation());
     if (opening) {
         lv_anim_delete(keyboard, keyboard_motion);
         lv_anim_t animation; lv_anim_init(&animation);
         lv_anim_set_var(&animation, keyboard); lv_anim_set_exec_cb(&animation, keyboard_motion);
-        lv_anim_set_values(&animation, KEYBOARD_HEIGHT, 0); lv_anim_set_duration(&animation, 180);
+        lv_anim_set_values(&animation, KEYBOARD_HEIGHT, 0); lv_anim_set_duration(&animation, ui_duration(180));
         lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
     }
 }
@@ -918,14 +1013,21 @@ static void select_network(lv_event_t *event) {
     hide_keyboard();
     lv_textarea_set_text(ssid_field, snapshot.networks[index].ssid);
     lv_textarea_set_text(pass_field, "");
+    wifi_open_selected = snapshot.networks[index].authmode == WIFI_AUTH_OPEN;
+    snprintf(wifi_selected_ssid, sizeof(wifi_selected_ssid), "%s", snapshot.networks[index].ssid);
     form_dirty = true;
     /* Move straight to the password so one tap selects and continues. */
-    lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
+    if (!wifi_open_selected) lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
 }
 static void wifi_feedback(const char *message, uint32_t color) {
     lv_label_set_text(wifi_info, message);
     lv_obj_set_style_text_color(wifi_info, lv_color_hex(color), 0);
-    lv_obj_scroll_to_view_recursive(wifi_info, LV_ANIM_ON);
+    lv_obj_scroll_to_view_recursive(wifi_info, ui_animation());
+}
+static m3_wifi_action_t wifi_connection_action(const network_settings_t *settings) {
+    bool explicit_open = wifi_open_selected && !strcmp(settings->ssid, wifi_selected_ssid);
+    return !settings->pass[0] && !explicit_open && snapshot.wifi_password_saved &&
+        !strcmp(settings->ssid, snapshot.settings.ssid) ? M3_WIFI_CONNECT_SAVED : M3_WIFI_CONNECT;
 }
 static void wifi_action(lv_event_t *event) {
     m3_wifi_action_t action = (m3_wifi_action_t)(uintptr_t)lv_event_get_user_data(event);
@@ -949,17 +1051,30 @@ static void wifi_action(lv_event_t *event) {
             wifi_feedback(tr(T_WIFI_INVALID), RED); return;
         }
     }
-    bool accepted = m3_runtime_wifi(action, action == M3_WIFI_CONNECT ? &settings : NULL);
+    if (action == M3_WIFI_CONNECT) action = wifi_connection_action(&settings);
+    bool accepted = m3_runtime_wifi(action,
+        action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED ? &settings : NULL);
     memset(&settings, 0, sizeof(settings));
     if (accepted) {
-        if (action == M3_WIFI_CONNECT) {
+        if (action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED) {
             lv_textarea_set_text(pass_field, ""); lv_textarea_set_password_mode(pass_field, true);
+            wifi_open_selected = false;
         }
         wifi_feedback(tr(T_WIFI_QUEUED), CYAN);
     } else wifi_feedback(tr(T_WIFI_BUSY), AMBER);
 }
 static unsigned wifi_bars(int rssi) {
     return rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -75 ? 2 : rssi >= -85 ? 1 : 0;
+}
+/* Vector lock: closed for secured networks, open shackle for public networks. */
+static void wifi_security(lv_obj_t *icon, bool open) {
+    uint32_t color = open ? GREEN : MUTED;
+    lv_obj_t *shackle = lv_obj_get_child(icon, 0);
+    lv_obj_set_pos(shackle, open ? 10 : 6, 1);
+    lv_obj_set_style_border_side(shackle, open ? LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT :
+        LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT, 0);
+    lv_obj_set_style_border_color(shackle, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_color(lv_obj_get_child(icon, 1), lv_color_hex(color), 0);
 }
 static void update_wifi(void) {
     static bool was_busy;
@@ -998,9 +1113,9 @@ static void update_wifi(void) {
                 lv_obj_set_style_text_color(lv_obj_get_child(scan_buttons[i], 0),
                     lv_color_hex(bars >= 3 ? GREEN : bars == 2 ? AMBER : RED), 0);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 1), snapshot.networks[i].ssid);
-                snprintf(text, sizeof(text), "%d dBm  %s", snapshot.networks[i].rssi,
-                    tr(snapshot.networks[i].authmode == WIFI_AUTH_OPEN ? T_NET_OPEN : T_NET_SECURED));
+                snprintf(text, sizeof(text), "%d dBm", snapshot.networks[i].rssi);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 2), text);
+                wifi_security(lv_obj_get_child(scan_buttons[i], 3), snapshot.networks[i].authmode == WIFI_AUTH_OPEN);
                 lv_obj_remove_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
             } else lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
         }
@@ -1008,9 +1123,43 @@ static void update_wifi(void) {
 }
 
 /* ---------- Audio, radio and speech. ---------- */
-static void test_audio(lv_event_t *event) {
+static void recorder_start(lv_event_t *event) {
     (void)event;
-    if (!m3_audio_test()) lv_label_set_text(audio_info, tr(T_AUDIO_BUSY));
+    if (!m3_audio_record()) lv_label_set_text(recorder_info, tr(T_AUDIO_BUSY));
+}
+static void recorder_stop(lv_event_t *event) { (void)event; m3_recorder_finish(); }
+static void recorder_play(lv_event_t *event) {
+    (void)event; m3_recorder_state_t recorded; m3_recorder_state(&recorded);
+    if (recorded.busy) return;
+    m3_audio_state_t audio; m3_audio_state(&audio);
+    if (audio.playing) { m3_audio_stop(); return; }
+    if (!recorded.saved || !m3_audio_recording_play(recorded.filename)) lv_label_set_text(recorder_info, tr(T_AUDIO_BUSY));
+}
+static void update_recorder(const m3_audio_state_t *audio) {
+    m3_recorder_state_t recorded; m3_recorder_state(&recorded);
+    char text[160];
+    snprintf(text, sizeof(text), "%02u:%02u / 30:00", recorded.seconds / 60, recorded.seconds % 60);
+    set_text(recorder_time, text);
+    set_text(recorder_info, !audio->ready ? tr(T_AUDIO_UNAVAILABLE) : !snapshot.sd ? status_text("SD unavailable or busy") :
+        audio->playing && !recorded.busy ? status_text(audio->message) :
+        recorded.message[0] ? status_text(recorded.message) : tr(T_REC_HINT));
+    if (!recorded.busy && recorded.error_stage[0]) {
+        snprintf(text, sizeof(text), "%.100s / %.23s (%d)", status_text(recorded.message), recorded.error_stage, recorded.error_code);
+        set_text(recorder_info, text);
+    }
+    lv_bar_set_value(recorder_meter, recorded.level, LV_ANIM_OFF);
+    snprintf(text, sizeof(text), "%s%s%s", M3_RECORDER_FOLDER, recorded.saved ? "/\n" : "", recorded.saved ? recorded.filename : "");
+    set_text(recorder_path, text);
+    snprintf(text, sizeof(text), "%s %s", audio->playing ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY,
+        tr(audio->playing ? T_AUDIO_STOP : T_REC_PLAY));
+    set_text(lv_obj_get_child(recorder_actions[2], 0), text);
+    bool enabled[] = {snapshot.sd && audio->ready && !audio->playing && !recorded.busy,
+        recorded.busy, (audio->playing || (snapshot.sd && recorded.saved)) && audio->ready && !recorded.busy,
+        snapshot.sd && !recorded.busy};
+    for (unsigned i = 0; i < 4; ++i) {
+        if (enabled[i]) lv_obj_remove_state(recorder_actions[i], LV_STATE_DISABLED);
+        else lv_obj_add_state(recorder_actions[i], LV_STATE_DISABLED);
+    }
 }
 static void stop_audio(lv_event_t *event) { (void)event; radio_pending = false; m3_audio_stop(); }
 static void volume_changed(lv_event_t *event) {
@@ -1088,8 +1237,48 @@ static uint32_t tile_color(uint8_t power) {
         0xeab308, 0xfacc15, 0x22c55e, 0x06b6d4, 0xa855f7};
     return power < sizeof(colors) / sizeof(colors[0]) ? colors[power] : MAGENTA;
 }
+static void render_crossing(void) {
+    char text[48];
+    if (crossing.best_row > crossing_best) crossing_best = crossing.best_row;
+    set_text(score_titles[0], tr(T_SCORE)); set_text(score_titles[1], tr(T_BEST));
+    snprintf(text, sizeof(text), "%lu", (unsigned long)crossing.best_row); set_text(score_values[0], text);
+    snprintf(text, sizeof(text), "%lu", (unsigned long)crossing_best); set_text(score_values[1], text);
+    set_text(game_info, tr(crossing.dead ? T_GAME_CROSS_OVER : T_GAME_CROSS_HINT));
+    for (unsigned i = 0; i < M3_CROSS_ROWS; ++i) {
+        uint32_t world = crossing.camera + i;
+        m3_cross_lane_t lane = m3_crossing_lane(&crossing, world);
+        set_bg(cross_lanes[i], lane == M3_CROSS_GRASS ? (world % 8 ? 0x518d46 : 0x609d50) :
+            lane == M3_CROSS_RIVER ? 0x237eaa : 0x364250);
+        int offset = m3_crossing_offset(&crossing, world), length = m3_crossing_length(&crossing, world);
+        for (unsigned j = 0; j < 3; ++j) {
+            lv_obj_t *obstacle = cross_objects[i][j];
+            if (lane == M3_CROSS_GRASS) { lv_obj_add_flag(obstacle, LV_OBJ_FLAG_HIDDEN); continue; }
+            lv_obj_remove_flag(obstacle, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(obstacle, offset + ((int)j - 1) * M3_CROSS_PERIOD, 8);
+            lv_obj_set_width(obstacle, length);
+            set_bg(obstacle, lane == M3_CROSS_RIVER ? 0x98602e : (world % 2 ? 0xf0b84a : 0xe46969));
+            set_bg(cross_windows[i][j], lane == M3_CROSS_RIVER ? 0xbf8649 : 0xb8e6f2);
+            lv_obj_set_width(cross_windows[i][j], lane == M3_CROSS_RIVER ? length - 16 : 20);
+        }
+    }
+    int visible_row = (int)crossing.row - (int)crossing.camera;
+    if (visible_row < 0) visible_row = 0;
+    lv_obj_set_pos(cross_player, crossing.x - 16, (M3_CROSS_ROWS - 1 - visible_row) * M3_CROSS_CELL + 5);
+    set_bg(cross_body, crossing.dead ? RED : 0xfff2cf);
+}
+static void crossing_tick(lv_timer_t *timer) {
+    (void)timer;
+    if (!crossing_game || current_app != APP_GAMES || crossing.dead || shade_y > -HOME_TOP) return;
+    if (sd_panel && !lv_obj_has_flag(sd_panel, LV_OBJ_FLAG_HIDDEN)) return;
+    m3_crossing_tick(&crossing);
+    render_crossing();
+}
 static void render_game(void) {
     char text[96];
+    if (crossing_game) {
+        lv_obj_add_state(game_undo, LV_STATE_DISABLED);
+        render_crossing(); return;
+    }
     if (memory_game) {
         unsigned solved = 0;
         for (unsigned i = 0; i < 16; ++i) if (memory_solved[i]) ++solved;
@@ -1132,6 +1321,7 @@ static void render_game(void) {
     }
 }
 static void game_move(m3_game_direction_t direction) {
+    if (crossing_game) { m3_crossing_move(&crossing, direction); render_game(); return; }
     if (memory_game) return;
     m3_2048_t previous = game;
     if (m3_2048_move(&game, direction)) { undo_game = previous; undo_available = true; render_game(); }
@@ -1149,10 +1339,13 @@ static void game_touch(lv_event_t *event) {
             game_drag = false;
             game_move(abs(dx) > abs(dy) ? (dx < 0 ? M3_GAME_LEFT : M3_GAME_RIGHT) : (dy < 0 ? M3_GAME_UP : M3_GAME_DOWN));
         }
-    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) game_drag = false;
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        if (code == LV_EVENT_RELEASED && game_drag && crossing_game) game_move(M3_GAME_UP);
+        game_drag = false;
+    }
 }
 static void memory_card(lv_event_t *event) {
-    if (!memory_game || memory_second >= 0) return;
+    if (!memory_game || crossing_game || memory_second >= 0) return;
     unsigned i = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     if (i >= 16 || memory_solved[i] || memory_visible[i]) return;
     memory_visible[i] = true;
@@ -1167,7 +1360,10 @@ static void memory_card(lv_event_t *event) {
 }
 static void new_game(lv_event_t *event) {
     (void)event;
-    if (memory_game) {
+    game_drag = false;
+    if (crossing_game) {
+        m3_crossing_reset(&crossing, esp_random()); undo_available = false;
+    } else if (memory_game) {
         memset(memory_visible, 0, sizeof(memory_visible)); memset(memory_solved, 0, sizeof(memory_solved));
         memory_first = memory_second = -1; memory_turns = 0;
         for (unsigned i = 0; i < 16; ++i) memory_cards[i] = i / 2;
@@ -1177,7 +1373,14 @@ static void new_game(lv_event_t *event) {
 }
 static void choose_game(lv_event_t *event) {
     (void)event;
-    memory_game = segment_value(game_tabs) != 0;
+    memory_game = segment_value(game_tabs) == 1;
+    crossing_game = segment_value(game_tabs) == 2;
+    for (unsigned i = 0; i < 16; ++i) {
+        if (crossing_game) lv_obj_add_flag(game_tiles[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(game_tiles[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (crossing_game) lv_obj_remove_flag(cross_scene, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(cross_scene, LV_OBJ_FLAG_HIDDEN);
     for (unsigned i = 0; i < 4; ++i) {
         if (memory_game) lv_obj_add_flag(game_arrows[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_remove_flag(game_arrows[i], LV_OBJ_FLAG_HIDDEN);
@@ -1186,7 +1389,79 @@ static void choose_game(lv_event_t *event) {
 }
 static void undo_move(lv_event_t *event) {
     (void)event;
-    if (!memory_game && undo_available) { game = undo_game; undo_available = false; render_game(); }
+    if (!memory_game && !crossing_game && undo_available) { game = undo_game; undo_available = false; render_game(); }
+}
+
+/* SD code runs on its own bounded worker; LVGL only copies completed frames. */
+static void sd_apps_release(void) {
+    m3_sd_apps_stop();
+    if (sd_canvas) { lv_obj_delete(sd_canvas); sd_canvas = NULL; }
+    free(sd_pixels); sd_pixels = NULL;
+    sd_launch_failed = false;
+    lv_obj_add_flag(sd_restart, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(sd_stage, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(sd_list, LV_OBJ_FLAG_HIDDEN);
+}
+static void sd_apps_close(lv_event_t *event) {
+    bool was_playing = sd_canvas != NULL;
+    sd_apps_release();
+    if (!event || !was_playing) {
+        lv_obj_add_flag(sd_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(builtin_games, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(sd_launcher, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+static void sd_apps_open(lv_event_t *event) {
+    (void)event;
+    sd_launch_failed = false;
+    lv_obj_add_flag(builtin_games, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(sd_launcher, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(sd_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_scroll_to_y(pages[APP_GAMES], 0, LV_ANIM_OFF);
+    sd_apps_tick(NULL);
+}
+static void sd_apps_launch(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index >= sd_snapshot.count || sd_canvas) return;
+    sd_launch_failed = false;
+    sd_pixels = heap_caps_calloc(M3_SD_APP_WIDTH * M3_SD_APP_HEIGHT, sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!sd_pixels || !m3_sd_apps_start(sd_snapshot.names[index])) {
+        free(sd_pixels); sd_pixels = NULL;
+        sd_launch_failed = true;
+        lv_label_set_text(sd_status, tr(T_SD_APPS_FAILED)); return;
+    }
+    sd_canvas = lv_canvas_create(sd_frame_holder);
+    lv_canvas_set_buffer(sd_canvas, sd_pixels, M3_SD_APP_WIDTH, M3_SD_APP_HEIGHT, LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(sd_canvas); lv_image_set_scale(sd_canvas, 448);
+    lv_obj_remove_flag(sd_canvas, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(sd_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(sd_stage, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(sd_restart, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_scroll_to_y(pages[APP_GAMES], 0, LV_ANIM_OFF);
+}
+static void sd_apps_control(lv_event_t *event) {
+    m3_sd_apps_input((unsigned)(uintptr_t)lv_event_get_user_data(event));
+}
+static void sd_apps_tick(lv_timer_t *timer) {
+    (void)timer;
+    if (current_app != APP_GAMES || !sd_panel || lv_obj_has_flag(sd_panel, LV_OBJ_FLAG_HIDDEN)) return;
+    if (!m3_sd_apps_state(&sd_snapshot)) return;
+    if (sd_canvas) {
+        if (m3_sd_apps_frame(sd_pixels)) lv_obj_invalidate(sd_canvas);
+        if (sd_snapshot.error[0]) set_text(sd_status, sd_snapshot.error);
+        else {
+            char message[64]; snprintf(message, sizeof(message), tr(T_SD_APPS_SCORE), sd_snapshot.score);
+            set_text(sd_status, message);
+        }
+    } else {
+        set_text(sd_status, tr(sd_launch_failed ? T_SD_APPS_FAILED : sd_snapshot.count ? T_SD_APPS_HINT : T_SD_APPS_EMPTY));
+        for (unsigned i = 0; i < M3_SD_APP_COUNT; ++i) {
+            if (i < sd_snapshot.count) {
+                lv_obj_remove_flag(sd_rows[i], LV_OBJ_FLAG_HIDDEN);
+                set_text(sd_faces[i], sd_snapshot.names[i]);
+            } else lv_obj_add_flag(sd_rows[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 
 /* ---------- Files. ---------- */
@@ -1214,6 +1489,9 @@ static void parent_folder(lv_event_t *event) {
     (void)event; char *slash = strrchr(selected_folder, '/'); if (slash) *slash = 0;
     selected_offset = 0; browse_refresh();
 }
+static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data);
+#include "m3_phone_ui.inc"
+
 static bool wav_name(const char *name) {
     const char *ext = strrchr(name, '.');
     return ext && !strcasecmp(ext, ".wav");
@@ -1228,12 +1506,16 @@ static void open_file(lv_event_t *event) {
         if (length <= 0 || (size_t)length >= sizeof(folder)) return;
         snprintf(selected_folder, sizeof(selected_folder), "%s", folder);
         selected_sd = true; selected_offset = 0; browse_refresh();
+    } else if (snapshot.browse_sd && m3_gallery_supported(entry->name)) {
+        show_app(APP_GALLERY); gallery_load(row_index);
     } else if (snapshot.browse_sd && !strcmp(snapshot.folder, "/media")) {
         if (!m3_audio_play(entry->name)) lv_label_set_text(file_info, tr(T_FILES_PLAY_FAIL));
+    } else if (snapshot.browse_sd && !strcmp(snapshot.folder, M3_RECORDER_FOLDER)) {
+        if (!m3_audio_recording_play(entry->name)) lv_label_set_text(file_info, tr(T_FILES_PLAY_FAIL));
     }
 }
-static void media_folder(lv_event_t *event) {
-    (void)event; selected_sd = true; strcpy(selected_folder, "/media"); selected_offset = 0; browse_refresh();
+static void recorder_folder(lv_event_t *event) {
+    (void)event; selected_sd = true; strcpy(selected_folder, M3_RECORDER_FOLDER); selected_offset = 0; browse_refresh();
     segment_select(storage_tabs, 1);
     show_app(APP_FILES);
 }
@@ -1254,7 +1536,7 @@ static void update_files(void) {
         format_size(snapshot.files.used, used, sizeof(used)); format_size(snapshot.files.total, total, sizeof(total));
         snprintf(text, sizeof(text), tr(T_FILES_USED), used, total, snapshot.files.count);
         lv_label_set_text(file_info, text);
-        lv_bar_set_value(file_bar, snapshot.files.total ? (int32_t)(snapshot.files.used * 100 / snapshot.files.total) : 0, LV_ANIM_ON);
+        lv_bar_set_value(file_bar, snapshot.files.total ? (int32_t)(snapshot.files.used * 100 / snapshot.files.total) : 0, ui_animation());
     }
     unsigned pages_total = (snapshot.files.count + STORAGE_VIEW_ROWS - 1) / STORAGE_VIEW_ROWS;
     snprintf(text, sizeof(text), "%u / %u", snapshot.files.offset / STORAGE_VIEW_ROWS + 1, pages_total ? pages_total : 1);
@@ -1304,7 +1586,7 @@ static void shade_set(bool open) {
     lv_anim_delete(shade, shade_motion);
     lv_anim_t animation; lv_anim_init(&animation);
     lv_anim_set_var(&animation, shade); lv_anim_set_exec_cb(&animation, shade_motion);
-    lv_anim_set_values(&animation, shade_y, open ? 0 : -HOME_TOP); lv_anim_set_duration(&animation, 220);
+    lv_anim_set_values(&animation, shade_y, open ? 0 : -HOME_TOP); lv_anim_set_duration(&animation, ui_duration(220));
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_out); lv_anim_start(&animation);
 }
 static bool shade_should_open(int start, int dx, int dy) {
@@ -1356,6 +1638,7 @@ static lv_obj_t *tube_search_view, *tube_player_view, *tube_query, *tube_heading
 static lv_obj_t *tube_prev, *tube_next, *tube_page, *tube_pager;
 static lv_obj_t *tube_video, *tube_overlay, *tube_seek, *tube_time, *tube_total, *tube_toggle, *tube_title, *tube_channel;
 static lv_obj_t *tube_channel_button, *tube_player_status;
+static lv_obj_t *tube_server_labels[2], *tube_download_labels[2], *tube_cancel_buttons[2], *tube_quality_tabs[2], *tube_save_button;
 static M3_PSRAM_BSS m3_tube_list_t tube_list;
 static unsigned seen_tube_list = ~0u, seen_tube_player = ~0u;
 static uint16_t seen_tube_thumbs;
@@ -1364,6 +1647,7 @@ static bool tube_in_player, tube_pending;
 static int64_t tube_pending_until;
 static char tube_id[12], tube_channel_id[25], tube_last_query[128];
 static unsigned tube_start_s, tube_duration_s;
+static bool tube_live;
 
 static void format_clock(unsigned seconds, char *text, size_t size) {
     if (seconds >= 3600) snprintf(text, size, "%u:%02u:%02u", seconds / 3600, seconds / 60 % 60, seconds % 60);
@@ -1402,6 +1686,26 @@ static void tube_start(unsigned seconds) {
     lv_label_set_text(tube_overlay, tr(T_TUBE_CONNECTING)); lv_obj_remove_flag(tube_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 static void tube_stop(void) { tube_pending = false; m3_tube_player_t player; m3_tube_player(&player); if (player.active) m3_audio_stop(); }
+static void tube_quality_changed(lv_event_t *event) {
+    lv_obj_t *tabs = lv_event_get_user_data(event);
+    unsigned selected = segment_value(tabs);
+    m3_tube_quality((m3_tube_quality_t)selected);
+    for (unsigned i = 0; i < 2; ++i) if (tube_quality_tabs[i]) segment_select(tube_quality_tabs[i], selected);
+    m3_tube_player_t player; m3_tube_player(&player);
+    if (tube_in_player && player.active && !player.audio_only) tube_start(player.position_ms / 1000);
+}
+static void tube_saved_folder(lv_event_t *event) {
+    (void)event; tube_stop();
+    selected_sd = true; strcpy(selected_folder, M3_TUBE_DOWNLOAD_FOLDER); selected_offset = 0;
+    segment_select(storage_tabs, 1); browse_refresh(); show_app(APP_FILES);
+}
+static void tube_save(lv_event_t *event) {
+    (void)event;
+    if (!tube_id[0] || tube_live) return;
+    tube_stop();
+    if (!m3_tube_download(tube_id, lv_label_get_text(tube_title))) lv_label_set_text(tube_download_labels[1], tr(T_TUBE_SAVE_BUSY));
+}
+static void tube_cancel_save(lv_event_t *event) { (void)event; m3_tube_download_cancel(); }
 static void tube_leave(void) { if (tube_in_player || tube_pending) tube_stop(); }
 static void tube_submit(void) {
     const char *query = lv_textarea_get_text(tube_query);
@@ -1420,7 +1724,7 @@ static void tube_page_turn(lv_event_t *event) {
     unsigned page = (unsigned)((int)tube_list.page + step);
     if (page < 1 || (step > 0 && !tube_list.more)) return;
     if (tube_list.channel) m3_tube_channel(tube_list.query, page); else m3_tube_search(tube_list.query, page);
-    lv_obj_scroll_to_y(pages[APP_TUBE], 0, LV_ANIM_ON);
+    lv_obj_scroll_to_y(pages[APP_TUBE], 0, ui_animation());
 }
 static void tube_back_to_search(lv_event_t *event) {
     (void)event;
@@ -1433,6 +1737,7 @@ static void tube_open(lv_event_t *event) {
     snprintf(tube_id, sizeof(tube_id), "%s", item->id);
     snprintf(tube_channel_id, sizeof(tube_channel_id), "%s", item->channel_id);
     tube_duration_s = item->duration;
+    tube_live = item->live;
     lv_label_set_text(tube_title, item->title); lv_label_set_text(tube_channel, item->channel);
     if (tube_channel_id[0]) lv_obj_remove_state(tube_channel_button, LV_STATE_DISABLED);
     else lv_obj_add_state(tube_channel_button, LV_STATE_DISABLED);
@@ -1500,6 +1805,23 @@ static void tube_render_rows(void) {
     }
 }
 static void update_tube(const m3_audio_state_t *audio) {
+    if (current_app == APP_TUBE) m3_tube_probe();
+    m3_tube_server_t server; m3_tube_server(&server);
+    m3_tube_download_t download; m3_tube_download_state(&download);
+    const char *server_message = server.age_s > 45 ? tr(T_TUBE_SERVER_UNKNOWN) : status_text(server.message);
+    if (server.checking) server_message = tr(T_TUBE_SERVER_CHECKING);
+    for (unsigned i = 0; i < 2; ++i) {
+        set_text(tube_server_labels[i], server_message);
+        set_ink(tube_server_labels[i], server.ready && server.age_s <= 45 ? GREEN : MUTED);
+        char progress[160];
+        if (download.busy && download.total) snprintf(progress, sizeof(progress), "%s / %u%%", status_text(download.message), download.percent);
+        else snprintf(progress, sizeof(progress), "%s", download.message[0] ? status_text(download.message) : tr(T_TUBE_SAVE_HINT));
+        set_text(tube_download_labels[i], progress);
+        if (download.busy) lv_obj_remove_flag(tube_cancel_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(tube_cancel_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (download.busy || tube_live || !tube_id[0]) lv_obj_add_state(tube_save_button, LV_STATE_DISABLED);
+    else lv_obj_remove_state(tube_save_button, LV_STATE_DISABLED);
     m3_tube_list(&tube_list);
     if (tube_list.revision != seen_tube_list) {
         seen_tube_list = tube_list.revision;
@@ -1540,9 +1862,11 @@ static void update_tube(const m3_audio_state_t *audio) {
         seen_tube_thumbs = tube_list.thumbs;
     }
     m3_tube_player_t player; m3_tube_player(&player);
+    /* A YouTube Music song is not this player's video. */
+    if (player.audio_only) player.active = player.buffering = player.paused = false;
     if (tube_pending && !audio->playing && !player.active) {
         tube_pending = false;
-        if (!m3_tube_play(tube_id, tube_start_s)) lv_label_set_text(tube_overlay, tr(T_TUBE_NOT_CONFIGURED));
+        if (download.busy || !m3_tube_play(tube_id, tube_start_s)) lv_label_set_text(tube_overlay, tr(download.busy ? T_TUBE_SAVE_BUSY : T_TUBE_NOT_CONFIGURED));
     } else if (tube_pending && esp_timer_get_time() > tube_pending_until) {
         tube_pending = false; lv_label_set_text(tube_overlay, tr(T_TUBE_BUSY));
     }
@@ -1577,6 +1901,7 @@ static void update_tube(const m3_audio_state_t *audio) {
     activity_set(tube_wait, tube_in_player && (tube_pending || (player.active && player.buffering)));
     if (tube_in_player) set_text(tube_player_status, status_text(audio->message));
 }
+#include "m3_ytmusic_ui.inc"
 
 
 static void update_activity(const m3_agent_state_t *agent, const m3_voice_state_t *voice, const m3_audio_state_t *audio) {
@@ -1586,7 +1911,7 @@ static void update_activity(const m3_agent_state_t *agent, const m3_voice_state_
     activity_set(agent_thinking, agent->busy);
     /* The previous answer fades while a new one is generated (text opacity needs no layer). */
     if (thinking || done) lv_obj_set_style_text_opa(agent_answer, thinking ? LV_OPA_40 : LV_OPA_COVER, 0);
-    if (thinking) lv_obj_scroll_to_y(agent_output, 0, LV_ANIM_ON);
+    if (thinking) lv_obj_scroll_to_y(agent_output, 0, ui_animation());
     activity_set(agent_voice, phase != 0);
     if (voice_target && voice->recording) lv_obj_remove_flag(voice_meter, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(voice_meter, LV_OBJ_FLAG_HIDDEN);
@@ -1714,8 +2039,10 @@ static void update_home(const m3_audio_state_t *audio) {
     set_text(home_detail, text);
 }
 static void update_metrics(lv_timer_t *timer) {
+    update_preferences();
     (void)timer;
     m3_runtime_state(&snapshot);
+    phone_update();
     update_music();
     static M3_PSRAM_BSS m3_agent_state_t agent; m3_agent_state(&agent);
     if (agent.revision != seen_agent) {
@@ -1774,7 +2101,7 @@ static void update_metrics(lv_timer_t *timer) {
     update_photos();
     snprintf(text, sizeof(text), "%s\n%.0f KiB\n%s\n%.1f / %.0f MiB", tr(T_MON_INTERNAL), internal / 1024.0,
         tr(T_MON_PSRAM), psram / 1048576.0, psram_total / 1048576.0);
-    set_text(memory, text); lv_bar_set_value(heap_bar, used, LV_ANIM_ON);
+    set_text(memory, text); lv_bar_set_value(heap_bar, used, ui_animation());
     if (++chart_tick % 4 == 0) {
         lv_chart_set_next_value(chart, heap_series, (int)(internal / 1024));
         lv_chart_set_next_value(chart, psram_series, (int)(psram / 65536));
@@ -1794,9 +2121,8 @@ static void update_metrics(lv_timer_t *timer) {
         lv_obj_remove_flag(qr, LV_OBJ_FLAG_HIDDEN);
     }
     if (seen_files != snapshot.file_revision) { seen_files = snapshot.file_revision; update_files(); }
-    snprintf(text, sizeof(text), "%s", audio.ready ? (audio.volume ? status_text(audio.message) : tr(T_AUDIO_MUTED)) : tr(T_AUDIO_UNAVAILABLE));
-    set_text(audio_info, text); lv_bar_set_value(audio_bar, audio.progress, LV_ANIM_ON);
-    lv_bar_set_value(radio_bar, audio.progress, LV_ANIM_ON);
+    update_recorder(&audio);
+    lv_bar_set_value(radio_bar, audio.progress, ui_animation());
     if (strcmp(seen_audio, audio.message)) {
         snprintf(seen_audio, sizeof(seen_audio), "%s", audio.message);
         if (!radio_pending) lv_label_set_text(radio_info, status_text(audio.message));
@@ -1821,6 +2147,7 @@ static void update_metrics(lv_timer_t *timer) {
         tr(snapshot.sd ? T_MOUNTED : T_NOT_MOUNTED), psram_total / 1048576.0);
     set_text(system_info, text);
     update_tube(&audio);
+    update_ytm(&audio);
     update_activity(&agent, &voice, &audio);
     update_web();
     int requested_app = m3_agent_take_open_app();
@@ -1839,19 +2166,40 @@ static const struct { app_id_t app; uint32_t top, bottom; const char *glyph; } a
     {APP_MONITOR, 0x2dd4bf, 0x0f766e, LV_SYMBOL_CHARGE},
     {APP_AGENT, 0x8b5cf6, 0x5b21b6, "AI"},
     {APP_WIFI, 0x38bdf8, 0x1d4ed8, LV_SYMBOL_WIFI},
-    {APP_RADIO, 0xfb923c, 0xc2410c, LV_SYMBOL_AUDIO},
+    {APP_RADIO, 0xfb923c, 0xc2410c, NULL},
     {APP_GAMES, 0x4ade80, 0x15803d, NULL},
     {APP_FILES, 0xfbbf24, 0xb45309, LV_SYMBOL_DIRECTORY},
-    {APP_AUDIO, 0xf472b6, 0xbe185d, LV_SYMBOL_VOLUME_MAX},
+    {APP_RECORDER, 0xf472b6, 0xbe185d, NULL},
     {APP_TTS, 0x818cf8, 0x4338ca, "가"},
     {APP_SYSTEM, 0x94a3b8, 0x475569, LV_SYMBOL_SETTINGS},
     {APP_TUBE, 0xf87171, 0xb91c1c, LV_SYMBOL_PLAY},
+    {APP_YTMUSIC, 0xfb7185, 0x9f1239, LV_SYMBOL_AUDIO},
     {APP_MUSIC, 0x22d3ee, 0x0369a1, LV_SYMBOL_AUDIO},
+    {APP_GALLERY, 0x38bdf8, 0x7c3aed, LV_SYMBOL_IMAGE},
+    {APP_CALCULATOR, 0x34d399, 0x047857, "="},
 };
 static void draw_app_icon(lv_obj_t *icon, unsigned index) {
     lv_obj_set_style_bg_color(icon, lv_color_hex(app_icons[index].top), 0);
     lv_obj_set_style_bg_grad_color(icon, lv_color_hex(app_icons[index].bottom), 0);
     lv_obj_set_style_bg_grad_dir(icon, LV_GRAD_DIR_VER, 0);
+    if (app_icons[index].app == APP_RADIO) {
+        icon_part(icon, 17, 28, 42, 30, 6);
+        icon_part(icon, 24, 18, 33, 3, 1);
+        lv_obj_t *speaker = bare(icon); lv_obj_set_pos(speaker, 23, 35); lv_obj_set_size(speaker, 17, 17);
+        lv_obj_set_style_bg_color(speaker, lv_color_hex(0xc2410c), 0); lv_obj_set_style_bg_opa(speaker, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(speaker, LV_RADIUS_CIRCLE, 0);
+        for (unsigned i = 0; i < 3; ++i) { lv_obj_t *dial = icon_part(icon, 45, 35 + i * 6, 8, 2, 0); lv_obj_set_style_bg_color(dial, lv_color_hex(0xc2410c), 0); }
+        return;
+    }
+    if (app_icons[index].app == APP_RECORDER) {
+        icon_part(icon, 31, 16, 14, 30, 7);
+        lv_obj_t *cradle = bare(icon); lv_obj_set_pos(cradle, 23, 29); lv_obj_set_size(cradle, 30, 25);
+        lv_obj_set_style_border_width(cradle, 3, 0); lv_obj_set_style_border_color(cradle, lv_color_hex(0xffffff), 0);
+        lv_obj_set_style_border_side(cradle, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT | LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_radius(cradle, 13, 0);
+        icon_part(icon, 36, 54, 4, 7, 1); icon_part(icon, 28, 61, 20, 3, 1);
+        return;
+    }
     if (!app_icons[index].glyph) {
         for (int i = 0; i < 4; ++i) {
             lv_obj_t *part = icon_part(icon, 21 + (i % 2) * 20, 21 + (i / 2) * 20, 16, 16, 4);
@@ -1950,10 +2298,9 @@ static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data) 
     return obj;
 }
 static void home_apps(lv_obj_t *home, unsigned first, int top) {
-    static const app_id_t apps[] = {APP_MONITOR, APP_AGENT, APP_WIFI, APP_RADIO, APP_GAMES, APP_FILES, APP_AUDIO, APP_TTS, APP_SYSTEM, APP_TUBE, APP_MUSIC};
-    _Static_assert(sizeof(apps) / sizeof(apps[0]) == sizeof(app_icons) / sizeof(app_icons[0]), "one icon per app");
+    _Static_assert(sizeof(app_icons) / sizeof(app_icons[0]) == APP_COUNT - 1, "one icon per app");
     unsigned end = first + HOME_APPS_PER_PAGE;
-    if (end > sizeof(apps) / sizeof(apps[0])) end = sizeof(apps) / sizeof(apps[0]);
+    if (end > sizeof(app_icons) / sizeof(app_icons[0])) end = sizeof(app_icons) / sizeof(app_icons[0]);
     for (unsigned i = first; i < end; ++i) {
         int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * 148;
         lv_obj_t *icon = lv_button_create(home); lv_obj_remove_style_all(icon);
@@ -1966,9 +2313,9 @@ static void home_apps(lv_obj_t *home, unsigned first, int top) {
         lv_obj_set_style_transform_pivot_x(icon, 38, 0); lv_obj_set_style_transform_pivot_y(icon, 38, 0);
         lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(icon, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
-        lv_obj_add_event_cb(icon, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)apps[i]);
+        lv_obj_add_event_cb(icon, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)app_icons[i].app);
         draw_app_icon(icon, i);
-        lv_obj_t *name = text(home, app_names[apps[i]], TEXT);
+        lv_obj_t *name = text(home, app_names[app_icons[i].app], TEXT);
         lv_obj_set_pos(name, x - 18, y + 84); lv_obj_set_width(name, 112);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -2043,7 +2390,7 @@ static void home_tile_changed(lv_event_t *event) {
 static void home_page_tap(lv_event_t *event) {
     unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     if (index >= HOME_PAGE_COUNT) return;
-    lv_tileview_set_tile_by_index(home_tiles, index, 0, LV_ANIM_ON);
+    lv_tileview_set_tile_by_index(home_tiles, index, 0, ui_animation());
 }
 static void calendar_move(lv_event_t *event) {
     int direction = (int)(intptr_t)lv_event_get_user_data(event);
@@ -2224,6 +2571,13 @@ static void build_wifi(lv_obj_t *net) {
     for (unsigned i = 0; i < M3_WIFI_RESULTS; ++i) {
         scan_buttons[i] = list_row(box, select_network, (void *)(uintptr_t)i);
         lv_label_set_text(lv_obj_get_child(scan_buttons[i], 0), LV_SYMBOL_WIFI);
+        lv_obj_t *security = bare(scan_buttons[i]); lv_obj_set_size(security, 26, 26);
+        lv_obj_t *shackle = bare(security); lv_obj_set_size(shackle, 12, 14);
+        lv_obj_set_style_radius(shackle, 6, 0); lv_obj_set_style_border_width(shackle, 2, 0);
+        icon_part(security, 3, 12, 18, 13, 3);
+        lv_obj_t *keyhole = icon_part(security, 11, 16, 2, 5, 1);
+        lv_obj_set_style_bg_color(keyhole, lv_color_hex(SURFACE), 0);
+        wifi_security(security, false);
         lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
     }
     box = card(net, T_SEC_CONNECT);
@@ -2273,6 +2627,9 @@ static void build_files(lv_obj_t *files) {
     lv_obj_set_style_pad_row(box, 8, 0);
     for (unsigned i = 0; i < STORAGE_VIEW_ROWS; ++i) {
         file_buttons[i] = list_row(box, open_file, (void *)(uintptr_t)i);
+        lv_obj_remove_event_cb(file_buttons[i], open_file);
+        lv_obj_add_event_cb(file_buttons[i], open_file, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_add_event_cb(file_buttons[i], file_action_select, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)i);
         lv_obj_add_flag(file_buttons[i], LV_OBJ_FLAG_HIDDEN);
     }
     file_empty = caption(box, T_FILES_EMPTY); lv_obj_set_style_text_align(file_empty, LV_TEXT_ALIGN_CENTER, 0);
@@ -2283,20 +2640,31 @@ static void build_files(lv_obj_t *files) {
     lv_obj_set_style_text_align(file_page, LV_TEXT_ALIGN_CENTER, 0);
     grow(button(line, NULL, T_FILES_NEXT, BTN_SECONDARY, next_files, NULL));
     caption(files, T_FILES_HINT);
+    build_file_actions(files);
 }
-static void build_audio(lv_obj_t *audio, unsigned volume) {
-    lv_obj_t *box = card(audio, T_NOW_PLAYING);
-    audio_info = label(box, "", TEXT);
-    audio_bar = bar(box, MAGENTA, 6);
+static void build_recorder(lv_obj_t *audio, unsigned volume) {
+    lv_obj_t *box = card(audio, T_APP_RECORDER);
+    recorder_time = label(box, "00:00 / 30:00", TEXT);
+    lv_obj_set_style_text_font(recorder_time, FONT_ICON, 0);
+    recorder_info = text(box, T_REC_HINT, CYAN);
+    recorder_meter = bar(box, MAGENTA, 14);
+    recorder_path = label(box, M3_RECORDER_FOLDER, MUTED);
     lv_obj_t *line = row(box);
-    grow(button(line, LV_SYMBOL_PLAY, T_AUDIO_TEST, BTN_SECONDARY, test_audio, NULL));
-    grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
+    recorder_actions[0] = grow(button(line, LV_SYMBOL_SAVE, T_REC_START, BTN_PRIMARY, recorder_start, NULL));
+    recorder_actions[1] = grow(button(line, LV_SYMBOL_STOP, T_REC_STOP, BTN_DANGER, recorder_stop, NULL));
+    line = row(box);
+    recorder_actions[2] = grow(button(line, LV_SYMBOL_PLAY, T_REC_PLAY, BTN_SECONDARY, recorder_play, NULL));
+    recorder_actions[3] = grow(button(line, LV_SYMBOL_DIRECTORY, T_REC_BROWSE, BTN_SECONDARY, recorder_folder, NULL));
+    caption(audio, T_REC_NOTES);
     box = card(audio, T_SEC_VOLUME);
     volume_row(box, 0, volume);
-    box = card(audio, T_SEC_MEDIA);
-    button(box, LV_SYMBOL_SD_CARD, T_AUDIO_BROWSE, BTN_SECONDARY, media_folder, NULL);
-    caption(box, T_AUDIO_INFO);
-    caption(audio, T_AUDIO_CODEC);
+}
+static void radio_filter(lv_event_t *event) {
+    (void)event; unsigned region = segment_value(radio_region);
+    for (unsigned i = 0; i < sizeof(radio_stations) / sizeof(radio_stations[0]); ++i) {
+        if (radio_stations[i].region == region) lv_obj_remove_flag(station_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(station_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
 }
 static void build_radio(lv_obj_t *radio, unsigned volume) {
     lv_obj_t *box = card(radio, T_NOW_PLAYING);
@@ -2309,6 +2677,8 @@ static void build_radio(lv_obj_t *radio, unsigned volume) {
     grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
     box = card(radio, T_SEC_VOLUME);
     volume_row(box, 1, volume);
+    static const m3_text_t countries[] = {T_RADIO_WORLD, T_RADIO_KR, T_RADIO_JP};
+    radio_region = segmented(radio, countries, NULL, 3, 1, radio_filter);
     box = card(radio, T_SEC_STATIONS);
     lv_obj_set_style_pad_row(box, 8, 0);
     for (unsigned i = 0; i < sizeof(radio_stations) / sizeof(radio_stations[0]); ++i) {
@@ -2327,11 +2697,62 @@ static void build_radio(lv_obj_t *radio, unsigned volume) {
     radio_codec = segmented(box, NULL, codecs, 2, 0, NULL);
     button(box, LV_SYMBOL_PLAY, T_RADIO_PLAY_URL, BTN_SECONDARY, play_custom, NULL);
     caption(radio, T_RADIO_NOTES);
+    radio_filter(NULL);
+}
+static void build_crossing(void) {
+    cross_scene = bare(game_board); lv_obj_set_pos(cross_scene, 2, 2);
+    lv_obj_set_size(cross_scene, M3_CROSS_WIDTH, M3_CROSS_ROWS * M3_CROSS_CELL);
+    for (unsigned i = 0; i < M3_CROSS_ROWS; ++i) {
+        cross_lanes[i] = icon_part(cross_scene, 0, (M3_CROSS_ROWS - 1 - i) * M3_CROSS_CELL,
+            M3_CROSS_WIDTH, M3_CROSS_CELL, 0);
+        for (unsigned j = 0; j < 3; ++j) {
+            cross_objects[i][j] = icon_part(cross_lanes[i], 0, 8, 64, 28, 5);
+            cross_windows[i][j] = icon_part(cross_objects[i][j], 8, 5, 20, 18, 2);
+        }
+    }
+    cross_player = bare(cross_scene); lv_obj_set_size(cross_player, 32, 34);
+    cross_body = icon_part(cross_player, 6, 10, 20, 19, 4);
+    icon_part(cross_player, 11, 2, 15, 15, 3);
+    lv_obj_t *part = icon_part(cross_player, 24, 10, 7, 5, 1); set_bg(part, 0xffb340);
+    part = icon_part(cross_player, 12, 0, 10, 4, 1); set_bg(part, 0xef6868);
+    part = icon_part(cross_player, 21, 6, 3, 3, 1); set_bg(part, 0x202630);
+    part = icon_part(cross_player, 8, 29, 6, 4, 1); set_bg(part, 0xffb340);
+    part = icon_part(cross_player, 20, 29, 6, 4, 1); set_bg(part, 0xffb340);
+    lv_obj_add_flag(cross_scene, LV_OBJ_FLAG_HIDDEN);
 }
 static void build_games(lv_obj_t *games) {
+    lv_obj_t *parent = games;
+    sd_launcher = button(parent, LV_SYMBOL_SD_CARD, T_SD_APPS, BTN_PRIMARY, sd_apps_open, NULL);
+    sd_panel = card(parent, T_SD_APPS);
+    lv_obj_t *sd_header = row(sd_panel);
+    grow(button(sd_header, LV_SYMBOL_LEFT, T_SD_APPS_STOP, BTN_SECONDARY, sd_apps_close, NULL));
+    sd_restart = grow(button(sd_header, LV_SYMBOL_REFRESH, T_GAME_NEW, BTN_SECONDARY, sd_apps_control, (void *)(uintptr_t)16));
+    lv_obj_add_flag(sd_restart, LV_OBJ_FLAG_HIDDEN);
+    sd_status = label(sd_panel, "", MUTED);
+    sd_list = bare(sd_panel); lv_obj_set_size(sd_list, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(sd_list, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(sd_list, 8, 0);
+    for (unsigned i = 0; i < M3_SD_APP_COUNT; ++i) {
+        sd_rows[i] = button(sd_list, NULL, T_NONE, BTN_SECONDARY, sd_apps_launch, (void *)(uintptr_t)i);
+        sd_faces[i] = lv_obj_get_child(sd_rows[i], 0);
+        lv_obj_add_flag(sd_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    sd_stage = bare(sd_panel); lv_obj_set_size(sd_stage, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(sd_stage, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(sd_stage, 10, 0);
+    lv_obj_t *frame = bare(sd_stage); lv_obj_set_size(frame, 280, 336);
+    lv_obj_set_style_align(frame, LV_ALIGN_CENTER, 0);
+    sd_frame_holder = frame;
+    lv_obj_t *controls = row(sd_stage);
+    const char *symbols[] = {LV_SYMBOL_LEFT, LV_SYMBOL_RIGHT, LV_SYMBOL_REFRESH, LV_SYMBOL_DOWN};
+    for (unsigned i = 0; i < 4; ++i)
+        grow(button(controls, symbols[i], T_NONE, BTN_SECONDARY, sd_apps_control, (void *)(uintptr_t)(1u << i)));
+    caption(sd_stage, T_SD_APPS_RULES);
+    lv_obj_add_flag(sd_stage, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(sd_panel, LV_OBJ_FLAG_HIDDEN);
+    games = builtin_games = bare(parent);
+    lv_obj_set_size(games, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(games, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(games, 12, 0);
     lv_obj_set_style_flex_cross_place(games, LV_FLEX_ALIGN_CENTER, 0);
-    static const m3_text_t modes[] = {T_GAME_2048, T_GAME_MEMORY};
-    game_tabs = segmented(games, modes, NULL, 2, 0, choose_game);
+    static const m3_text_t modes[] = {T_GAME_2048, T_GAME_MEMORY, T_GAME_CROSSING};
+    game_tabs = segmented(games, modes, NULL, 3, 0, choose_game);
     lv_obj_t *scores = row(games);
     for (unsigned i = 0; i < 2; ++i) {
         lv_obj_t *box = card(scores, T_NONE); grow(box); lv_obj_set_style_pad_row(box, 2, 0);
@@ -2356,6 +2777,7 @@ static void build_games(lv_obj_t *games) {
         lv_obj_add_flag(game_tiles[i], LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_PRESS_LOCK);
         lv_obj_remove_flag(game_tiles[i], LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     }
+    build_crossing();
     game_info = label(games, "", MUTED); lv_obj_set_style_text_align(game_info, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_t *arrows = row(games);
     static const char *directions[] = {LV_SYMBOL_LEFT, LV_SYMBOL_RIGHT, LV_SYMBOL_UP, LV_SYMBOL_DOWN};
@@ -2440,19 +2862,53 @@ static void build_music(lv_obj_t *music, unsigned volume) {
     lv_obj_t *box = card(music, T_NOW_PLAYING);
     music_title = label(box, "", TEXT); lv_obj_add_style(music_title, &st_title, 0);
     lv_label_set_long_mode(music_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *visual_row = bare(box); lv_obj_set_size(visual_row, LV_PCT(100), 200);
+    lv_obj_t *visual = bare(visual_row); lv_obj_set_size(visual, 200, 200); lv_obj_center(visual);
+    lv_obj_add_flag(visual, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(visual, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(visual, music_swipe_event, LV_EVENT_GESTURE, NULL);
+    static const uint32_t colors[] = {CYAN, GREEN, MAGENTA};
+    for (unsigned i = 0; i < 24; ++i) {
+        music_rays[i] = lv_line_create(visual); lv_obj_set_pos(music_rays[i], 0, 0);
+        lv_obj_set_style_line_color(music_rays[i], lv_color_hex(colors[i / 8]), 0);
+        lv_obj_set_style_line_width(music_rays[i], 5, 0);
+        lv_obj_remove_flag(music_rays[i], LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_t *center = label(visual, "", MUTED); bind_text(center, T_MUSIC_EQ, NULL, BIND_TEXT);
+    lv_obj_set_width(center, 112); lv_obj_set_style_text_align(center, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(center);
+    caption(box, T_MUSIC_SWIPE);
     music_info = label(box, "", MUTED); music_time = label(box, "", MUTED); music_bar = bar(box, CYAN, 8);
     lv_obj_t *line = row(box);
     grow(button(line, LV_SYMBOL_PREV, T_FILES_PREV, BTN_SECONDARY, music_step_event, (void *)(intptr_t)-1));
     music_pause_button = button(line, LV_SYMBOL_PAUSE, T_MUSIC_PAUSE, BTN_PRIMARY, music_pause_event, NULL); grow(music_pause_button);
     grow(button(line, LV_SYMBOL_NEXT, T_FILES_NEXT, BTN_SECONDARY, music_step_event, (void *)(intptr_t)1));
+    line = row(box);
+    grow(button(line, NULL, T_MUSIC_LIST, BTN_SECONDARY, music_panel_event, NULL));
+    grow(button(line, NULL, T_MUSIC_EQ, BTN_SECONDARY, music_panel_event, (void *)(uintptr_t)1));
+    static const m3_text_t repeats[] = {T_MUSIC_REPEAT_OFF, T_MUSIC_REPEAT_ON, T_MUSIC_REPEAT_ONE};
+    music_repeat = segmented(box, repeats, NULL, 3, 0, music_repeat_event);
+    static const m3_text_t shuffle[] = {T_MUSIC_SHUFFLE_OFF, T_MUSIC_SHUFFLE_ON};
+    music_shuffle = segmented(box, shuffle, NULL, 2, 0, music_shuffle_event);
+    volume_row(box, 4, volume);
     button(box, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, music_stop_event, NULL);
-    box = card(music, T_SEC_VOLUME); volume_row(box, 4, volume);
-    box = card(music, T_SEC_MEDIA);
+    music_eq_panel = card(music, T_MUSIC_EQ);
+    static const m3_text_t band_names[] = {T_MUSIC_BASS, T_MUSIC_MID, T_MUSIC_TREBLE};
+    for (unsigned b = 0; b < 3; ++b) {
+        line = row(music_eq_panel);
+        lv_obj_t *name = label(line, "", TEXT); bind_text(name, band_names[b], NULL, BIND_TEXT); lv_obj_set_width(name, 62);
+        music_eq_sliders[b] = lv_slider_create(line); style_slider(music_eq_sliders[b]); grow(music_eq_sliders[b]);
+        lv_slider_set_range(music_eq_sliders[b], -12, 12);
+        lv_obj_add_event_cb(music_eq_sliders[b], music_eq_event, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)b);
+        music_eq_values[b] = label(line, "0 dB", TEXT); lv_obj_set_width(music_eq_values[b], 65);
+    }
+    button(music_eq_panel, NULL, T_MUSIC_FLAT, BTN_SECONDARY, music_eq_reset, NULL);
+    button(music_eq_panel, NULL, T_NOW_PLAYING, BTN_SECONDARY, music_player_event, NULL);
+    lv_obj_add_flag(music_eq_panel, LV_OBJ_FLAG_HIDDEN);
+    box = card(music, T_SEC_MEDIA); music_library = box;
     static const m3_text_t sources[] = {T_STORAGE_SD, T_STORAGE_FLASH};
     music_source = segmented(box, sources, NULL, 2, 0, music_refresh_event);
     button(box, LV_SYMBOL_REFRESH, T_MUSIC_REFRESH, BTN_SECONDARY, music_refresh_event, NULL);
-    static const m3_text_t repeats[] = {T_MUSIC_REPEAT_OFF, T_MUSIC_REPEAT_ON};
-    music_repeat = segmented(box, repeats, NULL, 2, 0, music_repeat_event);
+
     music_empty = label(box, tr(T_MUSIC_EMPTY), MUTED);
     for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
         music_rows[i] = button(box, LV_SYMBOL_PLAY, T_NONE, BTN_SECONDARY, music_track_event, (void *)(uintptr_t)i);
@@ -2463,9 +2919,23 @@ static void build_music(lv_obj_t *music, unsigned volume) {
     line = row(box);
     grow(button(line, LV_SYMBOL_LEFT, T_FILES_PREV, BTN_SECONDARY, music_page_event, (void *)(intptr_t)-1));
     grow(button(line, LV_SYMBOL_RIGHT, T_FILES_NEXT, BTN_SECONDARY, music_page_event, (void *)(intptr_t)1));
-    caption(music, T_MUSIC_HINT);
+    caption(box, T_MUSIC_HINT);
+    button(box, NULL, T_NOW_PLAYING, BTN_SECONDARY, music_player_event, NULL);
+    lv_obj_add_flag(music_library, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void tube_build_controls(lv_obj_t *parent, unsigned index) {
+    tube_server_labels[index] = label(parent, tr(T_TUBE_SERVER_UNKNOWN), MUTED);
+    caption(parent, T_TUBE_QUALITY);
+    static const m3_text_t choices[] = {T_TUBE_LOW, T_TUBE_STANDARD, T_TUBE_HIGH};
+    tube_quality_tabs[index] = segmented(parent, choices, NULL, 3, m3_tube_get_quality(), NULL);
+    lv_obj_add_event_cb(tube_quality_tabs[index], tube_quality_changed, LV_EVENT_VALUE_CHANGED, tube_quality_tabs[index]);
+    tube_download_labels[index] = label(parent, tr(T_TUBE_SAVE_HINT), MUTED);
+    lv_obj_t *line = row(parent);
+    grow(button(line, LV_SYMBOL_DIRECTORY, T_TUBE_SAVED, BTN_SECONDARY, tube_saved_folder, NULL));
+    tube_cancel_buttons[index] = grow(button(line, LV_SYMBOL_STOP, T_TUBE_SAVE_CANCEL, BTN_SECONDARY, tube_cancel_save, NULL));
+    lv_obj_add_flag(tube_cancel_buttons[index], LV_OBJ_FLAG_HIDDEN);
+}
 static void build_tube(lv_obj_t *tube) {
     /* Full-width video; the other content keeps the usual side margins. */
     lv_obj_set_style_pad_hor(tube, 0, 0); lv_obj_set_style_pad_top(tube, 0, 0);
@@ -2473,6 +2943,7 @@ static void build_tube(lv_obj_t *tube) {
     lv_obj_set_flex_flow(tube_search_view, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_hor(tube_search_view, 16, 0); lv_obj_set_style_pad_top(tube_search_view, 6, 0);
     lv_obj_set_style_pad_row(tube_search_view, 12, 0);
+    tube_build_controls(tube_search_view, 0);
     tube_query = input_field(tube_search_view, T_NONE, 100, INPUT_KOREAN, true);
     bind_text(tube_query, T_TUBE_PLACEHOLDER, NULL, BIND_PLACEHOLDER);
     lv_obj_add_event_cb(tube_query, tube_search_event, LV_EVENT_READY, NULL);
@@ -2485,7 +2956,10 @@ static void build_tube(lv_obj_t *tube) {
         m3_text_t topic = (m3_text_t)(T_TUBE_TOPIC_1 + i);
         lv_obj_t *chip = button(chips, NULL, topic, BTN_SECONDARY, tube_chip, (void *)(uintptr_t)topic);
         lv_obj_set_size(chip, LV_SIZE_CONTENT, 40); lv_obj_set_style_radius(chip, 20, 0); lv_obj_set_style_pad_hor(chip, 18, 0);
-        lv_obj_center(lv_obj_get_child(chip, 0));
+        /* A 100% wide label inside a content-sized button resolves to zero width (no text). */
+        lv_obj_t *chip_text = lv_obj_get_child(chip, 0);
+        lv_obj_set_width(chip_text, LV_SIZE_CONTENT); lv_label_set_long_mode(chip_text, LV_LABEL_LONG_CLIP);
+        lv_obj_center(chip_text);
     }
     lv_obj_t *line = row(tube_search_view);
     tube_heading = label(line, "", TEXT); grow(tube_heading); lv_label_set_long_mode(tube_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -2562,6 +3036,8 @@ static void build_tube(lv_obj_t *tube) {
     tube_channel_button = button(line, LV_SYMBOL_LIST, T_TUBE_CHANNEL, BTN_SECONDARY, tube_channel_event, NULL);
     lv_obj_set_size(tube_channel_button, LV_SIZE_CONTENT, 44); lv_obj_set_style_pad_hor(tube_channel_button, 14, 0);
     tube_player_status = label(body, "", MUTED);
+    tube_build_controls(body, 1);
+    tube_save_button = button(body, LV_SYMBOL_DOWNLOAD, T_TUBE_SAVE, BTN_SECONDARY, tube_save, NULL);
     lv_obj_t *box = card(body, T_SEC_VOLUME);
     volume_row(box, 3, (unsigned)lv_slider_get_value(volume_sliders[0]));
     lv_obj_add_flag(tube_player_view, LV_OBJ_FLAG_HIDDEN);
@@ -2605,8 +3081,87 @@ static void build_monitor(lv_obj_t *monitor) {
     box = card(monitor, T_SEC_SERVICES);
     monitor_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(monitor_info, 4, 0);
 }
+static void settings_changed(lv_event_t *event) {
+    unsigned kind = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    m3_preferences_t p; m3_preferences_get(&p);
+    if (kind == 0) p.brightness = lv_slider_get_value(brightness_slider);
+    else if (kind == 1) p.max_fps = lv_slider_get_value(fps_slider);
+    else if (kind == 2) p.animations = lv_obj_has_state(animation_switch, LV_STATE_CHECKED);
+    else if (kind == 3) { m3_audio_volume(lv_obj_has_state(mute_switch, LV_STATE_CHECKED) ? 0 : p.last_volume); return; }
+    m3_preferences_update(&p);
+}
+static void apply_operation_mode(lv_event_t *event) {
+    (void)event;
+    m3_mode_result_t result = m3_preferences_request_mode(lv_obj_has_state(focus_switch, LV_STATE_CHECKED));
+    set_text(settings_info, tr(result == M3_MODE_OK ? T_SET_RESTARTING : result == M3_MODE_BUSY ? T_SET_BUSY :
+        result == M3_MODE_RESTART_FAILED ? T_SET_RESTART_MANUAL : T_SET_SAVE_FAILED));
+}
+static void update_preferences(void) {
+    m3_preferences_get(&ui_preferences);
+    if (applied_brightness != ui_preferences.brightness) {
+        applied_brightness = ui_preferences.brightness;
+        if (m3_board_set_brightness(applied_brightness) != ESP_OK) set_text(settings_info, tr(T_SET_BRIGHTNESS_ERROR));
+    }
+    if (applied_fps != ui_preferences.max_fps) {
+        applied_fps = ui_preferences.max_fps;
+        lv_display_t *display = m3_board_display();
+        if (display) lv_timer_set_period(lv_display_get_refr_timer(display), m3_preferences_frame_ms(applied_fps));
+    }
+    if (applied_animations != ui_preferences.animations) {
+        bool first = applied_animations == 255;
+        applied_animations = ui_preferences.animations;
+        if (!first) {
+            lv_anim_delete(NULL, NULL);
+            int32_t scroll = lv_obj_get_scroll_y(pages[current_app]);
+            show_app(current_app);
+            lv_obj_scroll_to_y(pages[current_app], scroll, LV_ANIM_OFF);
+            lv_obj_t *activities[] = {tube_wait, agent_thinking, agent_voice, voice_think, tts_wait, tts_talk};
+            for (unsigned i = 0; i < 6; ++i) lv_obj_add_flag(activities[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    char text[32]; snprintf(text, sizeof(text), "%u%%", ui_preferences.brightness); set_text(brightness_value, text);
+    snprintf(text, sizeof(text), "%u FPS", ui_preferences.max_fps); set_text(fps_value, text);
+    if (!lv_obj_has_state(brightness_slider, LV_STATE_PRESSED)) lv_slider_set_value(brightness_slider, ui_preferences.brightness, LV_ANIM_OFF);
+    if (!lv_obj_has_state(fps_slider, LV_STATE_PRESSED)) lv_slider_set_value(fps_slider, ui_preferences.max_fps, LV_ANIM_OFF);
+    if (ui_preferences.volume == 0) lv_obj_add_state(mute_switch, LV_STATE_CHECKED);
+    else lv_obj_remove_state(mute_switch, LV_STATE_CHECKED);
+    if (ui_preferences.animations) lv_obj_add_state(animation_switch, LV_STATE_CHECKED);
+    else lv_obj_remove_state(animation_switch, LV_STATE_CHECKED);
+}
+static lv_obj_t *settings_switch(lv_obj_t *box, m3_text_t title, bool checked, unsigned kind) {
+    lv_obj_t *line = row(box); grow(text(line, title, TEXT));
+    lv_obj_t *toggle = lv_switch_create(line); lv_obj_set_size(toggle, 60, 32);
+    if (checked) lv_obj_add_state(toggle, LV_STATE_CHECKED);
+    if (kind < 4) lv_obj_add_event_cb(toggle, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)kind);
+    return toggle;
+}
 static void build_settings(lv_obj_t *system) {
-    lv_obj_t *box = card(system, T_SEC_LANGUAGE);
+    m3_preferences_t p; m3_preferences_get(&p);
+    lv_obj_t *box = card(system, T_SET_SCREEN);
+    text(box, T_SET_BRIGHTNESS, TEXT);
+    brightness_value = label(box, "", CYAN);
+    brightness_slider = lv_slider_create(box); style_slider(brightness_slider);
+    lv_slider_set_range(brightness_slider, 5, 100); lv_slider_set_value(brightness_slider, p.brightness, LV_ANIM_OFF);
+    lv_obj_set_width(brightness_slider, LV_PCT(100));
+    lv_obj_add_event_cb(brightness_slider, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)0);
+    caption(box, T_SET_BRIGHTNESS_HINT);
+    box = card(system, T_SET_SOUND);
+    volume_row(box, 5, p.volume);
+    mute_switch = settings_switch(box, T_SET_MUTE, p.volume == 0, 3);
+    box = card(system, T_SET_PERFORMANCE);
+    text(box, T_SET_FPS, TEXT); fps_value = label(box, "", CYAN);
+    fps_slider = lv_slider_create(box); style_slider(fps_slider);
+    lv_slider_set_range(fps_slider, 5, 60); lv_slider_set_value(fps_slider, p.max_fps, LV_ANIM_OFF);
+    lv_obj_set_width(fps_slider, LV_PCT(100));
+    lv_obj_add_event_cb(fps_slider, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)1);
+    animation_switch = settings_switch(box, T_SET_ANIMATIONS, p.animations, 2);
+    caption(box, T_SET_FPS_HINT);
+    box = card(system, T_SET_OPERATION);
+    focus_switch = settings_switch(box, T_SET_WEB_FOCUS, p.web_focus, 4);
+    caption(box, T_SET_FOCUS_HINT);
+    button(box, LV_SYMBOL_REFRESH, T_SET_APPLY_MODE, BTN_PRIMARY, apply_operation_mode, NULL);
+    settings_info = text(box, T_SET_AUTO_SAVE, MUTED);
+    box = card(system, T_SEC_LANGUAGE);
     static const m3_text_t languages[] = {T_LANG_KO, T_LANG_EN, T_LANG_JA};
     language_tabs = segmented(box, languages, NULL, M3_LANG_COUNT, m3_i18n_language(), language_changed);
     box = card(system, T_SEC_VOICE);
@@ -2691,6 +3246,7 @@ static void apply_language(void) {
 esp_err_t m3_ui_start(void) {
     if (!m3_board_display() || !lvgl_port_lock(1000)) return ESP_ERR_INVALID_STATE;
     m3_i18n_load();
+    m3_preferences_get(&ui_preferences);
     styles_init();
     lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
     lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), true, &m3_font_korean);
@@ -2749,7 +3305,7 @@ esp_err_t m3_ui_start(void) {
     build_home(pages[APP_HOME]);
     build_wifi(pages[APP_WIFI]);
     build_files(pages[APP_FILES]);
-    build_audio(pages[APP_AUDIO], initial_audio.volume);
+    build_recorder(pages[APP_RECORDER], initial_audio.volume);
     build_monitor(pages[APP_MONITOR]);
     build_settings(pages[APP_SYSTEM]);
     build_radio(pages[APP_RADIO], initial_audio.volume);
@@ -2757,14 +3313,21 @@ esp_err_t m3_ui_start(void) {
     build_tts(pages[APP_TTS], initial_audio.volume);
     build_agent(pages[APP_AGENT]);
     build_tube(pages[APP_TUBE]);
+    build_ytmusic(pages[APP_YTMUSIC], initial_audio.volume);
     build_music(pages[APP_MUSIC], initial_audio.volume);
-    radio_select(0);
+    build_gallery(pages[APP_GALLERY], initial_audio.volume);
+    build_calculator(pages[APP_CALCULATOR]);
+    radio_select(7);
     create_shade(screen);
     show_app(APP_HOME);
     lv_timer_create(update_metrics, 250, NULL);
+    lv_timer_create(music_visual_update, 40, NULL);
     lv_timer_create(tube_frame_tick, 30, NULL);
+    lv_timer_create(crossing_tick, 50, NULL);
+    lv_timer_create(sd_apps_tick, 50, NULL);
     lv_timer_create(voice_meter_tick, 40, NULL);
     update_metrics(NULL);
+    lv_timer_create(gallery_tick, 33, NULL);
     lvgl_port_unlock();
     return ESP_OK;
 }

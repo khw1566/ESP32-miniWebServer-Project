@@ -54,17 +54,35 @@ const firmware=/enum \{ PACKET_INFO = 1, PACKET_VIDEO, PACKET_AUDIO, PACKET_END,
 assert(firmware);assert.deepEqual(packets,{INFO:1,VIDEO:2,AUDIO:3,END:4,WAIT:5});
 assert(server.includes('video: { width: 480, height: 272, fps: 15')&&define('M3_TUBE_VIDEO_W')===480&&define('M3_TUBE_VIDEO_H')===272);
 assert.equal(272%16,0,'hardware JPEG output height must be a multiple of 16');
-assert(server.includes("audio: { rate: 24000, chunkMs: 40 }"));
-const chunk=24000*4*40/1000;assert(chunk<=enumValue('AUDIO_LIMIT'),'one PCM packet fits the internal audio buffer');
-assert(server.includes("format=yuvj420p"),'baseline 4:2:0 JPEG for the P4 decoder');
+assert(server.includes("audio: { rate: 24000, channels: 1, chunkMs: 40 }")&&server.includes("music: { rate: 32000, channels: 1 }"));
+// Mono packets are widened in place to stereo, so twice the payload must fit the PCM buffer.
+for(const rate of [24000,32000])assert(2*(rate*2*40/1000)<=enumValue('AUDIO_LIMIT'),'one widened PCM packet fits the audio buffer');
+assert(tube.includes('length > AUDIO_LIMIT / (3 - channels)')&&tube.includes('mono_to_stereo((int16_t *)pcm, frames)'));
+const widen=new Function('samples','frames',body('mono_to_stereo').replace('unsigned i','let i')+';return samples;');
+assert.deepEqual(widen([1,2,3,0,0,0],3),[1,1,2,2,3,3],'in-place mono to stereo keeps sample order');
+assert(server.includes('videoFilter(profile)')&&lib.includes('format=yuvj420p'),'baseline 4:2:0 JPEG for every P4 quality profile');
 // Output latency equals the I2S DMA ring: 6 descriptors x 240 frames at 24 kHz.
-assert(/AUDIO_DMA_DESCS = 6, AUDIO_DMA_FRAMES = 240/.test(audio));assert.equal(enumValue('OUTPUT_LATENCY_MS'),6*240*1000/24000);
+assert(/AUDIO_DMA_DESCS = 6, AUDIO_DMA_FRAMES = 240/.test(audio));assert.equal(enumValue('OUTPUT_FRAMES'),6*240);
+assert(tube.includes('latency_ms = OUTPUT_FRAMES * 1000 / rate;'),'output latency follows the stream rate');
+// Buffering hysteresis: refill more after a stall than before the first sample.
+assert(enumValue('VIDEO_REBUFFER_BYTES')>enumValue('VIDEO_PREBUFFER_BYTES')&&enumValue('MUSIC_REBUFFER_BYTES')>enumValue('MUSIC_PREBUFFER_BYTES'));
+for(const prefix of ['LOW','STANDARD']){
+ assert(enumValue(prefix+'_REBUFFER_BYTES')>enumValue(prefix+'_PREBUFFER_BYTES'));
+ assert(enumValue(prefix+'_PREBUFFER_BYTES')<enumValue('VIDEO_PREBUFFER_BYTES'),'lower bandwidth should not wait for the high-quality byte threshold');
+}
+assert(enumValue('RING_BYTES')>=4*enumValue('VIDEO_REBUFFER_BYTES'));
 assert(server.includes("'/api/thumb'")&&server.includes("'rgb565le'")&&define('M3_TUBE_THUMB_W')===160&&define('M3_TUBE_THUMB_H')===90);
 assert(tube.includes('esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN)'));
 assert(server.includes("req.headers['x-m3-token']")&&server.includes('crypto.timingSafeEqual'));
 assert(server.includes("mediaServer.listen(config.mediaPort, '127.0.0.1')"),'range proxy stays on loopback');
 // Ownership: playback runs on the audio worker, nothing in the service calls LVGL, the token stays private.
-assert(audio.includes('m3_tube_run(request.name, request.speed, &output)'));
+assert(audio.includes('m3_tube_run(request.name, request.speed, request.aac, &output)'));
+// YouTube Music: song search, audio-only playback without the JPEG decoder, separate listing.
+assert(tube.includes('request->music ? "&music=1" : ""')&&server.includes("url.searchParams.get('music') === '1'"));
+assert(tube.includes('audio_only ? "&audio=1" : ""')&&server.includes("url.searchParams.get('audio') === '1'"));
+assert(tube.includes('if (!audio_only && !frames_ready())'),'music never allocates video frames');
+assert(tube.includes('if (!request->music) list.thumb_set ^= 1;'),'song lists never touch the displayed thumbnails');
+assert(ui.includes('#include "m3_ytmusic_ui.inc"')&&ui.includes('if (player.audio_only) player.active = player.buffering = player.paused = false;'));
 assert(!/\blv_\w+\(/.test(tube),'tube worker must not call LVGL');
 assert(read('../.gitignore').includes('m3_tube_private.h')||fs.readFileSync(path.join(root,'..','.gitignore'),'utf8').includes('m3_tube_private.h'));
 assert(ui.includes('if (current_app == APP_TUBE && app != APP_TUBE) tube_leave();'),'leaving the app stops playback');

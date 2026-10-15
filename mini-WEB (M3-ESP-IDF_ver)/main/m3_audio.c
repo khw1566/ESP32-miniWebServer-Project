@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "network_manager.h"
 #include "m3_google_audio.h"
 #include "m3_audio.h"
@@ -5,8 +6,11 @@
 #include "m3_wav.h"
 #include "m3_audio_apps.h"
 #include "m3_voice.h"
+#include "m3_recorder.h"
+#include "m3_preferences.h"
 #include "m3_tube.h"
 #include "m3_music.h"
+#include "m3_gallery.h"
 #include "m3_memory.h"
 #include "m3_pcm.h"
 #include "esp_audio_simple_dec_default.h"
@@ -32,7 +36,7 @@ static i2s_chan_handle_t tx, rx;
 static const audio_codec_if_t *codec_chip;
 /* DMA must remain small: C6 SDIO packets share this internal-RAM heap.
  * Radio jitter is absorbed by its PSRAM PCM ring rather than large I2S DMA. */
-enum { AUDIO_DMA_DESCS = 6, AUDIO_DMA_FRAMES = 240, TEST_BLOCKS = 200 };
+enum { AUDIO_DMA_DESCS = 6, AUDIO_DMA_FRAMES = 240 };
 static uint32_t playback_rate;
 static unsigned applied_volume = UINT_MAX;
 static atomic_uint cancel_epoch;
@@ -52,7 +56,7 @@ bool m3_audio_decoders_ready(void) {
     }
     return true;
 }
-typedef enum { PLAY_TEST, PLAY_FILE, PLAY_RADIO, PLAY_TTS, PLAY_CLOUD_TTS, PLAY_OPENAI_TTS, PLAY_VOICE, PLAY_TUBE, PLAY_MUSIC } request_kind_t;
+typedef enum { PLAY_FILE, PLAY_RADIO, PLAY_TTS, PLAY_CLOUD_TTS, PLAY_OPENAI_TTS, PLAY_VOICE, PLAY_TUBE, PLAY_MUSIC, PLAY_RECORD, PLAY_RECORDING, PLAY_MP4 } request_kind_t;
 typedef struct { char name[513]; unsigned epoch, speed; request_kind_t kind; bool aac; } request_t;
 static bool cancelled(void) { return atomic_load(&cancel_epoch) != active_epoch; }
 static void message(const char *text, bool playing, unsigned progress) {
@@ -65,13 +69,19 @@ void m3_audio_state(m3_audio_state_t *out) {
     portENTER_CRITICAL(&state_lock); *out = state; portEXIT_CRITICAL(&state_lock);
     out->volume = atomic_load(&volume);
 }
-void m3_audio_volume(unsigned percent) { atomic_store(&volume, percent > 150 ? 150 : percent); }
+void m3_audio_volume(unsigned percent) {
+    atomic_store(&volume, percent > 150 ? 150 : percent);
+    m3_preferences_volume(percent);
+}
 void m3_audio_stop(void) {
     atomic_fetch_add(&cancel_epoch, 1);
     m3_voice_cancel();
+    m3_recorder_cancel();
+    m3_gallery_audio_cancel();
     if (requests) xQueueReset(requests);
 }
 bool m3_audio_play(const char *name) {
+    if (m3_preferences_restarting()) return false;
     if (!requests || !name || !sd_media_name_valid(name)) return false;
     m3_audio_state_t current; m3_audio_state(&current);
     if (!current.ready || current.playing) return false;
@@ -80,13 +90,8 @@ bool m3_audio_play(const char *name) {
     request_t request = {.epoch = atomic_load(&cancel_epoch), .kind = PLAY_FILE}; snprintf(request.name, sizeof(request.name), "%s", name);
     return xQueueSend(requests, &request, 0) == pdTRUE;
 }
-bool m3_audio_test(void) {
-    m3_audio_state_t current; m3_audio_state(&current);
-    if (!current.ready || current.playing) return false;
-    request_t request = {.epoch = atomic_load(&cancel_epoch)};
-    return requests && xQueueSend(requests, &request, 0) == pdTRUE;
-}
 static bool enqueue_app(request_kind_t kind, const char *text, unsigned speed, bool aac) {
+    if (m3_preferences_restarting()) return false;
     m3_audio_state_t current; m3_audio_state(&current);
     if (!requests || !current.ready || current.playing) return false;
     request_t request = {.kind = kind, .epoch = atomic_load(&cancel_epoch), .speed = speed, .aac = aac};
@@ -97,7 +102,27 @@ static bool enqueue_app(request_kind_t kind, const char *text, unsigned speed, b
 bool m3_audio_radio(const char *url, bool aac) {
     return m3_radio_url_valid(url) && enqueue_app(PLAY_RADIO, url, 0, aac);
 }
+bool m3_audio_mp4(const char *relative, unsigned gallery_job) {
+    if (!relative || relative[0] != '/' || strlen(relative) > 255 || strstr(relative, "..") || strchr(relative, '\\')) return false;
+    m3_recorder_state_t recording; m3_recorder_state(&recording);
+    return !recording.busy && enqueue_app(PLAY_MP4, relative, gallery_job, false);
+}
+bool m3_audio_record(void) {
+    m3_audio_state_t current; m3_audio_state(&current);
+    if (!requests || !current.ready || current.playing) return false;
+    unsigned job = m3_recorder_prepare();
+    if (!job) return false;
+    if (enqueue_app(PLAY_RECORD, "", job, false)) return true;
+    m3_recorder_cancel(); return false;
+}
+bool m3_audio_recording_play(const char *name) {
+    m3_recorder_state_t recording; m3_recorder_state(&recording);
+    if (recording.busy || !sd_media_name_valid(name)) return false;
+    const char *ext = strrchr(name, '.');
+    return ext && !strcasecmp(ext, ".wav") && enqueue_app(PLAY_RECORDING, name, 0, false);
+}
 bool m3_audio_music(const char *path) {
+    if (m3_preferences_restarting()) return false;
     if (!requests || !m3_music_path_valid(path)) return false;
     m3_audio_state_t current; m3_audio_state(&current);
     if (!current.ready) return false;
@@ -107,14 +132,16 @@ bool m3_audio_music(const char *path) {
     return xQueueSend(requests, &request, 0) == pdTRUE;
 }
 bool m3_audio_music_follow(const char *path) {
+    if (m3_preferences_restarting()) return false;
     if (!requests || cancelled() || !m3_music_path_valid(path)) return false;
     request_t request = {.kind = PLAY_MUSIC, .epoch = active_epoch};
     snprintf(request.name, sizeof(request.name), "%s", path);
     return xQueueSend(requests, &request, 0) == pdTRUE;
 }
 /* YouTube via the PC relay; speed carries the start position in seconds. */
-bool m3_audio_tube(const char *id, unsigned start_seconds) {
-    return network_get_mode() == NET_MODE_STA_CONNECTED && enqueue_app(PLAY_TUBE, id, start_seconds, false);
+bool m3_audio_tube(const char *id, unsigned start_seconds, bool audio_only) {
+    /* The request's aac flag carries audio-only (YouTube Music) mode. */
+    return network_get_mode() == NET_MODE_STA_CONNECTED && enqueue_app(PLAY_TUBE, id, start_seconds, audio_only);
 }
 bool m3_audio_tts(const char *text, unsigned speed) {
     return m3_tts_text_valid(text) && enqueue_app(PLAY_TTS, text, speed, false);
@@ -266,36 +293,13 @@ static bool drain_output(void) {
         vTaskDelay(pdMS_TO_TICKS(10));
     return !cancelled();
 }
-static void play_test(void) {
-    if (!atomic_load(&volume)) { message("Volume is 0; raise volume and retry", false, 0); return; }
-    if (!open_rate(48000)) { esp_codec_dev_close(codec); message("Codec open failed", false, 0); return; }
-    message("Speaker test / 440 Hz / 2 seconds", true, 0);
-    int16_t samples[960];
-    bool ok = true;
-    ESP_LOGI(TAG, "Speaker test: 440 Hz / 2 seconds; no SD card required");
-    unsigned submitted = 0;
-    for (unsigned block = 0; block < TEST_BLOCKS && ok; ++block) {
-        for (unsigned i = 0; i < 480; ++i) {
-            unsigned phase = ((block * 480 + i) * 440) % 48000;
-            int32_t triangle = phase < 24000 ? (int32_t)phase : 48000 - (int32_t)phase;
-            samples[i * 2] = samples[i * 2 + 1] = (int16_t)((triangle - 12000) / 2);
-        }
-        ok = write_pcm(samples, sizeof(samples));
-        if (ok) submitted += sizeof(samples);
-    }
-    if (ok) ok = drain_output();
-    esp_codec_dev_close(codec);
-    ESP_LOGI(TAG, "Speaker test: submitted %u PCM bytes, status=%s", submitted,
-             cancelled() ? "cancelled" : ok ? "complete" : "failed");
-    message(ok ? "Speaker test complete" : "Playback stopped / I2S error", false, ok ? 100 : 0);
-}
-static void play_file(const char *name) {
+static void play_file(const char *name, bool recording) {
     if (!sd_media_admin_lock()) { message("SD unavailable or busy", false, 0); return; }
-    char path[128]; snprintf(path, sizeof(path), SD_MEDIA_ROOT "/media/%s", name);
+    char path[128]; snprintf(path, sizeof(path), "%s%s/%s", SD_MEDIA_ROOT, recording ? M3_RECORDER_FOLDER : "/media", name);
     FILE *file = fopen(path, "rb");
     m3_wav_info_t wav;
     bool ok = false;
-    if (!file || !m3_wav_parse(file, &wav)) { message("Use PCM16 WAV, 16-48 kHz, <=8 MiB", false, 0); goto done; }
+    if (!file || !m3_wav_parse_limit(file, &wav, recording ? M3_RECORDER_MAX_SECONDS * M3_RECORDER_RATE * 2 + 44 : SD_MEDIA_MAX_BYTES)) { message("Use PCM16 WAV, 16-48 kHz, <=8 MiB", false, 0); goto done; }
     if (!open_rate(wav.sample_rate)) { message("Codec open failed", false, 0); goto done; }
     unsigned remaining = wav.data_bytes;
     int16_t input[1024], output[2048];
@@ -340,14 +344,20 @@ static void audio_worker(void *unused) {
                 m3_voice_run(request.speed, &capture);
                 message("Voice input finished", false, 0);
             }
-            else if (request.kind == PLAY_FILE) play_file(request.name);
+            else if (request.kind == PLAY_FILE) play_file(request.name, false);
             else if (request.kind == PLAY_MUSIC) { m3_music_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_RADIO) { m3_radio_run(request.name, request.aac, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_TUBE) { m3_tube_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
+            else if (request.kind == PLAY_TUBE) { m3_tube_run(request.name, request.speed, request.aac, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_OPENAI_TTS) { m3_openai_tts_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_CLOUD_TTS) { m3_google_tts_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_TTS) { m3_tts_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
-            else play_test();
+            else if (request.kind == PLAY_RECORDING) play_file(request.name, true);
+            else if (request.kind == PLAY_MP4) { m3_gallery_mp4_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
+            else if (request.kind == PLAY_RECORD) {
+                message("SD recording active", true, 0);
+                m3_recorder_run(request.speed, &capture);
+                message("SD recording finished", false, 0);
+            }
             memset(&request, 0, sizeof(request));
         }
         unsigned current = atomic_load(&volume);
@@ -361,14 +371,12 @@ static void audio_worker(void *unused) {
     }
 }
 esp_err_t m3_audio_start(void) {
-    nvs_handle_t nvs;
-    uint8_t saved = 40;
-    if (nvs_open("m3_audio", NVS_READONLY, &nvs) == ESP_OK) { nvs_get_u8(nvs, "volume", &saved); nvs_close(nvs); }
-    m3_audio_volume(saved);
+    m3_preferences_t preferences; m3_preferences_get(&preferences);
+    m3_audio_volume(preferences.volume);
     requests = xQueueCreate(1, sizeof(request_t));
     if (!requests) return ESP_ERR_NO_MEM;
     /* eSpeak's translation/synthesis calls need a larger C stack than WAV playback. */
-    if (xTaskCreatePinnedToCore(audio_worker, "m3_audio", 65536, NULL, 4, NULL, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(audio_worker, "m3_audio", 65536, NULL, 4, NULL, M3_CORE_MEDIA) != pdPASS) {
         vQueueDelete(requests); requests = NULL; return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

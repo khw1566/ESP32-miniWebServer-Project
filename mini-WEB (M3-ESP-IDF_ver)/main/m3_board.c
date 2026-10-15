@@ -1,6 +1,8 @@
 #include "m3_board.h"
 #include "m3_panel_init.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "m3_preferences.h"
 #include "esp_check.h"
 #include "esp_ldo_regulator.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -17,11 +19,21 @@ static const char *TAG = "M3_BOARD";
 static i2c_master_bus_handle_t bus;
 static lv_display_t *display;
 static bool touch_ready;
+static bool backlight_pwm_ready;
 static esp_lcd_touch_io_gt911_config_t touch_address;
 static esp_ldo_channel_handle_t phy_power;
 i2c_master_bus_handle_t m3_board_i2c(void) { return bus; }
 lv_display_t *m3_board_display(void) { return display; }
 bool m3_board_touch_ready(void) { return touch_ready; }
+esp_err_t m3_board_set_brightness(unsigned percent) {
+    if (!backlight_pwm_ready) return ESP_ERR_INVALID_STATE;
+    if (percent < 5) percent = 5;
+    if (percent > 100) percent = 100;
+    esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, percent * 1023U / 100U);
+    if (err == ESP_OK) err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    if (err != ESP_OK) { ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 1); backlight_pwm_ready = false; }
+    return err;
+}
 
 static esp_err_t touch_start(void) {
     if (CONFIG_M3_TOUCH_RESET >= 0) {
@@ -116,7 +128,9 @@ esp_err_t m3_board_init(void) {
         .panel_handle = panel, .buffer_size = M3_WIDTH * M3_HEIGHT,
         .double_buffer = true, .hres = M3_WIDTH, .vres = M3_HEIGHT,
         .color_format = LV_COLOR_FORMAT_RGB565,
-        .flags = {.buff_spiram = true, .full_refresh = true}
+        /* Direct mode redraws only changed areas (LVGL copies them into the other frame
+         * buffer). Full refresh re-rendered all 480x800 pixels for every video frame. */
+        .flags = {.buff_spiram = true, .direct_mode = true}
     };
     lvgl_port_display_dsi_cfg_t sync = {.flags.avoid_tearing = true};
     display = lvgl_port_add_disp_dsi(&lcd, &sync);
@@ -124,7 +138,19 @@ esp_err_t m3_board_init(void) {
     esp_err_t touch_error = touch_start();
     touch_ready = touch_error == ESP_OK;
     if (!touch_ready) ESP_LOGW(TAG, "Touch unavailable: %s; web setup remains available", esp_err_to_name(touch_error));
-    /* This board's MP3202 enable is treated as digital on/off. */
-    gpio_set_level(M3_LCD_BACKLIGHT, 1);
+    /* MP3202 EN dimming needs <=1 kHz (datasheet Figure 7); use 500 Hz. */
+    ledc_timer_config_t pwm_timer = {.speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_10_BIT,
+        .timer_num = LEDC_TIMER_0, .freq_hz = 500, .clk_cfg = LEDC_AUTO_CLK};
+    ledc_channel_config_t pwm_channel = {.gpio_num = M3_LCD_BACKLIGHT, .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0, .timer_sel = LEDC_TIMER_0, .duty = 1023};
+    backlight_pwm_ready = ledc_timer_config(&pwm_timer) == ESP_OK && ledc_channel_config(&pwm_channel) == ESP_OK;
+    m3_preferences_t preferences; m3_preferences_get(&preferences);
+    if (!backlight_pwm_ready || m3_board_set_brightness(preferences.brightness) != ESP_OK) {
+        gpio_reset_pin(M3_LCD_BACKLIGHT);
+        gpio_set_direction(M3_LCD_BACKLIGHT, GPIO_MODE_OUTPUT);
+        gpio_set_level(M3_LCD_BACKLIGHT, 1);
+        backlight_pwm_ready = false;
+        ESP_LOGW(TAG, "Backlight PWM unavailable; retaining full brightness");
+    }
     return ESP_OK;
 }

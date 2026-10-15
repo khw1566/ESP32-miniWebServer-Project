@@ -46,7 +46,8 @@ assert not audit.inspect_map('unrelated or incomplete map')['espeak_bss_in_psram
 assert not audit.inspect_map(internal+external)['espeak_bss_in_psram']
 print('PASS: map parser distinguishes internal/external/discarded BSS and rejects mixed or missing engine placement.')
 `;
-const result=spawnSync('python',['-c',python],{cwd:root,encoding:'utf8'});assert.equal(result.status,0,result.stdout+result.stderr);
+const result=spawnSync(process.env.PYTHON || 'python',['-c',python],{cwd:root,encoding:'utf8'});
+assert.equal(result.status,0,result.error?.message || result.stdout+result.stderr);
 process.stdout.write(result.stdout);
 for(const file of ['AGENTS.md','docs/OPTIMIZATION_AND_VALIDATION.md']){
  const doc=read(file);assert(doc.includes('PSRAM'));assert(doc.includes('시뮬레이터'));assert(doc.includes('실기'));

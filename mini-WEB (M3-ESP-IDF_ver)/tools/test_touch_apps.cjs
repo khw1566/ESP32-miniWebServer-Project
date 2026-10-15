@@ -58,7 +58,7 @@ const edit={HOME_TOP:756,CONTENT_TOP:100,KEYBOARD_HEIGHT:270,
  M3_LANG_JA:2,m3_i18n_language:()=>0,LV_KEYBOARD_MODE_USER_3:6,LV_KEYBOARD_MODE_USER_4:7,
  keyboard:{hidden:true,align:'bottom',y:0},home_strip:{},viewport:{},field:{},form_dirty:false,
  LV_EVENT_VALUE_CHANGED:10,LV_EVENT_FOCUSED:11,LV_EVENT_CLICKED:12,LV_EVENT_PRESSED:13,
- LV_OBJ_FLAG_HIDDEN:1,LV_ALIGN_TOP_LEFT:'top',LV_ANIM_ON:1,
+ LV_OBJ_FLAG_HIDDEN:1,LV_ALIGN_TOP_LEFT:'top',LV_ANIM_ON:1,ui_duration:x=>x,ui_animation:()=>1,
  LV_KEYBOARD_MODE_USER_1:4,LV_KEYBOARD_MODE_NUMBER:3,LV_KEYBOARD_MODE_TEXT_LOWER:0,
  lv_event_get_code:e=>e.code,lv_event_get_current_target:()=>edit.field,lv_event_get_user_data:e=>e.mode,
  lv_obj_has_flag:obj=>obj.hidden,lv_obj_remove_flag:obj=>obj.hidden=false,
@@ -127,7 +127,7 @@ for(let c=32;c<=126;c++)assert(chars.has(String.fromCharCode(c)),`missing ASCII 
 for(const name of ['KEYBOARD','TEXTAREA','BUTTONMATRIX','SWITCH'])assert(config.includes(`CONFIG_LV_USE_${name}=y`));
 assert(!ui.includes('lv_tabview_'));assert(ui.includes('LV_OBJ_FLAG_PRESS_LOCK'));
 assert(ui.includes('HOME_TOP - CONTENT_TOP - KEYBOARD_HEIGHT'));
-assert(ui.includes('lv_obj_scroll_to_view_recursive(field, LV_ANIM_ON)'));
+assert(ui.includes('lv_obj_scroll_to_view_recursive(field, ui_animation())'));
 assert(ui.includes('network_settings_valid(&settings)'));assert(ui.includes('strlen(ssid) > 32'));
 assert(ui.includes('lv_textarea_set_password_mode(pass_field, true)'));
 assert(runtime.includes('atomic_compare_exchange_strong(&wifi_pending'));
@@ -152,7 +152,10 @@ let worker=removeCall(body('wifi_execute',runtime),'snprintf','record_message()'
  .replace('next.settings = request.settings','next.settings = {...request.settings}')
  .replace(/&request.settings/g,'request.settings')
  .replace('atomic_store(&wifi_pending, false)','pending = false');
-const radio={ESP_OK:0,NET_MODE_IDLE:0,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_RESULTS:8,
+worker=worker.replaceAll('60000000LL','60000000').replace('request.settings.pass[0] != 0','request.settings.pass.length > 0');
+const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPTIVE:1,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,M3_WIFI_RESULTS:8,
+ setup_requested:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
+ restore_wifi_password:()=>false,
  pending:true,events:[],saved:0,connected:0,fallback:0,scanned:2,web:true,
  record_message:()=>{},publish:()=>radio.events.push('publish'),
  network_scan_wifi:()=>{radio.events.push('scan');return radio.scanned;},
@@ -178,7 +181,74 @@ execute(1,{connected:5,fallback:5});assert(!radio.events.includes('dns-start'));
 execute(2,{web:false});assert.deepEqual(radio.events,['publish','setup','dns-start','http','relay','publish']);
 execute(3);assert.deepEqual(radio.events,['publish','ipv6','publish']);
 execute(3,{connected:5});assert.deepEqual(radio.events,['publish','ipv6','publish']);
+execute(4);assert(!radio.events.includes('save'),'missing saved secret must not overwrite NVS');
+state=execute(4,{restore_wifi_password:s=>{s.pass='saved-secret';return true;}});
+assert(radio.events.includes('connect'));assert(state.wifi_password_saved);assert.equal(state.settings.pass,'');
+assert(!radio.setup_requested);
+execute(2);assert(radio.setup_requested,'explicit setup disables automatic handover');
 for(const scanned of [-1,0,8]){state=execute(0,{scanned});assert.equal(state.scan_count,Math.max(0,scanned));assert.equal(state.scan_revision,1);assert(!radio.events.includes('save'));}
+// Execute periodic recovery with the real worker; initial failure leaves a retryable portal.
+let recovery=body('retry_saved_wifi',runtime).replaceAll('60000000LL','60000000')
+ .replace('wifi_request_t request = {.action = M3_WIFI_CONNECT, .retry = true};','let request = {action:M3_WIFI_CONNECT,retry:true,settings:{}};')
+ .replace('bool expected = false','let expected = false')
+ .replace('atomic_compare_exchange_strong(&wifi_pending, &expected, true)','claim_wifi()')
+ .replaceAll('&request.settings','request.settings').replaceAll('&request','request')
+ .replace('memset(request, 0, sizeof(request))','request.cleared = true').replaceAll('->','.');
+Object.assign(radio,{loaded:true,mode:1,clients:false,network_get_mode:()=>radio.mode,network_setup_has_clients:()=>radio.clients,
+ network_settings_load:s=>{Object.assign(s,{ssid:'Saved',pass:'saved-secret'});return radio.loaded;},
+ claim_wifi:()=>{if(radio.pending)return false;radio.pending=true;return true;},
+ wifi_execute:(next,request)=>radio.execute(next,request)});
+vm.runInContext('function recover(next){'+recovery+'}',radio);
+const recover=(overrides={})=>{Object.assign(radio,{setup_requested:false,next_wifi_retry:60000000,now:60000000,
+ pending:false,loaded:true,mode:1,clients:false,events:[],saved:0,connected:0,web:true},overrides);
+ radio.recover({wifi_ready:true,settings_revision:0,wifi_revision:0});return radio.events;};
+assert(recover().includes('connect'));assert.equal(radio.next_wifi_retry,120000000);
+assert(!radio.events.includes('save'),'automatic retries must not rewrite NVS');
+assert(!recover({clients:true}).includes('connect'),'active setup clients keep their connection');
+assert(!recover({now:59999999}).includes('connect'));
+assert(!recover({setup_requested:true}).includes('connect'));
+assert(!recover({pending:true}).includes('connect'));
+assert(!recover({loaded:false}).includes('connect'));
+assert(!recover({mode:3}).includes('connect'));
+assert(recover({connected:5}).includes('setup'),'failed retry restores the portal');
+// Saved-password selection must never turn an explicitly selected open AP into a secured AP.
+const passwords={M3_WIFI_CONNECT:1,M3_WIFI_CONNECT_SAVED:4,wifi_open_selected:false,wifi_selected_ssid:'Saved',
+ snapshot:{wifi_password_saved:true,settings:{ssid:'Saved'}},strcmp:(a,b)=>a===b?0:1};
+vm.createContext(passwords);
+vm.runInContext('function choose(settings){'+body('wifi_connection_action')
+ .replace('bool explicit_open','let explicit_open').replaceAll('->','.').replace('!settings.pass[0]','!settings.pass.length')+'}',passwords);
+assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
+assert.equal(passwords.choose({ssid:'Saved',pass:'new-secret'}),1);
+assert.equal(passwords.choose({ssid:'Other',pass:''}),1);
+passwords.wifi_open_selected=true;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
+passwords.wifi_selected_ssid='Other';assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
+passwords.snapshot.wifi_password_saved=false;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
+// Execute secret restoration from the actual C helper, with an NVS mock.
+const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,
+ network_settings_load:s=>{Object.assign(s,secrets.saved);return secrets.available;},strcmp:passwords.strcmp,
+ snprintf:(s,_size,_format,value)=>{s.pass=value;},memset:s=>{for(const k of Object.keys(s))s[k]='';secrets.cleared=s;}};
+vm.createContext(secrets);
+vm.runInContext('function restore(settings){'+body('restore_wifi_password',runtime)
+ .replace('network_settings_t saved;','let saved = {};').replace('bool found','let found')
+ .replace('saved.pass[0]','saved.pass.length').replace('sizeof(settings->pass)','64')
+ .replace('snprintf(settings->pass','snprintf(settings').replaceAll('->','.')
+ .replaceAll('&saved','saved').replace('sizeof(saved)','0')+'}',secrets);
+let candidate={ssid:'Saved',pass:'',ip:'192.168.0.50'};
+assert(secrets.restore(candidate));assert.equal(candidate.pass,'stored-secret');assert.equal(candidate.ip,'192.168.0.50');
+assert.equal(secrets.cleared.pass,'');assert.equal(secrets.saved.pass,'stored-secret');
+candidate={ssid:'Other',pass:''};assert(!secrets.restore(candidate));assert.equal(candidate.pass,'');
+secrets.available=false;assert(!secrets.restore({ssid:'Saved',pass:''}));
+// Both security icons are drawn with primitives; no font glyph dependency.
+const locks={GREEN:1,MUTED:2,LV_BORDER_SIDE_TOP:1,LV_BORDER_SIDE_LEFT:2,LV_BORDER_SIDE_RIGHT:4,
+ lv_obj_get_child:(obj,i)=>obj.children[i],lv_color_hex:x=>x,
+ lv_obj_set_pos:(obj,x,y)=>Object.assign(obj,{x,y}),
+ lv_obj_set_style_border_side:(obj,sides)=>obj.sides=sides,
+ lv_obj_set_style_border_color:(obj,color)=>obj.color=color,lv_obj_set_style_bg_color:(obj,color)=>obj.color=color};
+vm.createContext(locks);vm.runInContext('function security(icon,open){'+body('wifi_security')
+ .replace('uint32_t color','let color').replace('lv_obj_t *shackle','let shackle')+'}',locks);
+const lock={children:[{},{}]};locks.security(lock,false);assert.equal(lock.children[0].sides,7);
+assert.equal(lock.children[1].color,2);locks.security(lock,true);assert.equal(lock.children[0].sides,3);
+assert.equal(lock.children[0].x,10);assert.equal(lock.children[1].color,1);
 assert(runtime.includes('state.initialized && state.wifi_ready'),'failed radio init must disable commands');
 // Catch misspelled/nonexistent LVGL APIs against the pinned local headers.
 const headers=[];function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
@@ -190,4 +260,4 @@ if(fs.existsSync(sdk)){
  for(const name of new Set([...ui.matchAll(/\b(lv_\w+)\s*\(/g)].map(m=>m[1])))
   assert(new RegExp('\\b'+name+'\\s*\\(').test(declarations),`not in LVGL 9.2.2 headers: ${name}`);
 }
-console.log('PASS: home-bar growth/centering/cancellation, keyboard visibility and absolute alignment, ASCII keyboard/IP entry, Wi-Fi scan/save/connect/failure-to-SoftAP flows, password clearing, launcher layout, queue admission and LVGL API declarations.');
+console.log('PASS: home-bar/keyboard policies, ASCII/IP entry, Wi-Fi save/fallback, saved-password reuse and wiping, open/secured icon states, timed recovery without NVS rewrites, active setup/forced setup preservation, queue admission and available LVGL declarations.');

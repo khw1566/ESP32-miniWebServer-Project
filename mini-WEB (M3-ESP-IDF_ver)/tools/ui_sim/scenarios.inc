@@ -5,6 +5,8 @@ static void run_scenarios(const char *dir) {
     const char *lang = m3_i18n_language() == M3_LANG_EN ? "en" : m3_i18n_language() == M3_LANG_JA ? "ja" : "ko";
     char name[48];
 #define SHOT(label) do { snprintf(name, sizeof(name), "%s_%s", lang, label); capture(dir, name); } while (0)
+    SHOT("73_boot");
+    if (boot_overlay) { lv_obj_delete(boot_overlay); boot_overlay = NULL; }
     SHOT("00_home");
     lv_tileview_set_tile_by_index(home_tiles, 0, 0, LV_ANIM_OFF); home_tile_changed(NULL);
     update_metrics(NULL); settle(200); SHOT("47_home_calendar");
@@ -18,21 +20,40 @@ static void run_scenarios(const char *dir) {
     sim_photos_empty = true; update_metrics(NULL); settle(100); SHOT("52_photos_empty");
     sim_photos_empty = false; sim_photos_busy = true; update_metrics(NULL); settle(100); SHOT("53_photos_sd_busy");
     sim_photos_busy = false; show_app(APP_HOME); settle(200);
-    static const char *names[] = {"home", "wifi", "files", "audio", "monitor", "settings", "radio", "games", "tts", "agent", "tube", "music"};
+    static const char *names[] = {"home", "wifi", "files", "recorder", "monitor", "settings", "radio", "games", "tts", "agent", "tube", "music", "gallery", "calculator", "ytmusic"};
     _Static_assert(sizeof(names) / sizeof(names[0]) == APP_COUNT, "Simulator app names must match the firmware");
     for (unsigned app = 1; app < APP_COUNT; ++app) {
         char label[32]; show_app((app_id_t)app); settle(400);
         snprintf(label, sizeof(label), "%02u_%s", app, names[app]); SHOT(label);
     }
+    show_app(APP_CALCULATOR);
+    lv_textarea_set_text(calculator_input, "sin(30)+sqrt(81)^2");
+    lv_label_set_text(calculator_result, "81.5"); settle(200); SHOT("74_calculator_scientific");
+    show_app(APP_GALLERY); settle(200); SHOT("75_gallery_library");
+    sim_playing = false; show_app(APP_RECORDER); settle(300); SHOT("68_recorder_idle");
+    m3_audio_record(); sim_recorder.seconds = 42; sim_recorder.bytes = 1344000;
+    snprintf(sim_recorder.message, sizeof(sim_recorder.message), "Recording to SD card");
+    update_metrics(NULL); settle(200); SHOT("69_recorder_recording");
+    m3_recorder_finish(); update_metrics(NULL); settle(200); SHOT("70_recorder_saved");
+    snprintf(sim_recorder.message, sizeof(sim_recorder.message), "SD unavailable or busy");
+    update_metrics(NULL); settle(200); SHOT("71_recorder_storage_error");
+    sim_sd_ready = false; update_metrics(NULL); settle(200); SHOT("72_recorder_no_sd");
+    sim_sd_ready = true;
     show_app(APP_MUSIC); settle(300); SHOT("40_music_sd");
     show_app(APP_FILES); settle(300); SHOT("46_files_unicode");
     show_app(APP_MUSIC); settle(300);
     m3_music_play(0, 1); update_metrics(NULL); settle(300); SHOT("41_music_playing");
+    m3_music_shuffle(true); m3_music_repeat_mode(M3_MUSIC_REPEAT_ONE);
+    update_metrics(NULL); settle(200); SHOT("82_music_shuffle_repeat_one");
+    lv_obj_remove_flag(music_eq_panel, LV_OBJ_FLAG_HIDDEN); m3_music_equalizer(0, 6);
+    update_metrics(NULL); lv_obj_scroll_to_view(music_eq_panel, LV_ANIM_OFF); settle(200); SHOT("83_music_equalizer");
+    lv_obj_add_flag(music_eq_panel, LV_OBJ_FLAG_HIDDEN); lv_obj_scroll_to_y(pages[APP_MUSIC], 0, LV_ANIM_OFF);
     m3_music_pause(); update_metrics(NULL); settle(200); SHOT("42_music_paused");
     m3_audio_volume(150); update_metrics(NULL); settle(200); SHOT("43_music_boost150");
     m3_music_stop(); m3_music_refresh(false); segment_select(music_source, 1);
     update_metrics(NULL); settle(200); SHOT("44_music_flash");
-    m3_music_page(1); update_metrics(NULL); settle(200); SHOT("45_music_page2");
+    lv_obj_remove_flag(music_library, LV_OBJ_FLAG_HIDDEN);
+    m3_music_page(1); update_metrics(NULL); lv_obj_scroll_to_view(music_library, LV_ANIM_OFF); settle(200); SHOT("45_music_page2");
     m3_audio_volume(40);
     show_app(APP_WIFI); settle(300); scroll_page(APP_WIFI, 560); SHOT("11_wifi_form");
     lv_obj_add_state(static_switch, LV_STATE_CHECKED); lv_obj_send_event(static_switch, LV_EVENT_VALUE_CHANGED, NULL);
@@ -47,6 +68,15 @@ static void run_scenarios(const char *dir) {
     segment_select(game_tabs, 1); choose_game(NULL);
     memory_visible[0] = memory_visible[5] = true; memory_solved[2] = memory_solved[9] = true; render_game(); settle(100);
     SHOT("18_games_memory");
+    segment_select(game_tabs, 2); choose_game(NULL);
+    m3_crossing_reset(&crossing, 7); render_game(); scroll_page(APP_GAMES, 100);
+    SHOT("65_games_crossing");
+    crossing.row = 1;
+    while (m3_crossing_lane(&crossing, crossing.row) != M3_CROSS_RIVER) ++crossing.row;
+    crossing.best_row = crossing.row; crossing.camera = crossing.row > 3 ? crossing.row - 3 : 0;
+    crossing.x = (m3_crossing_offset(&crossing, crossing.row) + 40) % M3_CROSS_PERIOD;
+    crossing.started = true; render_game(); SHOT("66_games_crossing_river");
+    crossing.dead = true; render_game(); SHOT("67_games_crossing_over");
     show_app(APP_AGENT); settle(300); scroll_page(APP_AGENT, 400); SHOT("19_agent_input");
     show_app(APP_TTS); settle(300);
     lv_obj_send_event(lv_obj_get_child(lv_obj_get_parent(tts_text), 1), LV_EVENT_CLICKED, NULL);
@@ -62,8 +92,27 @@ static void run_scenarios(const char *dir) {
     scroll_page(APP_TUBE, 900); SHOT("28_tube_results_more");
     lv_obj_send_event(tube_rows[6].button, LV_EVENT_CLICKED, NULL);
     update_metrics(NULL); update_metrics(NULL); tube_frame_tick(NULL); settle(300); SHOT("29_tube_player");
+    segment_select(tube_quality_tabs[1], M3_TUBE_STANDARD); m3_tube_quality(M3_TUBE_STANDARD);
+    update_metrics(NULL); scroll_page(APP_TUBE, 480); SHOT("82_tube_quality");
+    tube_save(NULL); update_metrics(NULL); settle(200); SHOT("83_tube_downloading");
+    tube_cancel_save(NULL); sim_server_offline = true; update_metrics(NULL); settle(200); SHOT("84_tube_server_offline");
+    sim_server_offline = false; sim_download.message[0] = 0;
     tube_channel_event(NULL); update_metrics(NULL); settle(300); SHOT("30_tube_channel");
+    /* YouTube Music: empty, song results and a playing song. */
+    tube_stop(); sim_player.active = false; ++sim_player.revision;
+    show_app(APP_YTMUSIC); settle(300); update_metrics(NULL); settle(100); SHOT("77_ytmusic_empty");
+    lv_textarea_set_text(ytm_query, m3_i18n_language() == M3_LANG_EN ? "IU" : "아이유");
+    ytm_submit(); update_metrics(NULL); settle(300);
+    lv_obj_send_event(ytm_rows[0].button, LV_EVENT_CLICKED, NULL);
+    update_metrics(NULL); update_metrics(NULL); settle(300); SHOT("78_ytmusic_playing");
+    scroll_page(APP_YTMUSIC, 700); SHOT("79_ytmusic_results");
     show_app(APP_HOME); settle(300);
+    show_app(APP_SYSTEM); scroll_page(APP_SYSTEM, 0); SHOT("73_settings_display");
+    scroll_page(APP_SYSTEM, 280); SHOT("74_settings_sound");
+    scroll_page(APP_SYSTEM, 560); SHOT("75_settings_performance");
+    scroll_page(APP_SYSTEM, 850); SHOT("76_settings_operation");
+    sim_preferences.animations = 0; update_metrics(NULL); settle(200); SHOT("77_settings_no_effects");
+    sim_preferences.animations = 1; update_metrics(NULL);
     /* Monitor web QR (local and internet) and waiting animations. */
     sim_playing = false; show_app(APP_MONITOR); settle(300); update_metrics(NULL); settle(100); SHOT("31_monitor_qr");
     segment_select(web_tabs, M3_WEB_IPV6); web_tab_changed(NULL); update_metrics(NULL); settle(100); SHOT("32_monitor_qr_ipv6");
@@ -104,5 +153,10 @@ static void run_scenarios(const char *dir) {
     lv_textarea_set_text(tube_query, "ひらがなとカタカナ"); capture(dir, "ja_60_keyboard_hiragana");
     lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_USER_4); settle(200); capture(dir, "ja_61_keyboard_katakana");
     hide_keyboard();
+    show_app(APP_GAMES); sd_apps_open(NULL); settle(200); SHOT("78_sd_apps_list");
+    lv_obj_send_event(sd_rows[0], LV_EVENT_CLICKED, NULL); sd_apps_tick(NULL); settle(200); SHOT("79_sd_apps_game");
+    sim_sd_app_error = true; sd_apps_tick(NULL); SHOT("80_sd_apps_error"); sim_sd_app_error = false;
+    sd_apps_close(NULL); sd_apps_open(NULL); sim_sd_app_empty = true; sd_apps_tick(NULL); SHOT("81_sd_apps_empty");
+    sim_sd_app_empty = false; sd_apps_close(NULL);
 #undef SHOT
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,30 @@ test('factory credentials match registry and cannot be overwritten', () => {
     assert.equal(readFileSync(resolve(dir, 'provisioned/m1-aabbccddeeff.csv'), 'utf8'), csv);
     assert.equal(run('aabbccddeeff', 'c3').status, 0);
     assert.ok(JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'))['c3-aabbccddeeff'].tokenHash);
+    const m3 = run('aabbccddeeff', 'm3'); assert.equal(m3.status, 0, m3.stderr);
+    assert.ok(m3.stdout.includes('pattern = "m3-aabbccddeeff.audreaming.com"'));
+    const m3csv = readFileSync(resolve(dir, 'provisioned/m3-aabbccddeeff.csv'), 'utf8');
+    const m3token = /token,data,string,([a-f0-9]{64})/.exec(m3csv)?.[1]; assert.ok(m3token);
+    assert.notEqual(m3token, token);
+    assert.equal(JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'))['m3-aabbccddeeff'].tokenHash,
+      createHash('sha256').update(m3token).digest('hex'));
+    assert.notEqual(run('aabbccddeeff', 'm3').status, 0);
+    assert.equal(readFileSync(resolve(dir, 'provisioned/m3-aabbccddeeff.csv'), 'utf8'), m3csv);
+    // Upgrade an existing M3 registration that predates owner upload keys.
+    const m3registry = JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'));
+    delete m3registry['m3-aabbccddeeff'].uploadTokenHash;
+    writeFileSync(resolve(dir, 'provisioned/registry.json'), JSON.stringify(m3registry));
+    rmSync(resolve(dir, 'provisioned/m3-aabbccddeeff-upload-key.txt'));
+    const issueScript = fileURLToPath(new URL('../issue-upload-key.mjs', import.meta.url));
+    const issue = () => spawnSync(process.execPath, [issueScript, 'aabbccddeeff', 'm3'], { cwd: dir, encoding: 'utf8' });
+    const issued = issue(); assert.equal(issued.status, 0, issued.stderr);
+    const issuedToken = readFileSync(resolve(dir, 'provisioned/m3-aabbccddeeff-upload-key.txt'), 'utf8').trim();
+    assert.match(issuedToken, /^[a-f0-9]{64}$/); assert.equal(issued.stdout.includes(issuedToken), false);
+    const issuedRegistry = JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'));
+    assert.equal(issuedRegistry['m3-aabbccddeeff'].uploadTokenHash, createHash('sha256').update(issuedToken).digest('hex'));
+    assert.equal(issuedRegistry['m3-aabbccddeeff'].tokenHash, m3registry['m3-aabbccddeeff'].tokenHash);
+    assert.equal(readFileSync(resolve(dir, 'provisioned/m3-aabbccddeeff.csv'), 'utf8'), m3csv);
+    assert.notEqual(issue().status, 0);
     assert.notEqual(run('aabbccddeeff', 'x9').status, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

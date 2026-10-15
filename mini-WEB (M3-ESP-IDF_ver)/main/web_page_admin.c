@@ -199,7 +199,7 @@ const char HTML_ADMIN_DASHBOARD[] =
     "</div>      </div>      <div id='otaStatus' style='font-size:11px;color:var(--blue);margin-bottom:6px;display:none;'>"
     "</div>    </div>  </div>"
     "</div>"
-    "<div id='p-config' class='panel'>  <div class='row2'>    <div class='card'>      <div class='card-hd'>"
+    "<div id='p-config' class='panel'><a href='/device-settings' class='btn' style='margin-bottom:12px'>기기 설정 · 운영 모드</a><div class='row2'>    <div class='card'>      <div class='card-hd'>"
     "<span>첫 접속 화면 설정</span>"
     "</div>      <p style='font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5;'>보드의 IPv4 또는 IPv6 주소로 접속했을 때 표시할 첫 화면을 지정합니다. 아래 경로를 입력하면 업로드된 HTML 페이지가 우선 표시됩니다.</p>      <div style='display:flex;flex-direction:column;gap:8px;'>        <label style='font-size:12px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:8px;'>"
     "<input type='radio' name='initViewOpt' value='0'> 도움말 안내 가이드 (기본)</label>        <label style='font-size:12px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:8px;'>"

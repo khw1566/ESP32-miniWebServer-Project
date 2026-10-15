@@ -5,6 +5,13 @@ param([string]$Hostname = 'tube.audreaming.com', [string]$Name = 'm3-tube', [int
 $ErrorActionPreference = 'Continue'
 $here = $PSScriptRoot
 $cloudflared = (Get-Command cloudflared -ErrorAction Stop).Source; if (-not $cloudflared) { throw "cloudflared not found" }
+# First run on this PC: sign in once (opens the browser; choose the audreaming.com zone).
+$cert = Join-Path $env:USERPROFILE '.cloudflared\cert.pem'
+if (-not (Test-Path $cert)) {
+    Write-Output 'Cloudflare login required: a browser window opens. Select audreaming.com and authorize.'
+    & $cloudflared tunnel login | Out-Host
+    if (-not (Test-Path $cert)) { throw "Cloudflare login did not finish ($cert missing)" }
+}
 $list = & $cloudflared tunnel list --output json 2>$null | ConvertFrom-Json
 $tunnel = $list | Where-Object { $_.name -eq $Name } | Select-Object -First 1
 if (-not $tunnel) {
@@ -13,6 +20,8 @@ if (-not $tunnel) {
 }
 if (-not $tunnel) { throw "Tunnel $Name was not created" }
 $credentials = Join-Path $env:USERPROFILE ".cloudflared\$($tunnel.id).json"
+# The tunnel may have been created on another PC; fetch its credentials for this one.
+if (-not (Test-Path $credentials)) { & $cloudflared tunnel token --cred-file $credentials $tunnel.id | Out-Null }
 if (-not (Test-Path $credentials)) { throw "Missing tunnel credentials: $credentials" }
 & $cloudflared tunnel route dns --overwrite-dns $Name $Hostname | Out-Host
 @"

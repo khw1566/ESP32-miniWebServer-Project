@@ -1,5 +1,8 @@
+#include "m3_cores.h"
 #include "web_server.h"
 #include "cloud_relay.h"
+#include "m3_preferences.h"
+#include "m3_audio.h"
 #include "https_memory.h"
 #include "sd_media.h"
 #include "esp_heap_caps.h"
@@ -139,11 +142,14 @@ esp_err_t web_server_log_init(void) {
 /* First boot: the product home page becomes the editable /spiffs/index.html.
  * Deleting or replacing it is remembered (NVS flag); a storage reset brings
  * it back. Generated from web/index.html by tools/embed_home.cjs. */
+/* Bumped when the flash storage partition moves: the new partition starts
+ * empty, so the factory home page must be installed once more. */
+#define FACTORY_SEED_KEY "factory_seed2"
 static void web_factory_seed(bool force) {
   nvs_handle_t h;
   uint8_t seeded = 0;
   if (!force && nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-    nvs_get_u8(h, "factory_seed", &seeded);
+    nvs_get_u8(h, FACTORY_SEED_KEY, &seeded);
     nvs_close(h);
   }
   if (seeded) return;
@@ -161,7 +167,7 @@ static void web_factory_seed(bool force) {
     ESP_LOGI(TAG, "Factory home page installed (%u bytes)", (unsigned)written);
   }
   if (nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-    nvs_set_u8(h, "factory_seed", 1);
+    nvs_set_u8(h, FACTORY_SEED_KEY, 1);
     nvs_commit(h);
     nvs_close(h);
   }
@@ -340,8 +346,7 @@ static esp_err_t send_spiffs_file(httpd_req_t *req, const char *filepath) {
   return httpd_resp_send_chunk(req, NULL, 0);
 }
 
-static esp_err_t send_chunk_string(httpd_req_t *req, const char *str) {
-  size_t total_len = strlen(str);
+static esp_err_t send_chunk_bytes(httpd_req_t *req, const char *str, size_t total_len) {
   size_t sent = 0;
   const size_t chunk_size = 2048;
 
@@ -358,6 +363,16 @@ static esp_err_t send_chunk_string(httpd_req_t *req, const char *str) {
     sent += cur_len;
   }
   return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static esp_err_t send_chunk_string(httpd_req_t *req, const char *str) {
+  return send_chunk_bytes(req, str, strlen(str));
+}
+
+static esp_err_t send_gzip_page(httpd_req_t *req, const unsigned char *data, size_t bytes) {
+  esp_err_t result = httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+  if (result != ESP_OK) return result;
+  return send_chunk_bytes(req, (const char *)data, bytes);
 }
 
 static esp_err_t help_get_handler(httpd_req_t *req) {
@@ -539,6 +554,7 @@ static bool decode_wifi_field(char *out,size_t capacity,const char *encoded) {
   out[used]=0;return true;
 }
 #include "web_network_setup.inc"
+#include "web_device_settings.inc"
 
 static esp_err_t api_logs_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/plain; charset=utf-8");
@@ -1281,7 +1297,7 @@ static esp_err_t admin_get_handler(httpd_req_t *req) {
   ESP_LOGI(
       TAG,
       "[ADMIN] HTTP GET /admin requested. Streaming dashboard (Chunked)...");
-  esp_err_t res = send_chunk_string(req, HTML_ADMIN_DASHBOARD);
+  esp_err_t res = send_gzip_page(req, HTML_ADMIN_DASHBOARD_GZIP, HTML_ADMIN_DASHBOARD_GZIP_LEN);
   if (res == ESP_OK) {
     ESP_LOGI(TAG, "[ADMIN] Dashboard streamed successfully to client.");
   } else {
@@ -1305,7 +1321,7 @@ static esp_err_t ai_chat_get_handler(httpd_req_t *req) {
 static esp_err_t ai_studio_get_handler(httpd_req_t *req) {
   if (!ai_require_auth(req)) return ESP_OK;
   ai_page_headers(req);
-  return send_chunk_string(req, HTML_AI_STUDIO);
+  return send_gzip_page(req, HTML_AI_STUDIO_GZIP, HTML_AI_STUDIO_GZIP_LEN);
 }
 
 /* Separate public static-file route: never forwards setup, admin or AI endpoints. */
@@ -1360,6 +1376,15 @@ esp_err_t web_server_start(void) {
     if (httpd_register_uri_handler(s_server, &relay_uri) != ESP_OK) {
       httpd_stop(s_server); s_server = NULL; return ESP_FAIL;
     }
+    const httpd_uri_t device_routes[] = {
+      {.uri="/device-settings", .method=HTTP_GET, .handler=device_settings_get},
+      {.uri="/api/device-settings", .method=HTTP_POST, .handler=device_settings_post}
+    };
+    for (unsigned i = 0; i < 2; ++i) {
+      if (httpd_register_uri_handler(s_server, &device_routes[i]) != ESP_OK) {
+        httpd_stop(s_server); s_server = NULL; return ESP_FAIL;
+      }
+    }
     const httpd_uri_t ai_routes[] = {
       {.uri="/api/auth/status", .method=HTTP_GET, .handler=api_auth_status_handler},
       {.uri="/api/ai/login", .method=HTTP_POST, .handler=ai_login_post_handler},
@@ -1370,13 +1395,14 @@ esp_err_t web_server_start(void) {
       {.uri="/api/ai/chat", .method=HTTP_POST, .handler=ai_chat_post_handler}
     };
     for (size_t i = 0; i < sizeof(ai_routes)/sizeof(ai_routes[0]); ++i) {
+      if (m3_preferences_web_active() && i >= 3) continue;
       if (httpd_register_uri_handler(s_server, &ai_routes[i]) != ESP_OK) {
         httpd_stop(s_server); s_server = NULL; return ESP_FAIL;
       }
     }
     httpd_uri_t agent_uri = {.uri = "/api/agent", .method = HTTP_POST,
                              .handler = api_agent_post_handler, .user_ctx = NULL};
-    httpd_register_uri_handler(s_server, &agent_uri);
+    if (!m3_preferences_web_active()) httpd_register_uri_handler(s_server, &agent_uri);
     httpd_uri_t root_uri = {.uri = "/",
                             .method = HTTP_GET,
                             .handler = root_get_handler,
@@ -1399,7 +1425,7 @@ esp_err_t web_server_start(void) {
                           .method = HTTP_GET,
                           .handler = ai_chat_get_handler,
                           .user_ctx = NULL};
-    httpd_register_uri_handler(s_server, &ai_uri);
+    if (!m3_preferences_web_active()) httpd_register_uri_handler(s_server, &ai_uri);
 
     httpd_uri_t api_settings_get_uri = {.uri = "/api/settings",
                                         .method = HTTP_GET,
@@ -1514,7 +1540,7 @@ esp_err_t web_server_start(void) {
     ESP_LOGI(TAG, "HTTP Server started successfully (Admin, WebP & File "
                   "Manager Enabled)");
     atomic_store(&s_server_running, true);
-    if(!sd_index_task_handle && xTaskCreate(sd_index_task,"sd_index",4096,NULL,1,&sd_index_task_handle)!=pdPASS)
+    if(!sd_index_task_handle && xTaskCreatePinnedToCore(sd_index_task,"sd_index",4096,NULL,1,&sd_index_task_handle,M3_CORE_MEDIA)!=pdPASS)
       ESP_LOGW(TAG,"SD background index task unavailable; direct listing remains available");
     return ESP_OK;
   }

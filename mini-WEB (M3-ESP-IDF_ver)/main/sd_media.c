@@ -1,4 +1,5 @@
 #include "sd_media.h"
+#include "m3_preferences.h"
 #include "m3_utf8.h"
 #include "board_storage.h"
 #include "driver/sdmmc_host.h"
@@ -48,7 +49,7 @@ bool sd_media_name_valid(const char *name) {
     size_t length = strlen(name);
     if (name[length - 1] == ' ' || name[length - 1] == '.') return false;
     const char *ext=strrchr(name,'.');
-    const char *types[]={".jpg",".jpeg",".png",".webp",".gif",".mp4",".webm",".mp3",".wav",".m4a",".aac"};
+    const char *types[]={".jpg",".jpeg",".bmp",".png",".webp",".gif",".avi",".mjpg",".mjpeg",".mp4",".webm",".mp3",".wav",".m4a",".aac"};
     for(unsigned i=0;ext&&i<sizeof(types)/sizeof(types[0]);++i) if(!strcasecmp(ext,types[i])) return true;
     return false;
 }
@@ -58,7 +59,9 @@ static void abort_upload(void) {
     mbedtls_sha256_free(&digest);unlink(temporary);
 }
 bool sd_media_admin_lock(void) {
+    if (m3_preferences_restarting()) return false;
     if (!card || !lock || xSemaphoreTake(lock, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
+    if (m3_preferences_restarting()) { xSemaphoreGive(lock); return false; }
     if (upload && esp_timer_get_time()-last_activity>300LL*1000000) abort_upload();
     if (upload) { xSemaphoreGive(lock); return false; }
     return true;
@@ -142,8 +145,10 @@ static cJSON *answer(int status,const char *message) {
     cJSON_AddNumberToObject(out,"offset",written);return out;
 }
 cJSON *sd_media_command(const cJSON *cmd) {
+    if (m3_preferences_restarting()) return answer(503,"Device restarting");
     if(!card) return answer(503,"SD card is not mounted");
     if(xSemaphoreTake(lock,pdMS_TO_TICKS(3000))!=pdTRUE) return answer(503,"Storage is busy");
+    if (m3_preferences_restarting()) { xSemaphoreGive(lock); return answer(503,"Device restarting"); }
     int status=400;const char *message="Invalid upload command";
     const char *action=text(cmd,"action"),*sid=text(cmd,"session");
     if(upload&&esp_timer_get_time()-last_activity>300LL*1000000) abort_upload();

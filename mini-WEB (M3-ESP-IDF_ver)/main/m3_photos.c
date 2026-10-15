@@ -13,6 +13,8 @@
 #include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <limits.h>
+#include "src/libs/lodepng/lodepng.h"
 
 #define PHOTO_ROOT SD_MEDIA_ROOT "/widgets/photos"
 enum { PHOTO_COUNT = 64, PHOTO_FILE_LIMIT = 4 * 1024 * 1024 };
@@ -92,19 +94,50 @@ static bool jpeg_fit(const uint8_t *input, size_t size, uint8_t *canvas, unsigne
     jpeg_decode_memory_alloc_cfg_t cfg = {.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
     size_t capacity = 0;
     uint8_t *pixels = jpeg_alloc_decoder_mem((size_t)width * height * 2, &cfg, &capacity);
-    if (!pixels) { status(M3_PHOTO_NO_MEMORY); return false; }
+    if (!pixels) { if (generation != UINT_MAX) status(M3_PHOTO_NO_MEMORY); return false; }
     jpeg_decoder_handle_t decoder = NULL;
     jpeg_decode_engine_cfg_t engine = {.intr_priority = 0, .timeout_ms = 500};
     uint32_t written = 0;
-    esp_err_t opened = cancelled(generation) ? ESP_ERR_INVALID_STATE : jpeg_new_decoder_engine(&engine, &decoder);
-    if (opened == ESP_ERR_NO_MEM) status(M3_PHOTO_NO_MEMORY);
+    esp_err_t opened = generation != UINT_MAX && cancelled(generation) ? ESP_ERR_INVALID_STATE : jpeg_new_decoder_engine(&engine, &decoder);
+    if (opened == ESP_ERR_NO_MEM && generation != UINT_MAX) status(M3_PHOTO_NO_MEMORY);
     bool ok = opened == ESP_OK;
     if (ok) ok = jpeg_decoder_process(decoder, &(jpeg_decode_cfg_t){.output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
         .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR, .conv_std = JPEG_YUV_RGB_CONV_STD_BT601},
         input, size, pixels, capacity, &written) == ESP_OK && written >= (size_t)width * height * 2;
-    if (ok && !cancelled(generation)) ok = m3_photo_rgb565_fit(pixels, info.width, info.height, width * 2, canvas);
+    if (ok && (generation == UINT_MAX || !cancelled(generation))) ok = m3_photo_rgb565_fit(pixels, info.width, info.height, width * 2, canvas);
     if (decoder) jpeg_del_decoder_engine(decoder);
     free(pixels); return ok;
+}
+bool m3_photo_decode(const uint8_t *data, size_t size, uint8_t *canvas) {
+    if (!data || !canvas || size < 8 || size > PHOTO_FILE_LIMIT) return false;
+    if (data[0] == 'B' && data[1] == 'M') return m3_photo_bmp_fit(data, size, canvas);
+    if (data[0] == 0xff && data[1] == 0xd8) return jpeg_fit(data, size, canvas, UINT_MAX);
+    if (memcmp(data, "\x89PNG\r\n\x1a\n", 8)) return false;
+    LodePNGState png; lodepng_state_init(&png);
+    unsigned width = 0, height = 0;
+    unsigned error = lodepng_inspect(&width, &height, &png, data, size);
+    if (error || !width || !height || width > 2048 || height > 2048 || (uint64_t)width * height > 2 * 1024 * 1024) {
+        lodepng_state_cleanup(&png); return false;
+    }
+    unsigned char *rgba = NULL;
+    png.info_raw.colortype = LCT_RGBA; png.info_raw.bitdepth = 8;
+    png.decoder.zlibsettings.max_output_size = (size_t)(width * 4 + 8) * height + 65536;
+    error = lodepng_decode(&rgba, &width, &height, &png, data, size);
+    lodepng_state_cleanup(&png);
+    if (error || !rgba) { lv_free(rgba); return false; }
+    memset(canvas, 0, M3_PHOTO_BYTES);
+    unsigned w = M3_PHOTO_W, h = (uint64_t)height * w / width;
+    if (h > M3_PHOTO_H) { h = M3_PHOTO_H; w = (uint64_t)width * h / height; }
+    if (!w) w = 1;
+    if (!h) h = 1;
+    for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
+        const uint8_t *p = rgba + ((size_t)(y * height / h) * width + x * width / w) * 4;
+        unsigned r = p[0] * p[3] / 255, g = p[1] * p[3] / 255, b = p[2] * p[3] / 255;
+        uint16_t color = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        size_t offset = ((y + (M3_PHOTO_H - h) / 2) * M3_PHOTO_W + x + (M3_PHOTO_W - w) / 2) * 2;
+        canvas[offset] = color; canvas[offset + 1] = color >> 8;
+    }
+    lv_free(rgba); return true;
 }
 void m3_photos_poll(void) {
     if (!atomic_load(&active)) return;

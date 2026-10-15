@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "dns_server.h"
 #include <stdbool.h>
 #include <string.h>
@@ -120,7 +121,7 @@ esp_err_t dns_server_start(void) {
         return ESP_FAIL;
     }
 
-    xTaskCreate(dns_task, "dns_task", 4096, NULL, 5, &s_dns_task_h);
+    xTaskCreatePinnedToCore(dns_task, "dns_task", 4096, NULL, 5, &s_dns_task_h, M3_CORE_NET);
     return ESP_OK;
 }
 

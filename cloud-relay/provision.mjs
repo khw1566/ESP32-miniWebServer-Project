@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 const serial = (process.argv[2] || '').toLowerCase();
 if (!/^[a-f0-9]{12}$/.test(serial)) throw new Error('Usage: node provision.mjs <board MAC: 12 hex digits>');
 const product = process.argv[3] || 'm1';
-if (!['m1', 's3', 'c3'].includes(product)) throw new Error('Product must be m1, s3 or c3');
+if (!['m1', 'm3', 's3', 'c3'].includes(product)) throw new Error('Product must be m1, m3, s3 or c3');
 const id = `${product}-${serial}`;
 const dir = resolve('provisioned'); mkdirSync(dir, { recursive: true });
 const registryPath = resolve(dir, 'registry.json');

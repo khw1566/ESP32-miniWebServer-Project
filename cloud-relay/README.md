@@ -16,13 +16,14 @@ node provision.mjs aabbccddeeff
 
 `wrangler.toml`의 `DEMO_DEVICE`에 생성된 ID(`m1-실제MAC`)를 넣습니다. 현재 시연 보드는 `m1-b0cbd899de80`이며 `audreaming.com`과 `demo.audreaming.com`도 이 보드로 연결됩니다. 보드의 기본 QR은 MAC별 주소 `m1-실제MAC.audreaming.com`을 표시합니다. 여러 보드에서는 각 주소별 Custom Domain을 추가합니다. 주소와 토큰은 Wi-Fi가 바뀌어도 같습니다. 실제 Cloudflare 계정에서 구매 도메인을 확인하여 기존 문서의 `audeaming.com` 오기를 수정했습니다.
 
-## 다른 보드 연결 (S3, S3-N16R8, C3)
+## 다른 보드 연결 (M3, S3, S3-N16R8, C3)
 
 모든 펌웨어가 같은 중계 서버를 사용합니다. 보드 ID와 주소만 제품 접두사가 다릅니다.
 
 | 펌웨어 | 제품 | 외부 주소 | SD 업로드 |
 | --- | --- | --- | --- |
 | M1 | `m1` | `m1-MAC.audreaming.com` | 지원 |
+| M3 (ESP32-P4 + C6 Wi-Fi) | `m3` | `m3-MAC.audreaming.com` | 지원 |
 | S3-N16R8-SD | `s3` | `s3-MAC.audreaming.com` | 지원 |
 | S3 | `s3` | `s3-MAC.audreaming.com` | 없음 (내부 플래시 웹 파일만 제공) |
 | C3 | `c3` | `c3-MAC.audreaming.com` | 없음 (내부 플래시 웹 파일만 제공) |
@@ -33,6 +34,17 @@ node provision.mjs aabbccddeeff
 4. `./Register-Board.ps1 -BoardUrl http://보드주소 -Serial 실제MAC -Product 제품`으로 연결 키를 보드에 저장하고 재부팅합니다.
 
 SD가 없는 보드에 SD 업로드를 요청하면 보드가 `503 This board has no SD card slot`으로 거절합니다. AI 요청 중에는 M1과 같이 중계 연결을 잠시 내려 메모리를 확보합니다.
+
+### M3 도메인 연결
+
+M3 펌웨어는 `m3-시리얼`로 인증합니다. 기존 `m1-시리얼` 등록이나 토큰은 M3 등록을 대신하지 않습니다. 시리얼은 M3 로컬 관리자 `/api/system`의 `serial` 값을 사용하세요. C6 Wi-Fi 칩의 MAC을 별도로 읽어서 사용하지 마세요.
+
+1. 이 폴더에서 `node provision.mjs 실제MAC12자리 m3`를 실행합니다. 이미 M3 등록 파일이 있으면 기존 파일을 사용합니다. 중복 등록으로 토큰을 바꾸지 마세요.
+2. 출력된 `m3-실제MAC12자리.audreaming.com`의 `[[routes]]` 설정을 `wrangler.toml`에 추가합니다. 도메인 경로 추가와 `DEVICE_REGISTRY` secret 갱신이 모두 필요합니다. 상세 명령은 아래 2장을 따릅니다.
+3. Worker를 배포한 뒤 `./Register-Board.ps1 -BoardUrl http://보드IP -Serial 실제MAC12자리 -Product m3`를 실행합니다. 기존 Wi-Fi·관리자 설정을 유지하면서 해당 M3의 토큰만 저장합니다.
+4. 보드를 재부팅합니다. `/api/system`의 `cloud_status`가 `online`인지 확인하고, `tunnel_url` 주소를 모바일 데이터로 엽니다.
+
+QR에 도메인이 표시되는 것만으로 서버 등록이나 연결이 완료되지는 않습니다. `factory_missing`은 보드 토큰 미등록, 반복되는 `HTTP=401` 로그는 기기 ID·서버 등록·토큰 불일치 가능성을 뜻합니다. `waiting_time`은 시간 동기화 대기입니다. DNS 조회 실패는 도메인 경로 배포를 확인하세요. 온라인 이후 공개 파일이 없다는 응답이 나오면 로컬 관리자에서 웹 파일을 업로드하세요.
 
 ## 2. 제작자: Cloudflare에 무료 배포
 

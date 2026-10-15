@@ -4,17 +4,29 @@ param(
     [string]$IdfPath = 'C:\esp\v5.5.5\esp-idf'
 )
 $ErrorActionPreference = 'Stop'
+# Keep the window open on failure when the script was started by double-click.
+trap {
+    Write-Host "M3 script failed: $_" -ForegroundColor Red
+    Read-Host 'Press Enter to close'
+    exit 1
+}
 $env:PYTHONUTF8 = '1'
 $env:IDF_CCACHE_ENABLE = '0'
 $env:IDF_TARGET = 'esp32p4'
-if ($Action -ne 'Build' -and -not $Port) { throw '-Port COM번호 is required' }
+if ($Action -ne 'Build' -and -not $Port) { throw '-Port COMx is required (example: -Port COM5)' }
 if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
     $idfExport = Join-Path $IdfPath 'export.ps1'
     if (-not (Test-Path -LiteralPath $idfExport)) { throw 'Open an ESP-IDF 5.5.5 terminal or specify -IdfPath' }
-    # Match the complete local installation used by the camera example.
+    # ESP-IDF Installation Manager layout (C:\Espressif\tools), then the
+    # older idf_tools layout under the user profile.
+    $eimTools = 'C:\Espressif\tools'
+    $eimPython = Join-Path $eimTools 'python\v5.5.5\venv'
     $toolsRoot = Join-Path $env:USERPROFILE '.espressif'
     $pythonEnv = Join-Path $toolsRoot 'python_env\idf5.5_py3.10_env'
-    if (Test-Path -LiteralPath $pythonEnv) {
+    if (Test-Path -LiteralPath $eimPython) {
+        $env:IDF_TOOLS_PATH = $eimTools
+        $env:IDF_PYTHON_ENV_PATH = $eimPython
+    } elseif (Test-Path -LiteralPath $pythonEnv) {
         $env:IDF_TOOLS_PATH = $toolsRoot
         $env:IDF_PYTHON_ENV_PATH = $pythonEnv
     }
@@ -34,6 +46,11 @@ if ($Action -eq 'Build') {
     if ($LASTEXITCODE -ge 8) { throw 'CMake compatibility source sync failed' }
     robocopy.exe (Join-Path $PSScriptRoot 'components') (Join-Path $stage 'components') /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw 'Local TTS component source sync failed' }
+    robocopy.exe (Join-Path $PSScriptRoot 'third_party') (Join-Path $stage 'third_party') /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw 'Third-party source sync failed' }
+    $assetTools = Join-Path $stage 'tools'
+    New-Item -ItemType Directory -Path $assetTools -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tools\generate_web_gzip.py') -Destination $assetTools -Force
     foreach ($file in @('CMakeLists.txt', 'sdkconfig.defaults', 'partitions_16mb.csv')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $stage -Force
     }

@@ -1,0 +1,6 @@
+{
+  "name": "m3-sd-app-host-checks",
+  "private": true,
+  "scripts": { "test": "node test.cjs && node test_watermelon.cjs" },
+  "devDependencies": { "wasmoon": "1.16.0" }
+}

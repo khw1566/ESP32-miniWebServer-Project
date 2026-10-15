@@ -2,6 +2,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
 const root=path.resolve(__dirname,'..'),read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
 const music=read('main/m3_music.c'),audio=read('main/m3_audio.c');
+const features=require('./test_music_features.cjs');
 function body(name,source=music){const m=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\{').exec(source);assert(m,name);
  let start=m.index+m[0].length,end=start,depth=1;while(depth){if(source[end]==='{')depth++;if(source[end]==='}')depth--;end++;}return source.slice(start,end-1);}
 const gain=body('m3_pcm_gain',read('main/m3_pcm.c')).replace(/\bint32_t (\w+)/g,'let $1')
@@ -40,6 +41,10 @@ for(const p of ['/sdcard/media/한국어.mp3','/sdcard/media/album/song.wav','/s
 for(const p of ['/etc/test.wav','/sdcard/song.mp3','/spiffs/../secret.mp3','/spiffs/index.html','/spiffs/a\n.mp3','/spiffs/a\\b.mp3','/spiffs//song.mp3'])assert(!validator.valid(p),p);
 
 const playback=body('m3_music_run')
+ .replace('music_filter_t filter = {0};', 'var filter = {low:[0,0],upper:[0,0]};')
+ .replace('&filter', 'filter').replace('(int16_t *)pcm', 'pcm')
+ .replace("const char *filename = strrchr(path, '/');", "var filename = path.slice(path.lastIndexOf('/'));")
+ .replace('copy_name(state.title, sizeof(state.title), filename ? filename + 1 : path);', 'state.title = filename ? filename.slice(1) : path;')
  .replace(/\bFILE \*file/g,'var file').replace(/\buint8_t \*/g,'var ').replace(/\bint16_t \*stereo/g,'var stereo')
  .replace(/, \*(\w+)/g,', $1')
  .replace(/const char \*(\w+)/g,'var $1')
@@ -69,10 +74,15 @@ function wave(channels=2){const frames=1700,b=Buffer.alloc(44+frames*channels*2)
  b.write('RIFF');b.writeUInt32LE(b.length-8,4);b.write('WAVEfmt ',8);b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);
  b.writeUInt16LE(channels,22);b.writeUInt32LE(24000,24);b.writeUInt32LE(24000*channels*2,28);b.writeUInt16LE(channels*2,32);b.writeUInt16LE(16,34);
  b.write('data',36);b.writeUInt32LE(b.length-44,40);for(let i=0;i<frames*channels;i++)b.writeInt16LE(i%2? -12000:23000,44+i*2);return b;}
-function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=Infinity,failWrite=false,failRead=false}={}){
+function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=Infinity,failWrite=false,failRead=false,repeat_mode=0,shuffle=false,tracks=[name]}={}){
  const ctx={MUSIC_FILE_LIMIT:256*1024*1024,MUSIC_PREFETCH_LIMIT:8*1024*1024,MUSIC_READ_BYTES:4096,MUSIC_PCM_BYTES:32768,
+ shuffle_played:[],memset:(arr,value)=>arr.fill(value),
+ M3_MUSIC_REPEAT_ALL:1,M3_MUSIC_ROWS:5,esp_random:()=>0, music_target:features.target,
+ music_process:(pcm,samples,channels,rate,filter)=>features.dsp(new Int16Array(pcm.buffer,pcm.byteOffset,samples),channels,rate,filter),
+ M3_MUSIC_REPEAT_OFF:0,M3_MUSIC_REPEAT_ALL:1,M3_MUSIC_REPEAT_ONE:2,
  MALLOC_CAP_SPIRAM:4,MALLOC_CAP_8BIT:2,ESP_AUDIO_SIMPLE_DEC_TYPE_AAC:1,ESP_AUDIO_SIMPLE_DEC_TYPE_MP3:2,ESP_AUDIO_ERR_OK:0,
- state:{repeat:false,selected:0,count:1,title:""},catalog_set:0,catalogs:[[{path:name,name:"Mock song"}]],decoderRef:{value:null},allocations:[],freed:[],writes:[],statuses:[],reads:0,position:0,closed:0,unlocks:0,drains:0,begins:[],encoded:[],
+ state:{repeat:repeat_mode!==0,repeat_mode,shuffle,selected:0,count:tracks.length,title:""},catalog_set:0,catalogs:[tracks.map(path=>({path,name:"Mock song"}))],decoderRef:{value:null},allocations:[],freed:[],writes:[],statuses:[],reads:0,position:0,closed:0,unlocks:0,drains:0,begins:[],encoded:[],followed:[],
+ m3_audio_music_follow:buffer=>{ctx.followed.push(buffer.toString().split('\0')[0]);return true;},
  Buffer,strcmp:(a,b)=>a===b?0:1,snprintf:(out,n,format,text)=>{out.fill(0);out.write(text,0,n-1);},m3_music_path_valid:validator.valid,strlen:s=>s.length,strncmp:validator.strncmp,strcasecmp:(a,b)=>a.toLowerCase()===b.toLowerCase()?0:1,
  extension:s=>path.extname(s),status:(...args)=>ctx.statuses.push(args),sd_media_admin_lock:()=>true,sd_media_admin_unlock:()=>ctx.unlocks++,
  fopen:()=>({}),SEEK_END:2,SEEK_SET:0,ftell:()=>data.length,
@@ -109,10 +119,19 @@ for(const opts of [{failAllocation:3},{cancelAtRead:1},{failRead:true},{failWrit
  const r=run(wave(),opts);assert(!r.result.ok);assert.equal(r.closed,1);assert.equal(r.unlocks,1);
  assert.equal(r.freed.length,r.allocations.filter(Boolean).length,'all allocated working buffers released');
 }
+const tracks=['/spiffs/a.wav','/spiffs/b.wav','/spiffs/c.wav'];
+assert.deepEqual(run(wave(),{name:tracks[2],tracks}).followed,[],'last track stops');
+assert.deepEqual(run(wave(),{name:tracks[0],tracks}).followed,[tracks[1]],'natural advance');
+assert.deepEqual(run(wave(),{name:tracks[2],tracks,repeat_mode:1}).followed,[tracks[0]],'repeat list wraps');
+assert.deepEqual(run(wave(),{name:tracks[1],tracks,repeat_mode:2,shuffle:true}).followed,[tracks[1]],'repeat one queues the same path');
+assert.deepEqual(run(wave(),{name:tracks[2],tracks,shuffle:true}).followed,[tracks[0]],'shuffle skips current');
+for(const opts of [{failWrite:true},{cancelAtRead:1},{failAllocation:3}])
+ assert.deepEqual(run(wave(),{name:tracks[0],tracks,repeat_mode:2,...opts}).followed,[],'failure/cancel never repeats');
 assert(music.includes('M3_PSRAM_BSS track_t catalogs[2]'));assert(!music.includes('xTaskCreate'));
 assert(audio.includes('requested > 100 ? 100 : requested'));assert(audio.includes('m3_pcm_gain(input[i], gain)'));
 assert(audio.includes('percent > 150 ? 150 : percent'));assert(audio.includes('m3_music_run(request.name, &output)'));
 const follow={requests:[],active_epoch:7,PLAY_MUSIC:9,pdTRUE:true,cancelled:()=>false,
+ restarting:false,m3_preferences_restarting:()=>follow.restarting,
  m3_music_path_valid:validator.valid,xQueueSend:(queue,request)=>{if(queue.length)return false;queue.push(request);return true;}};
 vm.createContext(follow);vm.runInContext('function follow(path){'+body('m3_audio_music_follow',audio)
  .replace('request_t request = {.kind = PLAY_MUSIC, .epoch = active_epoch};','let request = {kind:PLAY_MUSIC,epoch:active_epoch};')
@@ -121,11 +140,12 @@ vm.createContext(follow);vm.runInContext('function follow(path){'+body('m3_audio
 assert(follow.follow('/spiffs/next.mp3'));assert.equal(follow.requests[0].epoch,7);
 assert(!follow.follow('/spiffs/another.mp3'),'auto advance does not overwrite a queued request');
 follow.requests=[];follow.cancelled=()=>true;assert(!follow.follow('/spiffs/next.mp3'));
+follow.cancelled=()=>false;follow.restarting=true;assert(!follow.follow('/spiffs/next.mp3'),'restart blocks automatic playback admission');
 assert(!body('m3_audio_music_follow',audio).includes('m3_audio_stop()'),'auto advance must not cancel a newer user action');
 const registry={initialized:false,ESP_AUDIO_ERR_OK:0,low:0,simple:0,
  esp_audio_dec_register_default:()=>{registry.low++;return 0;},esp_audio_simple_dec_register_default:()=>{registry.simple++;return 0;}};
 vm.createContext(registry);vm.runInContext('function ready(){'+body('m3_audio_decoders_ready',audio).replace('static bool initialized;','')+'}',registry);
 assert(registry.ready());assert(registry.ready());assert.equal(registry.low,1);assert.equal(registry.simple,1);
 assert(music.includes('m3_audio_decoders_ready()')&&read('main/m3_radio.c').includes('m3_audio_decoders_ready()'));
-assert(read('main/m3_runtime.c').includes('m3_music_poll()'));assert(read('main/m3_ui.c').includes('APP_TUBE, APP_MUSIC, APP_COUNT'));
+assert(read('main/m3_runtime.c').includes('m3_music_poll()'));assert(read('main/m3_ui.c').includes('APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_COUNT'));
 console.log('PASS: saturating 100..150 gain, storage path isolation, actual local-player WAV/MP3/AAC loop with mocked decoders, mono/stereo bytes, prefetch and fallback, cancel/read/write/OOM cleanup, sole codec ownership and service/UI integration.');

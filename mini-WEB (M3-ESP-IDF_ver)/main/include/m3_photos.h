@@ -21,3 +21,5 @@ void m3_photos_poll(void); /* Service task only; never calls LVGL. */
 const uint8_t *m3_photos_frame(void);
 bool m3_photo_bmp_fit(const uint8_t *data, size_t size, uint8_t *canvas);
 bool m3_photo_rgb565_fit(const uint8_t *data, unsigned width, unsigned height, unsigned stride, uint8_t *canvas);
+/* Bounded JPEG/BMP/PNG decode for service workers, never from an LVGL callback. */
+bool m3_photo_decode(const uint8_t *data, size_t size, uint8_t *canvas);

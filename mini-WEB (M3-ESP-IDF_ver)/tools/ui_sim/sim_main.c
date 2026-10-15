@@ -13,6 +13,28 @@
 
 #include "../../main/m3_ui.c"
 
+/* SD app UI fixtures; they do not execute scripts or access an SD card. */
+static bool sim_sd_app_running, sim_sd_app_empty, sim_sd_app_error;
+void m3_sd_apps_poll(void) {}
+bool m3_sd_apps_state(m3_sd_apps_state_t *out) {
+    memset(out, 0, sizeof(*out)); out->mounted = true;
+    out->count = sim_sd_app_empty ? 0 : 2; out->running = sim_sd_app_running;
+    snprintf(out->names[0], sizeof(out->names[0]), "sand_tetris.lua"); out->score = 240;
+    snprintf(out->names[1], sizeof(out->names[1]), "watermelon.lua");
+    if (sim_sd_app_error) snprintf(out->error, sizeof(out->error), "Execution limit / stopped");
+    return true;
+}
+bool m3_sd_apps_start(const char *name) { (void)name; sim_sd_app_running = true; return true; }
+void m3_sd_apps_stop(void) { sim_sd_app_running = false; }
+void m3_sd_apps_input(unsigned buttons) { (void)buttons; }
+bool m3_sd_apps_frame(uint16_t *out) {
+    if (!sim_sd_app_running) return false;
+    for (unsigned y = 0; y < M3_SD_APP_HEIGHT; ++y)
+        for (unsigned x = 0; x < M3_SD_APP_WIDTH; ++x)
+            out[y * M3_SD_APP_WIDTH + x] = y > 150 - (x % 41) ? ((x / 28) % 2 ? 0x459f : 0xfbe4) : 0x0862;
+    return true;
+}
+
 /* Photo widget mocks: a bounded RGB565 test card, no SD or JPEG hardware. */
 static bool sim_photos_active, sim_photos_paused, sim_photos_empty, sim_photos_busy;
 static unsigned sim_photo_index;
@@ -39,19 +61,18 @@ const uint8_t *m3_photos_frame(void) {
 
 /* Music catalog and player mocks; no storage device is accessed. */
 static unsigned sim_music_revision = 1, sim_music_page, sim_music_selected;
+static m3_music_repeat_t sim_music_mode;
+static bool sim_music_shuffle;
+static int sim_music_eq[3];
 static bool sim_music_sd = true, sim_music_active, sim_music_paused, sim_music_repeat;
 void m3_music_state(m3_music_state_t *out) {
     memset(out, 0, sizeof(*out)); out->sd = sim_music_sd; out->count = 7; out->catalog_revision = 1;
     out->page = sim_music_page; out->revision = sim_music_revision; out->selected = sim_music_selected;
-    out->active = sim_music_active; out->paused = sim_music_paused; out->repeat = sim_music_repeat;
+    out->active = sim_music_active; out->paused = sim_music_paused; out->repeat = sim_music_repeat; out->repeat_mode = sim_music_mode; out->shuffle = sim_music_shuffle;
+    memcpy(out->eq_db, sim_music_eq, sizeof(sim_music_eq));
+    for (unsigned b = 0; b < 3; ++b) out->bands[b] = sim_music_active && !sim_music_paused ? 30 + b * 25 : 0;
     out->progress = sim_music_active ? 37 : 0; out->seconds = sim_music_active ? 46 : 0;
     snprintf(out->title, sizeof(out->title), "%s", sim_music_active ? "春の音楽 - ひらがなとカタカナの長いファイル名（特別版）.mp3" : "");
-    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
-    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
-    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
-    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
-    out->mdns_ready = true;
-    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
     snprintf(out->message, sizeof(out->message), "%s", sim_music_active ? "Local music playing" : "Music catalog ready");
     for (unsigned i = sim_music_page * M3_MUSIC_ROWS; i < 7 && out->shown < M3_MUSIC_ROWS; ++i) {
         m3_music_item_t *item = &out->items[out->shown++]; item->index = i;
@@ -66,7 +87,10 @@ void m3_music_page(int direction) { sim_music_page = direction > 0 ? 1 : 0; ++si
 bool m3_music_play(unsigned index, unsigned revision) { (void)revision; sim_music_selected = index; sim_music_active = true; ++sim_music_revision; return true; }
 bool m3_music_next(int direction) { sim_music_selected = (sim_music_selected + (direction > 0 ? 1 : 6)) % 7; sim_music_active = true; ++sim_music_revision; return true; }
 void m3_music_pause(void) { sim_music_paused = !sim_music_paused; ++sim_music_revision; }
-void m3_music_repeat(bool enabled) { sim_music_repeat = enabled; ++sim_music_revision; }
+void m3_music_repeat_mode(m3_music_repeat_t mode) { sim_music_mode = mode; sim_music_repeat = mode != M3_MUSIC_REPEAT_OFF; ++sim_music_revision; }
+void m3_music_repeat(bool enabled) { m3_music_repeat_mode(enabled ? M3_MUSIC_REPEAT_ALL : M3_MUSIC_REPEAT_OFF); }
+void m3_music_shuffle(bool enabled) { sim_music_shuffle = enabled; ++sim_music_revision; }
+void m3_music_equalizer(unsigned band, int db) { if (band < 3) sim_music_eq[band] = db; ++sim_music_revision; }
 void m3_music_stop(void) { sim_music_active = false; ++sim_music_revision; }
 
 /* YouTube mocks. tube_sim_data.inc (optional, generated from a real relay listing) supplies items and images. */
@@ -80,6 +104,23 @@ static uint8_t sim_thumbs[1][160 * 90 * 2], sim_frame[480 * 272 * 2];
 static m3_tube_list_t sim_tube;
 static m3_tube_player_t sim_player;
 bool m3_tube_configured(void) { return true; }
+static m3_tube_quality_t sim_quality;
+static m3_tube_download_t sim_download;
+static bool sim_server_offline;
+void m3_tube_quality(m3_tube_quality_t quality) { sim_quality = quality; }
+m3_tube_quality_t m3_tube_get_quality(void) { return sim_quality; }
+void m3_tube_probe(void) {}
+void m3_tube_server(m3_tube_server_t *out) {
+    memset(out, 0, sizeof(*out)); out->ready = !sim_server_offline;
+    snprintf(out->message, sizeof(out->message), "%s", sim_server_offline ? "PC server or tunnel is offline" : "PC server ready");
+}
+bool m3_tube_download(const char *id, const char *title) {
+    (void)id; (void)title; memset(&sim_download, 0, sizeof(sim_download)); sim_download.busy = true;
+    sim_download.bytes = 1048576; sim_download.total = 4194304; sim_download.percent = 25;
+    snprintf(sim_download.message, sizeof(sim_download.message), "Saving video to SD"); return true;
+}
+void m3_tube_download_cancel(void) { sim_download.busy = false; snprintf(sim_download.message, sizeof(sim_download.message), "Download cancelled"); }
+void m3_tube_download_state(m3_tube_download_t *out) { *out = sim_download; }
 esp_err_t m3_tube_start(void) { return ESP_OK; }
 static bool sim_listing(bool channel, const char *text, unsigned page) {
     sim_tube.status = M3_TUBE_LIST_READY; sim_tube.channel = channel; sim_tube.page = page; sim_tube.more = true;
@@ -96,7 +137,22 @@ void m3_tube_list(m3_tube_list_t *out) { *out = sim_tube; }
 const uint8_t *m3_tube_thumb(const m3_tube_list_t *list, unsigned index) {
     return index < sim_item_count && (list->thumbs & (1u << index)) ? sim_thumbs[index] : NULL;
 }
+static m3_tube_list_t sim_music;
+bool m3_tube_music_search(const char *query, unsigned page) {
+    sim_music.status = M3_TUBE_LIST_READY; sim_music.music = true; sim_music.page = page; sim_music.more = true;
+    sim_music.count = sim_item_count > M3_TUBE_ITEMS ? M3_TUBE_ITEMS : sim_item_count;
+    memcpy(sim_music.items, sim_items, sizeof(m3_tube_item_t) * sim_music.count);
+    snprintf(sim_music.query, sizeof(sim_music.query), "%s", query); ++sim_music.revision;
+    return true;
+}
+void m3_tube_music_list(m3_tube_list_t *out) { *out = sim_music; }
+bool m3_tube_play_audio(const char *id, unsigned start) {
+    memset(&sim_player, 0, sizeof(sim_player));
+    sim_player.active = true; sim_player.audio_only = true; sim_player.position_ms = 63000 + start * 1000; sim_player.duration_s = 201;
+    snprintf(sim_player.id, sizeof(sim_player.id), "%s", id); ++sim_player.revision; return true;
+}
 bool m3_tube_play(const char *id, unsigned start) {
+    sim_player.audio_only = false;
     sim_player.active = true; sim_player.video = true; sim_player.position_ms = 63000 + start * 1000; sim_player.duration_s = 201;
     snprintf(sim_player.id, sizeof(sim_player.id), "%s", id); ++sim_player.revision; return true;
 }
@@ -107,6 +163,14 @@ const uint8_t *m3_tube_frame(void) { return sim_player.active ? sim_frame : NULL
 static lv_display_t *display;
 static uint16_t frame[480 * 800];
 static int sim_lang = -1;
+static m3_preferences_t sim_preferences = {1,100,30,1,0,40,40,0};
+bool m3_preferences_restarting(void) { return false; }
+void m3_preferences_get(m3_preferences_t *out) { *out = sim_preferences; }
+bool m3_preferences_update(const m3_preferences_t *p) { sim_preferences = *p; return true; }
+void m3_preferences_volume(unsigned value) { sim_preferences.volume=value; if(value)sim_preferences.last_volume=value; }
+unsigned m3_preferences_frame_ms(unsigned fps) { return (1000+fps-1)/fps; }
+m3_mode_result_t m3_preferences_request_mode(bool focus) { sim_preferences.web_focus=focus; return M3_MODE_OK; }
+esp_err_t m3_board_set_brightness(unsigned value) { (void)value; return ESP_OK; }
 lv_display_t *m3_board_display(void) { return display; }
 bool m3_board_touch_ready(void) { return true; }
 bool lvgl_port_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
@@ -132,10 +196,13 @@ bool network_settings_valid(const network_settings_t *settings) { return setting
 /* Service mocks. The scenario selects online/offline and busy states. */
 static bool sim_online = true, sim_playing = true, sim_agent_busy, sim_voice_recording = true, sim_voice_busy;
 static const char *sim_audio_message;
+static m3_recorder_state_t sim_recorder;
+static bool sim_sd_ready = true;
 static bool sim_ipv6_ready = true;
 void m3_runtime_state(m3_runtime_state_t *out) {
     memset(out, 0, sizeof(*out));
-    out->initialized = out->web = out->sd = out->wifi_ready = true;
+    out->initialized = out->web = out->wifi_ready = true;
+    out->sd = sim_sd_ready;
     out->cloud = sim_online;
     out->mode = sim_online ? NET_MODE_STA_CONNECTED : NET_MODE_AP_CAPTIVE;
     out->rssi = -58; out->requests = 42;
@@ -158,6 +225,7 @@ void m3_runtime_state(m3_runtime_state_t *out) {
         out->networks[i].rssi = (int8_t)rssi[i]; out->networks[i].authmode = i == 2 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
     }
     snprintf(out->settings.ssid, sizeof(out->settings.ssid), "KT_GiGA_5G_Home");
+    out->wifi_password_saved = true;
     snprintf(out->settings.netmask, sizeof(out->settings.netmask), "255.255.255.0");
     out->browse_sd = true; out->file_revision = 1;
     snprintf(out->folder, sizeof(out->folder), "/media");
@@ -185,13 +253,22 @@ void m3_audio_state(m3_audio_state_t *out) {
         sim_playing ? "Radio / MP3 / net 412 KiB / PCM 740 ms / gaps 0" : "Ready / PCM16 WAV");
 }
 bool m3_audio_play(const char *name) { (void)name; return true; }
-bool m3_audio_test(void) { return true; }
+bool m3_audio_record(void) {
+    sim_recorder.busy = sim_recorder.recording = true; sim_recorder.level = 52; return true;
+}
+bool m3_audio_recording_play(const char *name) { (void)name; return true; }
+void m3_recorder_state(m3_recorder_state_t *out) { *out = sim_recorder; }
+void m3_recorder_finish(void) {
+    sim_recorder.busy = sim_recorder.recording = false; sim_recorder.saved = true;
+    sim_recorder.level = 0; snprintf(sim_recorder.filename, sizeof(sim_recorder.filename), "rec_20261014_120000_12345678.wav");
+    snprintf(sim_recorder.message, sizeof(sim_recorder.message), "Recording saved");
+}
 bool m3_audio_radio(const char *url, bool aac) { (void)url; (void)aac; return true; }
 void m3_audio_tts_provider(unsigned provider) { (void)provider; }
 bool m3_audio_speak(const char *text, unsigned speed) { (void)text; (void)speed; return true; }
 bool m3_audio_voice(void) { return true; }
 void m3_audio_stop(void) {}
-void m3_audio_volume(unsigned percent) { sim_volume = percent; }
+void m3_audio_volume(unsigned percent) { sim_volume = percent; m3_preferences_volume(percent); }
 void m3_voice_state(m3_voice_state_t *out) {
     memset(out, 0, sizeof(*out)); out->key_ready = true; out->revision = 3; out->recording = sim_voice_recording; out->busy = sim_voice_busy;
     snprintf(out->text, sizeof(out->text), "%s", "내일 날씨 알려줘");
@@ -286,3 +363,15 @@ int main(int argc, char **argv) {
     run_scenarios(dir);
     return 0;
 }
+
+/* Gallery fixtures do not decode media or use SD hardware. */
+esp_err_t m3_gallery_start(void) { return ESP_OK; }
+bool m3_gallery_supported(const char *name) { const char *ext = strrchr(name, '.'); return ext && (!strcmp(ext, ".png") || !strcmp(ext, ".jpg") || !strcmp(ext, ".avi") || !strcmp(ext, ".mp4")); }
+bool m3_gallery_open(const char *path) { (void)path; return true; }
+void m3_gallery_close(void) {}
+void m3_gallery_audio_cancel(void) {}
+void m3_gallery_pause(void) {}
+bool m3_gallery_active(void) { return false; }
+void m3_gallery_state(m3_gallery_state_t *out) { memset(out, 0, sizeof(*out)); out->status = M3_GALLERY_IDLE; }
+const uint8_t *m3_gallery_frame(void) { return NULL; }
+bool m3_runtime_file_action(bool sd, const char *a, const char *b, bool remove) { (void)sd; (void)a; (void)b; (void)remove; return true; }

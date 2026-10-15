@@ -46,6 +46,7 @@ node tools/test_dma_memory.cjs
 node tools/test_memory_budget.cjs
 node tools/test_radio_buffer.cjs
 node tools/test_audio_output.cjs
+node tools/test_recorder.cjs
 node tools/test_voice_input.cjs
 node tools/test_cloud_speech.cjs
 node tools/test_tube.cjs
@@ -96,3 +97,65 @@ DMA 버퍼를 무조건 확대하지 않는다.
 보고 형식은 “변경 / 호스트 검사 / PC 화면 확인 / 사용자 펌웨어 빌드 /
 실기 결과 / 남은 확인”으로 구분한다. 미실행·모의 결과·기존 map 추정치를
 실기 성공으로 표현하지 않는다.
+
+## MP4 추가 후 앱 크기 초과 (2026-10-15)
+
+사용자 로그에서 MP4 포함 이미지가 `0x40ac00` (4,238,336바이트)로 생성됐으나
+4 MiB OTA 앱 슬롯을 44,032바이트 초과해 크기 검사에서 실패했다. 앞부분의 빌드·플래시
+성공 기록은 이전 이미지이며 MP4 포함 이미지의 설치 성공을 뜻하지 않는다.
+
+관리자와 AI 스튜디오 페이지를 gzip 정적 데이터로 제공한다. 내용·인증·API는 유지하며
+브라우저가 압축을 해제한다. 원본 C 문자열은 편집과 기존 검사에 남기고 서버에서는
+참조하지 않아 링크 시 제거된다. 원본 데이터 179,309바이트가 53,007바이트가 되어
+126,302바이트 줄었다. 이는 데이터 계산이며 최종 이미지 감소량은 링크·정렬에 따라 달라진다.
+파티션과 NVS/SD 데이터는 변경하지 않는다. 실시간 디코더의 최적화 설정도 유지한다.
+
+`tools/generate_web_gzip.py`는 Python 표준 라이브러리만 사용한다. CMake 구성 시 실행하며
+원본 페이지와 SD 관리자 매크로가 바뀌면 자동으로 다시 생성한다. 바이너리 데이터는
+문자열 길이 대신 명시적 길이를 사용해 2 KiB 단위로 전송한다.
+
+`node tools/test_web_gzip.cjs`는 원본과 압축 해제 결과의 바이트 일치, CRC 오류,
+분할 전송·실패, 인증 유지와 컴파일러 없는 CMake 재생성 fixture를 검사한다.
+이 검사에는 CMake와 Python 경로가 필요하다. 기존 대시보드·AI 스튜디오 검사도 통과했다.
+사용자는 다시 `idf.py build`를 실행해 앱 슬롯 크기 검사 통과를 확인한 뒤 설치하고,
+Chrome에서 관리자·AI 로그인과 MP4 재생을 확인한다. 새 펌웨어 빌드·브라우저·실기 결과는 아직 없다.
+
+
+## 유튜브 서버 상태·화질·SD 저장 (2026-10-15)
+
+앱 진입 시 별도 서버 상태를 조회한다. 목록 작업이 없을 때도 작업 큐를 500ms마다
+확인하므로 첫 검색 전 상태 확인이 가능하다. 인증 거절, 구버전 중계 서버,
+PC 도구 누락과 터널 연결 실패를 구분한다. 요청은 15초 간격으로 제한하며
+45초 넘게 갱신하지 못하면 화면에서 오래된 연결됨 표시를 제거한다.
+
+화질은 저화질(기본, 8fps)·표준(12fps)·고화질(15fps)이다. 고정 480x272
+RGB565 화면과 JPEG 디코더는 유지하고 PC가 세부 묘사와 JPEG 압축을 조절한다.
+선택 화질은 이번 실행 동안 유지하며 NVS 설정 형식은 변경하지 않는다.
+합성 3초 영상의 전송량은 270183/397251/508817바이트였다. 실제 YouTube 영상의
+대역폭이나 보드에서의 버퍼링 개선 비율을 뜻하지 않는다.
+
+SD 저장 작업은 내부 스택 10240바이트, PSRAM 전송 버퍼 8192바이트를 사용한다.
+PC 준비 중에는 SD 잠금을 잡지 않고, 전송과 파일 commit 동안에만 잠금을 유지한다.
+HTTP 헤더의 길이와 실제 전송량, 여유 공간, flush/fsync/close/rename 결과를 확인한다.
+취소와 오류는 해당 작업의 부분 파일만 제거한다. SD에는 H.264 Baseline과 AAC-LC
+MP4를 저장하고 기존 파일 앱·갤러리로 재생한다. PC 전용 변환 작업은 단일 실행이며
+30분 이하 영상·파일 512MiB·캐시 12개와 약 1GiB 상한을 둔다.
+
+호스트 검사:
+- `node tools/test_tube.cjs`
+- `node tools/test_tube_status.cjs`
+- `node tools/test_tube_download.cjs`
+- `node tools/test_preferences.cjs` 및 `node tools/test_device_settings.cjs`
+- `node tools/test_file_actions.cjs`
+- `node tools/test_touch_apps.cjs`, `node tools/test_i18n.cjs`, `node tools/test_japanese.cjs`
+- `tube-relay`에서 `npm test`, FFmpeg/FFprobe가 있는 환경에서 `npm run test:media`
+
+위 검사는 펌웨어 컴파일이나 SD카드 실기 검증이 아니다. PC 시뮬레이터에는
+화질·저장 진행·서버 오프라인 시나리오를 추가했지만 네이티브 컴파일과
+새 한국어·영어 화면 렌더링은 실행하지 않았다. 프로젝트 규칙상 사용자 빌드가 필요하다.
+M3 폴더에서 `.\m3.ps1 -Action Build`로 빌드한 뒤 사용 중인 COM 포트로 업로드한다.
+
+실기에서는 PC 종료/터널 단절/토큰 불일치와 복구 표시, 세 화질 재연결, SD 용량 부족,
+준비·전송 중 취소, 완료 후 재부팅, Wi-Fi와 PC를 끈 상태의 저장 MP4 음성·영상 재생,
+SD 파일 관리와 녹음·클라우드 업로드 간의 잠금, 설정 재시작 거절을 확인한다.
+최소 내부 힙·최대 DMA 블록·각 작업의 스택 여유도 함께 기록한다.

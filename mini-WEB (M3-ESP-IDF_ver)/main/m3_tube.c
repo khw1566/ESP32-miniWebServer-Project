@@ -8,6 +8,10 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_vfs_fat.h"
+#include "sd_media.h"
+#include "m3_preferences.h"
+#include "m3_utf8.h"
 #include "esp_log.h"
 #include "driver/jpeg_decode.h"
 #include "cJSON.h"
@@ -20,14 +24,25 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
 static const char *TAG = "M3_TUBE";
 enum {
     THUMB_BYTES = M3_TUBE_THUMB_W * M3_TUBE_THUMB_H * 2, FRAME_BYTES = M3_TUBE_VIDEO_W * M3_TUBE_VIDEO_H * 2,
-    JSON_LIMIT = 32 * 1024, FRAME_SLOTS = 5, RING_BYTES = 2 * 1024 * 1024, PREBUFFER_BYTES = 512 * 1024,
-    REBUFFER_BYTES = 256 * 1024, READ_BYTES = 8192, JPEG_LIMIT = 192 * 1024, AUDIO_LIMIT = 8192, INFO_LIMIT = 2048,
-    /* 6 DMA descriptors x 240 frames: queued-output duration at 24 kHz. */
-    OUTPUT_LATENCY_MS = 60,
+    JSON_LIMIT = 32 * 1024, FRAME_SLOTS = 5, RING_BYTES = 4 * 1024 * 1024, READ_BYTES = 8192,
+    /* Start soon, but refill more after a stall so playback does not stutter on and off.
+     * Video is about 2 Mbps (~250 KB/s); music is 32 kHz mono PCM (64 KB/s). */
+    VIDEO_PREBUFFER_BYTES = 384 * 1024, VIDEO_REBUFFER_BYTES = 1024 * 1024,
+    LOW_PREBUFFER_BYTES = 128 * 1024, LOW_REBUFFER_BYTES = 384 * 1024,
+    STANDARD_PREBUFFER_BYTES = 256 * 1024, STANDARD_REBUFFER_BYTES = 768 * 1024,
+    MUSIC_PREBUFFER_BYTES = 96 * 1024, MUSIC_REBUFFER_BYTES = 256 * 1024,
+    JPEG_LIMIT = 192 * 1024, AUDIO_LIMIT = 8192, INFO_LIMIT = 2048,
+    /* 6 DMA descriptors x 240 frames: queued output, converted to ms at the stream rate. */
+    OUTPUT_FRAMES = 6 * 240,
 };
 /* M3TV packet header: u8 type, u8 flags, u16 reserved, u32 pts_ms, u32 length (little endian). */
 enum { PACKET_INFO = 1, PACKET_VIDEO, PACKET_AUDIO, PACKET_END, PACKET_WAIT };
@@ -61,25 +76,51 @@ static void copy_text(char *out, size_t size, const cJSON *value) {
         if (length - (lead - 1) < need) out[lead - 1] = 0;
     }
 }
-/* The relay lease waits for the persistent cloud relay to yield its TLS memory.
- * Playback holds it for the whole video, so listings retry briefly after a stop. */
-static bool lease_tls(uint32_t timeout_ms) {
-    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
-    do {
-        if (https_memory_exclusive_begin(1000)) return true;
-        vTaskDelay(pdMS_TO_TICKS(100));
-    } while (esp_timer_get_time() < deadline);
-    return false;
+/* Asks the persistent cloud relay to yield its TLS session. The relay only notices
+ * between requests and its long poll lasts up to 20 s (right after boot it is also
+ * handshaking), so waiting for it made YouTube report "HTTPS busy". TLS buffers are
+ * in PSRAM (MBEDTLS_EXTERNAL_MEM_ALLOC), so a concurrent session is allowed when
+ * internal RAM still has headroom. *owned tells the caller whether to end the lease. */
+static bool lease_tls(uint32_t timeout_ms, bool *owned) {
+    *owned = https_memory_exclusive_begin(timeout_ms);
+    if (*owned) return true;
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= 48 * 1024 &&
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= 16 * 1024;
 }
 
 /* ---------- Listings and thumbnails ---------- */
-typedef struct { bool channel; unsigned page; char text[128]; } list_request_t;
+typedef struct { bool channel, music; unsigned page; char text[128]; } list_request_t;
 typedef struct { uint8_t *data; size_t capacity, length; bool overflow; } sink_t;
 static QueueHandle_t list_requests;
 static SemaphoreHandle_t list_lock;
-static M3_PSRAM_BSS m3_tube_list_t list;
+static M3_PSRAM_BSS m3_tube_list_t list, music_list;
 static uint8_t *thumb_sets[2];
 static uint8_t *json_buffer;
+static atomic_int selected_quality = ATOMIC_VAR_INIT(M3_TUBE_LOW);
+static const char *quality_name(unsigned quality) {
+    return quality == M3_TUBE_HIGH ? "high" : quality == M3_TUBE_STANDARD ? "standard" : "low";
+}
+void m3_tube_quality(m3_tube_quality_t quality) { if ((unsigned)quality <= M3_TUBE_HIGH) atomic_store(&selected_quality, quality); }
+m3_tube_quality_t m3_tube_get_quality(void) { return (m3_tube_quality_t)atomic_load(&selected_quality); }
+static portMUX_TYPE service_lock = portMUX_INITIALIZER_UNLOCKED;
+static m3_tube_server_t server_state;
+static int64_t server_checked, server_requested;
+static atomic_bool probe_requested;
+void m3_tube_probe(void) {
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&service_lock);
+    bool due = !server_requested || now - server_requested >= 15000000;
+    if (due) server_requested = now;
+    portEXIT_CRITICAL(&service_lock);
+    if (due) atomic_store(&probe_requested, true);
+}
+void m3_tube_server(m3_tube_server_t *out) {
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&service_lock);
+    *out = server_state;
+    out->age_s = server_checked ? (uint32_t)((now - server_checked) / 1000000) : UINT32_MAX;
+    portEXIT_CRITICAL(&service_lock);
+}
 
 static esp_err_t sink_event(esp_http_client_event_t *event) {
     sink_t *sink = event->user_data;
@@ -95,9 +136,48 @@ static int http_get(esp_http_client_handle_t client, sink_t *sink, uint8_t *data
     if (esp_http_client_perform(client) != ESP_OK) return -1;
     return sink->overflow ? -2 : esp_http_client_get_status_code(client);
 }
-static void list_status(m3_tube_list_status_t status, const char *message) {
+static void server_probe_execute(void) {
+    bool owned = false, ready = false;
+    int status = 0;
+    const char *message = "Checking PC server";
+    portENTER_CRITICAL(&service_lock); server_state.checking = true; portEXIT_CRITICAL(&service_lock);
+    if (!m3_tube_configured()) { message = "YouTube relay is not configured"; goto done; }
+    if (network_get_mode() != NET_MODE_STA_CONNECTED) { message = "Connect Wi-Fi first"; goto done; }
+    if (!lease_tls(100, &owned)) { message = "Server check waiting for HTTPS"; goto done; }
+    uint8_t data[512]; sink_t sink = {0};
+    esp_http_client_config_t config = {.url = M3_TUBE_URL "/api/status", .timeout_ms = 5000,
+        .buffer_size = 1024, .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = sink_event, .user_data = &sink};
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) { message = "Relay connection failed"; goto done; }
+    esp_http_client_set_header(client, "x-m3-token", M3_TUBE_TOKEN);
+    status = http_get(client, &sink, data, sizeof(data) - 1, M3_TUBE_URL "/api/status");
+    esp_http_client_cleanup(client);
+    message = status == 401 ? "Relay token rejected; rerun setup and rebuild" :
+        status == 404 ? "Update PC relay for quality and downloads" :
+        status == 530 || status == 502 || status == 503 ? "PC server or tunnel is offline" : "Relay connection failed";
+    if (status == 200) {
+        data[sink.length] = 0;
+        cJSON *root = cJSON_Parse((char *)data);
+        const cJSON *protocol = root ? cJSON_GetObjectItem(root, "protocol") : NULL;
+        const cJSON *service = root ? cJSON_GetObjectItem(root, "service") : NULL;
+        bool compatible = cJSON_IsString(service) && !strcmp(service->valuestring, "m3-tube-relay") &&
+            cJSON_IsNumber(protocol) && protocol->valueint >= 2;
+        ready = compatible && cJSON_IsTrue(cJSON_GetObjectItem(root, "ok"));
+        message = ready ? "PC server ready" : compatible ? "PC yt-dlp or ffmpeg unavailable" : "Update PC relay for quality and downloads";
+        cJSON_Delete(root);
+    }
+done:
+    if (owned) https_memory_exclusive_end();
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&service_lock);
+    server_state.checking = false; server_state.ready = ready; server_state.http_status = status; server_checked = now;
+    snprintf(server_state.message, sizeof(server_state.message), "%s", message);
+    portEXIT_CRITICAL(&service_lock);
+}
+#include "m3_tube_download.inc"
+static void list_status(m3_tube_list_t *target, m3_tube_list_status_t status, const char *message) {
     xSemaphoreTake(list_lock, portMAX_DELAY);
-    list.status = status; snprintf(list.message, sizeof(list.message), "%s", message); ++list.revision;
+    target->status = status; snprintf(target->message, sizeof(target->message), "%s", message); ++target->revision;
     xSemaphoreGive(list_lock);
 }
 static bool parse_listing(const char *text, m3_tube_item_t *items, unsigned *count, bool *more, char *title, size_t title_size) {
@@ -129,43 +209,47 @@ static void list_execute(const list_request_t *request) {
     static M3_PSRAM_BSS m3_tube_item_t items[M3_TUBE_ITEMS];
     static sink_t sink;
     char encoded[3 * sizeof(request->text) + 1], url[640], title[64] = "";
-    unsigned count = 0; bool more = false;
-    if (!m3_tube_configured()) { list_status(M3_TUBE_LIST_ERROR, "YouTube relay is not configured"); return; }
-    if (network_get_mode() != NET_MODE_STA_CONNECTED) { list_status(M3_TUBE_LIST_ERROR, "Connect Wi-Fi first"); return; }
-    if (!lease_tls(6000)) { list_status(M3_TUBE_LIST_ERROR, "HTTPS busy; stop radio or video and retry"); return; }
+    unsigned count = 0; bool more = false, owned = false;
+    m3_tube_list_t *target = request->music ? &music_list : &list;
+    if (!m3_tube_configured()) { list_status(target, M3_TUBE_LIST_ERROR, "YouTube relay is not configured"); return; }
+    if (network_get_mode() != NET_MODE_STA_CONNECTED) { list_status(target, M3_TUBE_LIST_ERROR, "Connect Wi-Fi first"); return; }
+    if (!lease_tls(1500, &owned)) { list_status(target, M3_TUBE_LIST_ERROR, "HTTPS busy; stop radio or video and retry"); return; }
     esp_http_client_config_t config = {
         .url = M3_TUBE_URL "/healthz", .timeout_ms = 30000, .buffer_size = 4096, .keep_alive_enable = true,
         .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = sink_event, .user_data = &sink,
         .user_agent = "Mini-WebServer-M3/1.2",
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) { list_status(M3_TUBE_LIST_ERROR, "Relay connection failed"); goto done; }
+    if (!client) { list_status(target, M3_TUBE_LIST_ERROR, "Relay connection failed"); goto done; }
     esp_http_client_set_header(client, "x-m3-token", M3_TUBE_TOKEN);
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     url_encode(request->text, encoded, sizeof(encoded));
-    snprintf(url, sizeof(url), "%s/api/%s?%s=%s&page=%u", M3_TUBE_URL, request->channel ? "channel" : "search",
-        request->channel ? "id" : "q", encoded, request->page);
+    snprintf(url, sizeof(url), "%s/api/%s?%s=%s&page=%u%s", M3_TUBE_URL, request->channel ? "channel" : "search",
+        request->channel ? "id" : "q", encoded, request->page, request->music ? "&music=1" : "");
     int status = http_get(client, &sink, json_buffer, JSON_LIMIT - 1, url);
     if (status != 200) {
         ESP_LOGW(TAG, "listing HTTP %d", status);
-        list_status(M3_TUBE_LIST_ERROR, status == 401 ? "Relay token rejected; rerun setup and rebuild" :
+        list_status(target, M3_TUBE_LIST_ERROR, status == 401 ? "Relay token rejected; rerun setup and rebuild" :
             status < 0 ? "Relay connection failed" : "Relay search failed; try again");
         goto done;
     }
     json_buffer[sink.length] = 0;
     if (!parse_listing((const char *)json_buffer, items, &count, &more, title, sizeof(title))) {
-        list_status(M3_TUBE_LIST_ERROR, "Relay returned an invalid listing"); goto done;
+        list_status(target, M3_TUBE_LIST_ERROR, "Relay returned an invalid listing"); goto done;
     }
     xSemaphoreTake(list_lock, portMAX_DELAY);
-    memcpy(list.items, items, sizeof(items));
-    list.count = count; list.more = more; list.page = request->page; list.channel = request->channel;
-    snprintf(list.query, sizeof(list.query), "%s", request->text);
-    snprintf(list.title, sizeof(list.title), "%s", title);
-    snprintf(list.message, sizeof(list.message), "%s", count ? "Ready" : "No results");
-    list.status = M3_TUBE_LIST_READY; list.thumbs = 0; list.thumb_set ^= 1; ++list.revision;
+    memcpy(target->items, items, sizeof(items));
+    target->count = count; target->more = more; target->page = request->page; target->channel = request->channel;
+    target->music = request->music;
+    snprintf(target->query, sizeof(target->query), "%s", request->text);
+    snprintf(target->title, sizeof(target->title), "%s", title);
+    snprintf(target->message, sizeof(target->message), "%s", count ? "Ready" : "No results");
+    target->status = M3_TUBE_LIST_READY; target->thumbs = 0; ++target->revision;
+    /* Song lists have no thumbnails, so the video list's double buffer stays untouched. */
+    if (!request->music) list.thumb_set ^= 1;
     uint8_t *set = thumb_sets[list.thumb_set];
     xSemaphoreGive(list_lock);
-    for (unsigned i = 0; i < count; ++i) {
+    for (unsigned i = 0; !request->music && i < count; ++i) {
         if (uxQueueMessagesWaiting(list_requests)) break; /* A newer request replaces this listing. */
         int url_length = snprintf(url, sizeof(url), "%s/api/thumb?id=%.11s&w=%d&h=%d",
             M3_TUBE_URL, items[i].id, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H);
@@ -175,30 +259,37 @@ static void list_execute(const list_request_t *request) {
     }
 done:
     if (client) esp_http_client_cleanup(client);
-    https_memory_exclusive_end();
+    if (owned) https_memory_exclusive_end();
 }
 static void list_worker(void *unused) {
     (void)unused;
     list_request_t request;
-    for (;;) if (xQueueReceive(list_requests, &request, portMAX_DELAY) == pdTRUE) list_execute(&request);
+    for (;;) {
+        if (xQueueReceive(list_requests, &request, pdMS_TO_TICKS(500)) == pdTRUE) list_execute(&request);
+        if (atomic_exchange(&probe_requested, false)) server_probe_execute();
+    }
 }
-static bool list_enqueue(bool channel, const char *text, unsigned page) {
+static bool list_enqueue(bool channel, bool music, const char *text, unsigned page) {
     if (!list_requests || !text || !text[0] || page < 1 || page > 20) return false;
-    list_request_t request = {.channel = channel, .page = page};
+    list_request_t request = {.channel = channel, .music = music, .page = page};
     snprintf(request.text, sizeof(request.text), "%s", text);
+    m3_tube_list_t *target = music ? &music_list : &list;
     xSemaphoreTake(list_lock, portMAX_DELAY);
-    list.status = M3_TUBE_LIST_LOADING; snprintf(list.message, sizeof(list.message), "Loading..."); ++list.revision;
+    target->status = M3_TUBE_LIST_LOADING; snprintf(target->message, sizeof(target->message), "Loading..."); ++target->revision;
     xSemaphoreGive(list_lock);
     return xQueueOverwrite(list_requests, &request) == pdTRUE;
 }
-bool m3_tube_search(const char *query, unsigned page) { return list_enqueue(false, query, page); }
+bool m3_tube_search(const char *query, unsigned page) { return list_enqueue(false, false, query, page); }
+bool m3_tube_music_search(const char *query, unsigned page) { return list_enqueue(false, true, query, page); }
 bool m3_tube_channel(const char *channel_id, unsigned page) {
-    return channel_id && strlen(channel_id) == 24 && !strncmp(channel_id, "UC", 2) && list_enqueue(true, channel_id, page);
+    return channel_id && strlen(channel_id) == 24 && !strncmp(channel_id, "UC", 2) && list_enqueue(true, false, channel_id, page);
 }
-void m3_tube_list(m3_tube_list_t *out) {
+static void list_copy(m3_tube_list_t *out, const m3_tube_list_t *source) {
     if (!list_lock) { memset(out, 0, sizeof(*out)); return; }
-    xSemaphoreTake(list_lock, portMAX_DELAY); *out = list; xSemaphoreGive(list_lock);
+    xSemaphoreTake(list_lock, portMAX_DELAY); *out = *source; xSemaphoreGive(list_lock);
 }
+void m3_tube_list(m3_tube_list_t *out) { list_copy(out, &list); }
+void m3_tube_music_list(m3_tube_list_t *out) { list_copy(out, &music_list); }
 const uint8_t *m3_tube_thumb(const m3_tube_list_t *copy, unsigned index) {
     if (!copy || index >= M3_TUBE_ITEMS || !(copy->thumbs & (1u << index)) || !thumb_sets[copy->thumb_set & 1]) return NULL;
     return thumb_sets[copy->thumb_set & 1] + index * THUMB_BYTES;
@@ -272,7 +363,10 @@ void m3_tube_player(m3_tube_player_t *out) {
 }
 void m3_tube_pause(bool value) { atomic_store(&paused, value); }
 bool m3_tube_play(const char *id, unsigned start_seconds) {
-    return m3_tube_configured() && video_id_valid(id) && start_seconds < 86400 && m3_audio_tube(id, start_seconds);
+    return m3_tube_configured() && video_id_valid(id) && start_seconds < 86400 && m3_audio_tube(id, start_seconds, false);
+}
+bool m3_tube_play_audio(const char *id, unsigned start_seconds) {
+    return m3_tube_configured() && video_id_valid(id) && start_seconds < 86400 && m3_audio_tube(id, start_seconds, true);
 }
 static void player_update(bool buffering, unsigned percent, unsigned position_ms) {
     portENTER_CRITICAL(&player_lock);
@@ -315,6 +409,8 @@ typedef struct {
     tube_rx_t *rx;
     const m3_audio_output_t *out;
     unsigned start_ms;
+    size_t prebuffer, rebuffer;
+    bool music; /* YouTube Music session: status messages say "Music" */
 } tube_play_t;
 /* Waits for buffered data; while waiting the clock stands still (I2S plays silence). */
 static bool wait_buffer(tube_play_t *play, size_t target, unsigned position_ms) {
@@ -326,7 +422,7 @@ static bool wait_buffer(tube_play_t *play, size_t target, unsigned position_ms) 
         if (done) return false;
         unsigned percent = (unsigned)(available * 100 / target);
         if (esp_timer_get_time() - last_message > 250000) {
-            char text[64]; snprintf(text, sizeof(text), "Video buffering / %u%%", percent);
+            char text[64]; snprintf(text, sizeof(text), play->music ? "Music buffering / %u%%" : "Video buffering / %u%%", percent);
             play->out->message(text, true, percent); player_update(true, percent, position_ms);
             last_message = esp_timer_get_time();
         }
@@ -341,7 +437,7 @@ static bool read_exact(tube_play_t *play, void *buffer, size_t length, unsigned 
         size_t received = xStreamBufferReceive(play->rx->stream, (uint8_t *)buffer + got, length - got, pdMS_TO_TICKS(20));
         got += received;
         if (!received && !xStreamBufferBytesAvailable(play->rx->stream) &&
-            !wait_buffer(play, atomic_load(&play->rx->done) ? 1 : REBUFFER_BYTES, position_ms)) return false;
+            !wait_buffer(play, atomic_load(&play->rx->done) ? 1 : play->rebuffer, position_ms)) return false;
     }
     return true;
 }
@@ -354,11 +450,12 @@ static bool skip_bytes(tube_play_t *play, size_t length, unsigned position_ms) {
     }
     return true;
 }
-static void apply_info(const char *text, unsigned *rate, bool *video, bool *audio, unsigned *start_s) {
+static void apply_info(const char *text, unsigned *rate, unsigned *channels, bool *video, bool *audio, unsigned *start_s) {
     cJSON *root = cJSON_Parse(text);
     if (!root) return;
     const cJSON *value;
     if (cJSON_IsNumber(value = cJSON_GetObjectItem(root, "rate"))) *rate = (unsigned)value->valuedouble;
+    if (cJSON_IsNumber(value = cJSON_GetObjectItem(root, "ch"))) *channels = (unsigned)value->valuedouble;
     if ((value = cJSON_GetObjectItem(root, "video"))) *video = cJSON_IsTrue(value);
     if ((value = cJSON_GetObjectItem(root, "audio"))) *audio = cJSON_IsTrue(value);
     if (cJSON_IsNumber(value = cJSON_GetObjectItem(root, "start"))) *start_s = (unsigned)value->valuedouble;
@@ -375,24 +472,34 @@ static void apply_info(const char *text, unsigned *rate, bool *video, bool *audi
     portEXIT_CRITICAL(&player_lock);
     cJSON_Delete(root);
 }
-void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t *out) {
+/* Mono 16-bit PCM -> interleaved stereo in place; the buffer holds twice the input. */
+static void mono_to_stereo(int16_t *samples, unsigned frames) {
+    for (unsigned i = frames; i-- > 0;) samples[2 * i] = samples[2 * i + 1] = samples[i];
+}
+void m3_tube_run(const char *id, unsigned start_seconds, bool audio_only, const m3_audio_output_t *out) {
     const char *error = "Video connection failed";
-    bool leased = false, ps_changed = false, receiver_started = false, codec_open = false, ended = false;
+    bool leased = false, lease_owned = false, ps_changed = false, receiver_started = false, codec_open = false, ended = false;
     wifi_ps_type_t previous_ps = WIFI_PS_NONE;
     esp_http_client_handle_t http = NULL;
     uint8_t *pcm = NULL;
     char *info = NULL;
+    unsigned quality = atomic_load(&selected_quality);
     tube_rx_t rx = {.stop = ATOMIC_VAR_INIT(false), .done = ATOMIC_VAR_INIT(false)};
-    tube_play_t play = {.rx = &rx, .out = out, .start_ms = start_seconds * 1000};
+    tube_play_t play = {.rx = &rx, .out = out, .start_ms = start_seconds * 1000,
+        .prebuffer = audio_only ? MUSIC_PREBUFFER_BYTES : quality == M3_TUBE_LOW ? LOW_PREBUFFER_BYTES :
+            quality == M3_TUBE_STANDARD ? STANDARD_PREBUFFER_BYTES : VIDEO_PREBUFFER_BYTES,
+        .rebuffer = audio_only ? MUSIC_REBUFFER_BYTES : quality == M3_TUBE_LOW ? LOW_REBUFFER_BYTES :
+            quality == M3_TUBE_STANDARD ? STANDARD_REBUFFER_BYTES : VIDEO_REBUFFER_BYTES, .music = audio_only};
     portENTER_CRITICAL(&player_lock);
     memset(&player, 0, sizeof(player)); player.active = player.buffering = true; player.position_ms = play.start_ms;
+    player.audio_only = audio_only;
     snprintf(player.id, sizeof(player.id), "%s", id); ++player.revision;
     portEXIT_CRITICAL(&player_lock);
     atomic_store(&paused, false); atomic_store(&clock_ms, -1); frames_reset();
     out->message("Video connecting...", true, 0);
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { error = "Connect Wi-Fi first"; goto done; }
-    if (!frames_ready()) { error = "Video decoder memory unavailable"; goto done; }
-    leased = !strncmp(M3_TUBE_URL, "https://", 8) ? lease_tls(5000) : true;
+    if (!audio_only && !frames_ready()) { error = "Video decoder memory unavailable"; goto done; }
+    leased = !strncmp(M3_TUBE_URL, "https://", 8) ? lease_tls(1500, &lease_owned) : true;
     if (!leased) { error = "HTTPS busy; stop radio or video and retry"; goto done; }
     if (esp_wifi_get_ps(&previous_ps) == ESP_OK && previous_ps != WIFI_PS_NONE) ps_changed = esp_wifi_set_ps(WIFI_PS_NONE) == ESP_OK;
     rx.storage = heap_caps_malloc(RING_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -401,7 +508,8 @@ void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t
     info = heap_caps_malloc(INFO_LIMIT + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!rx.storage || !rx.chunk || !pcm || !info) { error = "Video buffer allocation failed"; goto done; }
     rx.stream = xStreamBufferCreateStatic(RING_BYTES + 1, 1, rx.storage, &rx.control);
-    char url[192]; snprintf(url, sizeof(url), "%s/api/play?id=%s&t=%u", M3_TUBE_URL, id, start_seconds);
+    char url[256]; snprintf(url, sizeof(url), "%s/api/play?id=%s&t=%u%s&quality=%s", M3_TUBE_URL, id, start_seconds,
+        audio_only ? "&audio=1" : "", quality_name(quality));
     esp_http_client_config_t config = {
         .url = url, .timeout_ms = 15000, .buffer_size = 4096, .crt_bundle_attach = esp_crt_bundle_attach,
         .user_agent = "Mini-WebServer-M3/1.2",
@@ -418,14 +526,14 @@ void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t
     if (xTaskCreatePinnedToCore(tube_receive, "m3_tube_rx", 8192, &rx, 5, NULL, 0) != pdPASS) { error = "Video task allocation failed"; goto done; }
     receiver_started = true;
 
-    unsigned rate = 24000, position_ms = play.start_ms;
-    bool video = true, audio = true, started = false;
+    unsigned rate = 24000, channels = 2, latency_ms = 60, position_ms = play.start_ms;
+    bool video = !audio_only, audio = true, started = false;
     uint64_t written_us = 0;   /* stream time written to I2S */
     int64_t video_epoch = 0;   /* video-only clock origin */
     int64_t last_status = 0;
     for (;;) {
         uint8_t header[12];
-        if (!started && !wait_buffer(&play, PREBUFFER_BYTES, position_ms)) { if (!out->cancelled()) error = rx.error ? rx.error : "Video ended before buffering"; break; }
+        if (!started && !wait_buffer(&play, play.prebuffer, position_ms)) { if (!out->cancelled()) error = rx.error ? rx.error : "Video ended before buffering"; break; }
         if (!read_exact(&play, header, sizeof(header), position_ms)) { error = rx.error ? rx.error : "Video stream ended"; ended = !rx.error; break; }
         unsigned type = header[0];
         uint32_t pts = header[4] | header[5] << 8 | header[6] << 16 | (uint32_t)header[7] << 24;
@@ -443,9 +551,11 @@ void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t
                 cJSON_Delete(root);
                 break;
             }
-            apply_info(info, &rate, &video, &audio, &start_seconds);
+            apply_info(info, &rate, &channels, &video, &audio, &start_seconds);
+            if (audio_only || !jpeg) video = false;
             play.start_ms = start_seconds * 1000;
-            if (rate < 8000 || rate > 48000) { error = "Video stream format error"; break; }
+            if (rate < 8000 || rate > 48000 || (channels != 1 && channels != 2)) { error = "Video stream format error"; break; }
+            latency_ms = OUTPUT_FRAMES * 1000 / rate;
             if (audio) { if (!out->begin(rate)) { error = "Codec open failed"; break; } codec_open = true; }
             started = true; video_epoch = esp_timer_get_time();
             continue;
@@ -453,19 +563,22 @@ void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t
         if (!started) { error = "Video stream format error"; break; }
         while (atomic_load(&paused) && !out->cancelled()) {
             int64_t paused_at = esp_timer_get_time();
-            if (esp_timer_get_time() - last_status > 500000) { out->message("Video paused", true, 0); last_status = esp_timer_get_time(); }
+            if (esp_timer_get_time() - last_status > 500000) { out->message(audio_only ? "Music paused" : "Video paused", true, 0); last_status = esp_timer_get_time(); }
             vTaskDelay(pdMS_TO_TICKS(50));
             video_epoch += esp_timer_get_time() - paused_at;
         }
         if (type == PACKET_AUDIO) {
-            if (length > AUDIO_LIMIT || length % 4) { error = "Video stream format error"; break; }
+            /* Mono packets (half the bandwidth) are widened to the stereo I2S format here. */
+            if (length > AUDIO_LIMIT / (3 - channels) || length % (2 * channels)) { error = "Video stream format error"; break; }
             if (!read_exact(&play, pcm, length, position_ms)) break;
-            if (!audio || !out->write(pcm, length)) { if (out->cancelled()) break; continue; }
-            written_us = (uint64_t)pts * 1000 + (uint64_t)length * 1000000 / (rate * 4);
-            int now = (int)(written_us / 1000) - OUTPUT_LATENCY_MS;
+            unsigned frames = length / (2 * channels);
+            if (channels == 1) mono_to_stereo((int16_t *)pcm, frames);
+            if (!audio || !out->write(pcm, frames * 4)) { if (out->cancelled()) break; continue; }
+            written_us = (uint64_t)pts * 1000 + (uint64_t)frames * 1000000 / rate;
+            int now = (int)(written_us / 1000) - (int)latency_ms;
             atomic_store(&clock_ms, now < 0 ? 0 : now);
         } else if (type == PACKET_VIDEO) {
-            if (length > jpeg_input_size || !video) { if (!skip_bytes(&play, length, position_ms)) break; continue; }
+            if (!video || length > jpeg_input_size) { if (!skip_bytes(&play, length, position_ms)) break; continue; }
             if (!read_exact(&play, jpeg_input, length, position_ms)) break;
             if (!audio) { /* Pace video-only streams with the wall clock. */
                 int64_t due = video_epoch + (int64_t)pts * 1000;
@@ -486,7 +599,7 @@ void m3_tube_run(const char *id, unsigned start_seconds, const m3_audio_output_t
         position_ms = play.start_ms + (now > 0 ? (unsigned)now : 0);
         if (esp_timer_get_time() - last_status > 500000) {
             m3_tube_player_t snapshot; m3_tube_player(&snapshot);
-            out->message("Video playing", true, snapshot.duration_s ? position_ms / 10 / snapshot.duration_s : 0);
+            out->message(audio_only ? "Music playing" : "Video playing", true, snapshot.duration_s ? position_ms / 10 / snapshot.duration_s : 0);
             player_update(false, 100, position_ms);
             last_status = esp_timer_get_time();
         }
@@ -501,10 +614,13 @@ done:
     if (http) { esp_http_client_close(http); esp_http_client_cleanup(http); }
     free(rx.storage); free(rx.chunk); free(pcm); free(info);
     if (ps_changed) esp_wifi_set_ps(previous_ps);
-    if (leased && !strncmp(M3_TUBE_URL, "https://", 8)) https_memory_exclusive_end();
+    if (lease_owned) https_memory_exclusive_end();
     frames_reset();
-    portENTER_CRITICAL(&player_lock); player.active = false; player.buffering = false; ++player.revision; portEXIT_CRITICAL(&player_lock);
-    out->message(out->cancelled() ? "Video stopped" : ended ? "Video ended" : error, false, ended ? 100 : 0);
+    portENTER_CRITICAL(&player_lock);
+    player.active = false; player.buffering = false; player.ended = ended && !out->cancelled(); ++player.revision;
+    portEXIT_CRITICAL(&player_lock);
+    out->message(out->cancelled() ? (audio_only ? "Music stopped" : "Video stopped") :
+        ended ? (audio_only ? "Music ended" : "Video ended") : error, false, ended ? 100 : 0);
 }
 
 esp_err_t m3_tube_start(void) {

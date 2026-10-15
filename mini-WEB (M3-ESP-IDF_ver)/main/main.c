@@ -1,9 +1,12 @@
 #include "m3_board.h"
+#include "m3_boot_splash.h"
 #include "m3_ui.h"
 #include "m3_audio.h"
 #include "m3_runtime.h"
 #include "m3_agent.h"
 #include "m3_tube.h"
+#include "m3_gallery.h"
+#include "m3_preferences.h"
 #include "web_server.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -26,11 +29,25 @@ void app_main(void) {
     gpio_config_t boot = {.pin_bit_mask = 1ULL << 35, .mode = GPIO_MODE_INPUT, .pull_up_en = true};
     ESP_ERROR_CHECK(gpio_config(&boot));
     bool force_setup = gpio_get_level(35) == 0;
+    esp_err_t settings_error = m3_preferences_init();
+    if (settings_error != ESP_OK) ESP_LOGW("M3", "Device settings unavailable: %s", esp_err_to_name(settings_error));
+    m3_preferences_boot_mode(force_setup);
+    if (m3_preferences_web_active()) {
+        gpio_set_direction(M3_LCD_BACKLIGHT, GPIO_MODE_OUTPUT); gpio_set_level(M3_LCD_BACKLIGHT, 0);
+        gpio_set_direction(M3_AMP_ENABLE, GPIO_MODE_OUTPUT); gpio_set_level(M3_AMP_ENABLE, 0);
+        ESP_LOGI("M3", "Web focus: display, audio and application workers are disabled");
+        ESP_ERROR_CHECK(m3_runtime_start(false));
+        return;
+    }
     err = m3_board_init();
     if (err == ESP_OK) {
+        if (m3_boot_splash_start() != ESP_OK) ESP_LOGW("M3", "Boot splash skipped");
+        m3_boot_splash_step(M3_BOOT_WORKERS);
         if (m3_agent_start() != ESP_OK) ESP_LOGW("M3", "Agent task unavailable");
         if (m3_audio_start() != ESP_OK) ESP_LOGW("M3", "Audio task unavailable");
         if (m3_tube_start() != ESP_OK) ESP_LOGW("M3", "YouTube worker unavailable");
+        if (m3_gallery_start() != ESP_OK) ESP_LOGW("M3", "Gallery worker unavailable");
+        m3_boot_splash_step(M3_BOOT_UI);
         if (m3_ui_start() != ESP_OK) ESP_LOGW("M3", "UI unavailable");
     } else ESP_LOGE("M3", "Display failed: %s; continuing web setup", esp_err_to_name(err));
     /* File mount, C6 boot and Wi-Fi retries must not hold the LVGL mutex. */

@@ -1,13 +1,21 @@
+#include "m3_sd_apps.h"
 #include "m3_music.h"
 #include "m3_photos.h"
+#include "m3_audio.h"
+#include "m3_recorder.h"
+#include "m3_gallery.h"
 #include "m3_runtime.h"
 #include "web_server.h"
 #include "sd_media.h"
+#include "m3_preferences.h"
 #include "cloud_relay.h"
 #include "dns_server.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_ipc.h"
+#include "m3_boot_splash.h"
 #include "esp_netif_sntp.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -15,14 +23,45 @@
 #include <stdio.h>
 #include <stdatomic.h>
 typedef struct { bool sd; unsigned offset; char folder[256]; } browse_t;
-typedef struct { m3_wifi_action_t action; network_settings_t settings; } wifi_request_t;
+typedef struct { m3_wifi_action_t action; network_settings_t settings; bool retry; } wifi_request_t;
 static QueueHandle_t browse_queue;
 static QueueHandle_t wifi_queue;
+typedef struct { char source[256], destination[256]; bool remove, sd; } mutation_t;
+static QueueHandle_t mutation_queue;
+static atomic_bool mutation_pending;
 static atomic_bool wifi_pending;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_runtime_state_t state;
 static bool setup_requested;
 static bool clock_started;
+static int64_t next_wifi_retry;
+/* Logs each HP core's busy share every 30 s from the idle tasks' run-time
+ * counters (microseconds with the default esp_timer clock), so core placement
+ * can be checked on the board with real apps running. IDF 5.5's kernel only
+ * reads the calling core's idle counter, so each read runs on its own core. */
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+static void read_idle_counter(void *out) { *(configRUN_TIME_COUNTER_TYPE *)out = ulTaskGetIdleRunTimeCounter(); }
+#endif
+static void log_core_load(void) {
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    static int64_t last_us;
+    static configRUN_TIME_COUNTER_TYPE last_idle[2];
+    int64_t now = esp_timer_get_time();
+    if (last_us && now - last_us < 30000000) return;
+    unsigned busy[2] = {0};
+    for (int core = 0; core < 2; ++core) {
+        configRUN_TIME_COUNTER_TYPE idle = 0;
+        if (esp_ipc_call_blocking(core, read_idle_counter, &idle) != ESP_OK) return;
+        if (last_us && now > last_us) {
+            uint64_t share = (uint64_t)(idle - last_idle[core]) * 100 / (uint64_t)(now - last_us);
+            busy[core] = share >= 100 ? 0 : 100 - (unsigned)share;
+        }
+        last_idle[core] = idle;
+    }
+    if (last_us) ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]);
+    last_us = now;
+#endif
+}
 /* One service task owns SNTP, including when cloud access is unprovisioned. */
 static void start_network_clock(void) {
     if (clock_started || network_get_mode() != NET_MODE_STA_CONNECTED) return;
@@ -33,6 +72,17 @@ static void start_network_clock(void) {
 void m3_runtime_state(m3_runtime_state_t *out) {
     portENTER_CRITICAL(&state_lock); *out = state; portEXIT_CRITICAL(&state_lock);
     out->wifi_busy = atomic_load(&wifi_pending);
+    out->mutation_busy = atomic_load(&mutation_pending);
+}
+bool m3_runtime_file_action(bool sd, const char *source, const char *destination, bool remove) {
+    if (!mutation_queue || !source || strlen(source) > 255 || (!remove && (!destination || strlen(destination) > 255))) return false;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&mutation_pending, &expected, true)) return false;
+    mutation_t request = {.remove = remove, .sd = sd};
+    snprintf(request.source, sizeof(request.source), "%s", source);
+    if (!remove) snprintf(request.destination, sizeof(request.destination), "%s", destination);
+    if (xQueueSend(mutation_queue, &request, 0) == pdPASS) return true;
+    atomic_store(&mutation_pending, false); return false;
 }
 static void publish(const m3_runtime_state_t *next) {
     portENTER_CRITICAL(&state_lock); state = *next; portEXIT_CRITICAL(&state_lock);
@@ -45,8 +95,8 @@ bool m3_runtime_browse(bool sd, const char *folder, unsigned offset) {
     return xQueueOverwrite(browse_queue, &request) == pdPASS;
 }
 bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings) {
-    if (!wifi_queue || action < M3_WIFI_SCAN || action > M3_WIFI_IPV6 ||
-        (action == M3_WIFI_CONNECT && !network_settings_valid(settings))) return false;
+    if (!wifi_queue || action < M3_WIFI_SCAN || action > M3_WIFI_CONNECT_SAVED ||
+        ((action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED) && !network_settings_valid(settings))) return false;
     portENTER_CRITICAL(&state_lock); bool ready = state.initialized && state.wifi_ready; portEXIT_CRITICAL(&state_lock);
     bool expected = false;
     if (!ready || !atomic_compare_exchange_strong(&wifi_pending, &expected, true)) return false;
@@ -57,10 +107,18 @@ bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings
     if (!sent) atomic_store(&wifi_pending, false);
     return sent;
 }
+/* Resolve secrets only in the service task; never publish the saved password. */
+static bool restore_wifi_password(network_settings_t *settings) {
+    network_settings_t saved;
+    bool found = network_settings_load(&saved) && saved.pass[0] && !strcmp(saved.ssid, settings->ssid);
+    if (found) snprintf(settings->pass, sizeof(settings->pass), "%s", saved.pass);
+    memset(&saved, 0, sizeof(saved));
+    return found;
+}
 static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
     snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
         request->action == M3_WIFI_SCAN ? "Searching nearby Wi-Fi..." :
-        request->action == M3_WIFI_CONNECT ? "Saving and connecting (up to 15 seconds)..." :
+        (request->action == M3_WIFI_CONNECT || request->action == M3_WIFI_CONNECT_SAVED) ? "Saving and connecting (up to 15 seconds)..." :
         request->action == M3_WIFI_IPV6 ? "Requesting IPv6 router discovery..." : "Starting setup hotspot...");
     publish(next);
     esp_err_t result = ESP_OK;
@@ -76,9 +134,12 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
         snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
             result == ESP_OK ? "IPv6 router discovery requested." : "IPv6 discovery unavailable; connect Wi-Fi first.");
     } else {
-        if (request->action == M3_WIFI_CONNECT) {
-            result = network_save_configuration(&request->settings);
+        if (request->action == M3_WIFI_CONNECT || request->action == M3_WIFI_CONNECT_SAVED) {
+            setup_requested = false;
+            result = request->action == M3_WIFI_CONNECT_SAVED && !restore_wifi_password(&request->settings)
+                ? ESP_ERR_INVALID_STATE : request->retry ? ESP_OK : network_save_configuration(&request->settings);
             if (result == ESP_OK) {
+                next->wifi_password_saved = request->settings.pass[0] != 0;
                 next->settings = request->settings;
                 memset(next->settings.pass, 0, sizeof(next->settings.pass));
                 ++next->settings_revision;
@@ -93,6 +154,7 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
                 } else snprintf(next->wifi_message, sizeof(next->wifi_message), "Connected. Settings saved for next boot.");
             } else snprintf(next->wifi_message, sizeof(next->wifi_message), "Save failed: %s", esp_err_to_name(result));
         } else {
+            setup_requested = true;
             result = network_start_softap();
             if (result == ESP_OK) dns_server_start();
             snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
@@ -104,10 +166,23 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
         }
     }
     memset(request, 0, sizeof(*request));
+    next_wifi_retry = esp_timer_get_time() + 60000000LL;
     ++next->wifi_revision;
     /* Publish completion before releasing the admission gate. */
     publish(next);
     atomic_store(&wifi_pending, false);
+}
+/* A failed boot/manual attempt must not permanently disable saved Wi-Fi.
+ * Keep the setup portal between attempts; explicit setup mode opts out. */
+static void retry_saved_wifi(m3_runtime_state_t *next) {
+    if (setup_requested || !next->wifi_ready || network_get_mode() != NET_MODE_AP_CAPTIVE ||
+        esp_timer_get_time() < next_wifi_retry || network_setup_has_clients()) return;
+    next_wifi_retry = esp_timer_get_time() + 60000000LL;
+    wifi_request_t request = {.action = M3_WIFI_CONNECT, .retry = true};
+    if (!network_settings_load(&request.settings)) return;
+    bool expected = false;
+    if (atomic_compare_exchange_strong(&wifi_pending, &expected, true)) wifi_execute(next, &request);
+    memset(&request, 0, sizeof(request));
 }
 /* Reject sentinel text, link-local and ULA; a public QR requires a current global address. */
 static bool ipv6_url(const char *address, char *out, size_t capacity) {
@@ -123,40 +198,65 @@ static void services(void *unused) {
     (void)unused;
     m3_runtime_state_t next = {0};
     snprintf(next.message, sizeof(next.message), "Starting storage and C6 Wi-Fi"); publish(&next);
+    m3_boot_splash_step(M3_BOOT_STORAGE);
     esp_err_t storage = web_server_storage_init();
     if (storage != ESP_OK) ESP_LOGW("M3", "Flash storage: %s", esp_err_to_name(storage));
     next.sd = sd_media_init() == ESP_OK;
+    m3_boot_splash_step(M3_BOOT_NETWORK);
     esp_err_t net = network_init();
     next.wifi_ready = net == ESP_OK;
+    bool saved_wifi = false, connected = false;
     if (net == ESP_OK) {
         char ssid[64] = {0}, pass[64] = {0};
-        bool connected = !setup_requested && network_has_saved_credentials(ssid, sizeof(ssid), pass, sizeof(pass)) &&
-                         network_connect_sta(ssid, pass) == ESP_OK;
+        saved_wifi = !setup_requested && network_has_saved_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
+        if (saved_wifi) m3_boot_splash_step(M3_BOOT_CONNECT);
+        connected = saved_wifi && network_connect_sta(ssid, pass) == ESP_OK;
         memset(pass, 0, sizeof(pass));
         if (!connected) {
             net = network_start_softap();
             if (net == ESP_OK) dns_server_start();
         }
         if (net == ESP_OK) {
+            m3_boot_splash_step(M3_BOOT_WEB);
             next.web = web_server_start() == ESP_OK;
             cloud_relay_start();
         }
     }
     next.initialized = true;
+    m3_boot_splash_step(M3_BOOT_READY);
     network_settings_load(&next.settings);
+    next.wifi_password_saved = next.settings.pass[0] != 0;
     memset(next.settings.pass, 0, sizeof(next.settings.pass));
+    next_wifi_retry = esp_timer_get_time() + 60000000LL;
     next.settings_revision = 1;
-    snprintf(next.wifi_message, sizeof(next.wifi_message), "Enter Wi-Fi details here, or use the setup hotspot.");
+    snprintf(next.wifi_message, sizeof(next.wifi_message), "%s", connected ? "Connected. Settings saved for next boot." :
+        saved_wifi ? "Connection failed. Setup hotspot restored; check password/IP." :
+        "Enter Wi-Fi details here, or use the setup hotspot.");
     snprintf(next.message, sizeof(next.message), "%s", net == ESP_OK ? "Services ready" : "C6 Wi-Fi failed; inspect serial log");
     browse_t browse = {.sd = false};
     bool refresh = true;
     unsigned tick = 0;
     for (;;) {
         if (xQueueReceive(browse_queue, &browse, pdMS_TO_TICKS(1000)) == pdTRUE) refresh = true;
-        m3_music_poll();
-        m3_photos_poll();
+        mutation_t mutation;
+        if (xQueueReceive(mutation_queue, &mutation, 0) == pdTRUE) {
+            m3_audio_state_t audio; m3_audio_state(&audio);
+            m3_recorder_state_t recording; m3_recorder_state(&recording);
+            bool locked = !recording.busy && !audio.playing && !m3_gallery_active() && (!mutation.sd || sd_media_admin_lock());
+            next.mutation_result = locked ? storage_view_mutate(mutation.sd, mutation.source, mutation.destination, mutation.remove) : ESP_ERR_INVALID_STATE;
+            if (locked) {
+                if (next.mutation_result == ESP_OK) { if (mutation.sd) sd_media_changed(); m3_music_refresh(mutation.sd); m3_photos_refresh(); }
+                if (mutation.sd) sd_media_admin_unlock();
+            }
+            ++next.mutation_revision; refresh = true; publish(&next);
+            atomic_store(&mutation_pending, false);
+        }
+        m3_preferences_poll();
+        log_core_load();
+        if (!m3_preferences_web_active()) { m3_music_poll(); m3_photos_poll(); m3_sd_apps_poll(); }
         wifi_request_t request;
         if (xQueueReceive(wifi_queue, &request, 0) == pdTRUE) wifi_execute(&next, &request);
+        retry_saved_wifi(&next);
         next.mode = network_get_mode();
         start_network_clock();
         network_get_ip_str(next.ip, sizeof(next.ip));
@@ -180,7 +280,7 @@ static void services(void *unused) {
         snprintf(next.cloud_status, sizeof(next.cloud_status), "%s", cloud_relay_status());
         next.requests = web_server_home_requests(); next.disconnects = network_get_disconnect_count();
         next.sd = sd_media_ready();
-        if (refresh || (++tick % 5 == 0)) {
+        if (!m3_preferences_web_active() && (refresh || (++tick % 5 == 0))) {
             storage_capacity_read(false, &next.flash);
             bool locked = !browse.sd || sd_media_admin_lock();
             if (locked) {
@@ -201,14 +301,17 @@ esp_err_t m3_runtime_start(bool force_setup) {
     setup_requested = force_setup;
     browse_queue = xQueueCreate(1, sizeof(browse_t));
     wifi_queue = xQueueCreate(1, sizeof(wifi_request_t));
-    if (!browse_queue || !wifi_queue) {
+    mutation_queue = xQueueCreate(1, sizeof(mutation_t));
+    if (!browse_queue || !wifi_queue || !mutation_queue) {
         if (browse_queue) vQueueDelete(browse_queue);
         if (wifi_queue) vQueueDelete(wifi_queue);
-        browse_queue = wifi_queue = NULL; return ESP_ERR_NO_MEM;
+        if (mutation_queue) vQueueDelete(mutation_queue);
+        browse_queue = wifi_queue = mutation_queue = NULL; return ESP_ERR_NO_MEM;
     }
     if (xTaskCreatePinnedToCore(services, "m3_services", 12288, NULL, 3, NULL, 0) != pdPASS) {
+        vQueueDelete(mutation_queue); mutation_queue = NULL;
         vQueueDelete(browse_queue); vQueueDelete(wifi_queue);
-        browse_queue = wifi_queue = NULL; return ESP_ERR_NO_MEM;
+        browse_queue = wifi_queue = mutation_queue = NULL; return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
 }

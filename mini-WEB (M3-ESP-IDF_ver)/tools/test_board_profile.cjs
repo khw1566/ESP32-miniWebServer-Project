@@ -24,7 +24,9 @@ for(const line of read('partitions_16mb.csv').split(/\r?\n/)){
  rows.set(name,{type,sub,start,length});end=start+length;
 }
 assert.equal(end,16*1024*1024);
-assert.equal(rows.get('ota_0').length,4*1024*1024);assert.equal(rows.get('ota_1').length,4*1024*1024);
+assert.equal(rows.get('ota_0').length,0x760000);assert.equal(rows.get('ota_1').length,0x760000);
+assert.equal(rows.get('littlefs').length,0x110000);assert.equal(rows.get('nvs').start,0x9000,'NVS stays in place');
+assert(read('main/web_server.c').includes('#define FACTORY_SEED_KEY "factory_seed2"'),'moved storage is reseeded once');
 // Every explicit SPIFFS label used by the backend must exist as SPIFFS.
 for(const file of ['web_server.c','storage_view.c','web_agent_diagnostics.inc']){
  for(const match of read('main/'+file).matchAll(/esp_spiffs_(?:info|format)\("([^"]+)"/g))
@@ -51,7 +53,7 @@ assert(sd.includes('host.pwr_ctrl_handle = sd_power'));
 assert(sd.includes('host.slot = SDMMC_HOST_SLOT_0'));
 assert(!sd.includes('BOARD_SD_POWER_EN')); for(const pin of ['BOARD_SD_D1','BOARD_SD_D2','BOARD_SD_D3'])assert(sd.includes(pin));
 const deps=read('main/idf_component.yml');
-assert(deps.includes('"0.14.0"')&&deps.includes('"1.4.1"'));
+assert(deps.includes('"1.6.5"')&&deps.includes('"2.13.0"'));
 for(const line of ['CONFIG_WIFI_RMT_SOFTAP_SUPPORT=y','CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y',
  'CONFIG_ESP_HOSTED_SDIO_PIN_CLK=18','CONFIG_ESP_HOSTED_SDIO_PIN_CMD=19',
  'CONFIG_ESP_HOSTED_SDIO_PIN_D0=14','CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS=15',

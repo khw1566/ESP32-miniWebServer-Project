@@ -11,7 +11,7 @@ assert.equal(new Set(Object.entries(pinMap).filter(([n])=>!['M3_WIDTH','M3_HEIGH
 assert(board.includes('.num_fbs = 2'));assert(board.includes('.flags.avoid_tearing = true'));
 assert(/\.phy_clk_src\s*=\s*0\s*,/.test(board),'DSI PHY must use the revision-aware IDF default');
 assert(!/\.phy_clk_src\s*=\s*MIPI_DSI_PHY_CLK_SRC_DEFAULT\b/.test(board),'legacy PLL_F20M aborts on P4 v3.x');
-assert(board.includes('.full_refresh = true'));assert(board.includes('.flags.use_dma2d = true'));
+assert(board.includes('.direct_mode = true')&&!board.includes('.full_refresh = true'),'redraw only changed areas');assert(board.includes('.flags.use_dma2d = true'));
 assert(board.includes('.chan_id = 3, .voltage_mv = 2500'));assert(board.includes('touch_address.dev_addr = address'));
 assert(board.indexOf('esp_lcd_panel_init(panel)')<board.lastIndexOf('gpio_set_level(M3_LCD_BACKLIGHT, 1)'));
 assert(board.includes('port.task_affinity = 1'));assert(read('main/web_server.c').includes('config.core_id = 0'));
@@ -25,15 +25,19 @@ assert(runtime.includes('sd_media_admin_lock()'));assert(runtime.includes('sd_me
 assert(runtime.includes('xQueueOverwrite'));assert(runtime.includes('network_start_softap()'));
 assert(main.indexOf('m3_ui_start()')<main.indexOf('m3_runtime_start(force_setup)'));
 assert(audio.includes('sd_media_name_valid(name)'));assert(audio.includes('strcasecmp(ext, ".wav")'));
-assert(audio.includes('SD_MEDIA_ROOT "/media/%s"'));assert(audio.includes('m3_wav_parse(file, &wav)'));
+assert(audio.includes('recording ? M3_RECORDER_FOLDER : "/media"'));
+assert(audio.includes('m3_wav_parse_limit(file, &wav, recording ? M3_RECORDER_MAX_SECONDS * M3_RECORDER_RATE * 2 + 44 : SD_MEDIA_MAX_BYTES)'));
 assert(audio.includes('percent > 150 ? 150 : percent'));assert(audio.includes('esp_codec_dev_close(codec)'));
 function body(name){const re=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\{'),match=re.exec(audio);assert(match);let depth=1,end=match.index+match[0].length,start=end;for(;depth;end++){if(audio[end]==='{')depth++;if(audio[end]==='}')depth--;}return audio.slice(start,end-1);}
 // Execute the actual small cancellation policy bodies with a queue mock.
 const policy='function cancelled(){'+body('cancelled').replace('atomic_load(&cancel_epoch)','cancel_epoch')+'}\nfunction stop(){'+body('m3_audio_stop').replace('atomic_fetch_add(&cancel_epoch, 1)','cancel_epoch++')+'}';
-const queue={pending:true},ctx={cancel_epoch:0,active_epoch:0,requests:queue,xQueueReset:q=>q.pending=false,m3_voice_cancel:()=>{}};
+const queue={pending:true},ctx={cancel_epoch:0,active_epoch:0,recorder_stops:0,requests:queue,xQueueReset:q=>q.pending=false,
+ m3_voice_cancel:()=>{},m3_recorder_cancel:()=>ctx.recorder_stops++,gallery_stops:0,m3_gallery_audio_cancel:()=>ctx.gallery_stops++};
 vm.createContext(ctx);vm.runInContext(policy,ctx);assert(!ctx.cancelled());ctx.stop();assert(ctx.cancelled());assert(!queue.pending);
+assert.equal(ctx.recorder_stops,1,'global stop also releases a queued recorder request');
+assert.equal(ctx.gallery_stops,1,'global stop also invalidates MP4 playback');
 ctx.active_epoch=0;assert(ctx.cancelled(),'dequeued old command stays cancelled');ctx.active_epoch=1;assert(!ctx.cancelled(),'fresh command is accepted');ctx.stop();assert(ctx.cancelled());
-assert(audio.includes('active_epoch = request.epoch;\n            if (cancelled()) continue;'));
+assert(/active_epoch = request\.epoch;\s+if \(cancelled\(\)\) continue;/.test(audio));
 assert(read('main/idf_component.yml').includes('"2.7.2"'));
 assert(!main.includes('m3_audio_test()'),'startup must not automatically sound the speaker');
 const cmake=read('main/CMakeLists.txt');

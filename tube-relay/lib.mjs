@@ -50,12 +50,13 @@ export class JpegSplitter {
 }
 
 export class PcmChunker {
-  constructor(bytes, onChunk) { this.bytes = bytes; this.onChunk = onChunk; this.pending = []; this.size = 0; this.total = 0; }
+  // frame: bytes per sample frame (4 = 16-bit stereo, 2 = 16-bit mono).
+  constructor(bytes, onChunk, frame = 4) { this.bytes = bytes; this.onChunk = onChunk; this.frame = frame; this.pending = []; this.size = 0; this.total = 0; }
   push(chunk) {
     this.pending.push(chunk); this.size += chunk.length;
     while (this.size >= this.bytes) this.emit(this.bytes);
   }
-  flush() { const tail = this.size - (this.size % 4); if (tail) this.emit(tail); }
+  flush() { const tail = this.size - (this.size % this.frame); if (tail) this.emit(tail); }
   emit(length) {
     const all = Buffer.concat(this.pending);
     this.onChunk(Buffer.from(all.subarray(0, length)), this.total);
@@ -113,6 +114,20 @@ export class Interleaver {
 export function validVideoId(id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id); }
 export function validChannelId(id) { return typeof id === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(id); }
 
+// Keep the hardware JPEG canvas fixed; lower profiles reduce detail and frames.
+export const VIDEO_PROFILES = Object.freeze({
+  low: { width: 256, height: 144, fps: 8, quality: 18, bitrate: '300k' },
+  standard: { width: 384, height: 216, fps: 12, quality: 13, bitrate: '500k' },
+  high: { width: 480, height: 272, fps: 15, quality: 9, bitrate: '700k' },
+});
+export function videoProfile(name = 'low') {
+  return Object.hasOwn(VIDEO_PROFILES, name) ? VIDEO_PROFILES[name] : null;
+}
+export function videoFilter(profile, offline = false) {
+  const scale = `fps=${profile.fps},scale=${profile.width}:${profile.height}:force_original_aspect_ratio=decrease:force_divisible_by=${offline ? 16 : 2}`;
+  return offline ? scale : `${scale},scale=480:272:force_original_aspect_ratio=decrease,pad=480:272:(ow-iw)/2:(oh-ih)/2,format=yuvj420p`;
+}
+
 // yt-dlp flat entry -> compact item for the board.
 export function toItem(entry) {
   if (!entry || !validVideoId(entry.id)) return null;
@@ -129,4 +144,12 @@ export function toItem(entry) {
     views: Number.isFinite(entry.view_count) ? entry.view_count : 0,
     live,
   };
+}
+
+// Songs for the YouTube Music app: no live streams and nothing over 20 minutes
+// (mixes, full albums and talk shows); unknown durations are kept.
+export const MUSIC_MAX_SECONDS = 20 * 60;
+export function musicItem(entry) {
+  const item = toItem(entry);
+  return item && !item.live && item.duration <= MUSIC_MAX_SECONDS ? item : null;
 }

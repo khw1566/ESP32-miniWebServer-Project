@@ -1,75 +1,70 @@
-// CMake configuration only: no firmware compiler, build or flash invocation.
+// CMake configuration and source checks only: no firmware compiler, build or flash.
 const fs = require('fs'), path = require('path'), assert = require('assert');
 const {spawnSync} = require('child_process');
 const root = path.resolve(__dirname, '..');
-const base = path.join(root, 'results', 'm3-hosted-compat');
+const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const slash = s => s.replace(/\\/g, '/');
-const req = 'WIFI_CONFIG_STA_SET_RESERVED_VAL(p_a_sta->reserved, p_c_sta->bitmask);\n' +
-  'WIFI_HE_STA_SET_RESERVED_VAL(p_a_sta->he_reserved, p_c_sta->he_bitmask);\n' +
-  'other_ap->reserved = 1;\n';
-const rsp = 'p_a_sta->reserved = WIFI_CONFIG_STA_GET_RESERVED_VAL(p_c_sta->bitmask);\n' +
-  'sta_info->reserved = 0;\n';
 const write = (name, value) => {fs.mkdirSync(path.dirname(name), {recursive: true}); fs.writeFileSync(name, value);};
-function run(name, header, version = '1.4.1', request = req, response = rsp, success = true) {
-  const dir = path.join(base, name), hosted = path.join(dir, 'hosted');
-  const sources = path.join(hosted, 'host/drivers/rpc/core');
-  write(path.join(sources, 'rpc_req.c'), request);
-  write(path.join(sources, 'rpc_rsp.c'), response);
-  write(path.join(dir, 'other.c'), '/* unchanged */');
-  write(path.join(hosted, 'idf_component.yml'), `version: ${version}\n`);
-  write(path.join(dir, 'sdk/components/esp_wifi/include/esp_wifi_types_generic.h'), header);
+
+// Hosted 1.4.1 idled RESET54 high whatever the choice said; 2.x honors the
+// choice, so a saved ACTIVE_LOW must migrate to ACTIVE_HIGH (same pin level).
+const saved = 'CONFIG_UNRELATED_USER_CHOICE=17\n# CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH is not set\n' +
+  'CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y\nCONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54\nCONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW=y\n';
+function fixture(name, existing) {
+  const dir = path.join(root, 'results', 'm3-hosted-v2', name);
+  fs.rmSync(dir, {recursive: true, force: true});
+  if (existing) write(path.join(dir, 'sdkconfig'), saved);
   write(path.join(dir, 'CMakeLists.txt'), `cmake_minimum_required(VERSION 3.16)
-project(hosted_compat_fixture LANGUAGES NONE)
-function(idf_component_get_property out component property)
-  if(NOT component STREQUAL "espressif__esp_hosted")
-    message(FATAL_ERROR "Wrong registry component name")
-  endif()
-  if(property STREQUAL "COMPONENT_DIR")
-    set(${'$'}{out} "${slash(hosted)}" PARENT_SCOPE)
-  else()
-    set(${'$'}{out} hosted_fixture PARENT_SCOPE)
-  endif()
-endfunction()
-add_custom_target(hosted_fixture)
-set_property(TARGET hosted_fixture PROPERTY SOURCES "${slash(sources)}/rpc_req.c;${slash(sources)}/rpc_rsp.c;${slash(dir)}/other.c")
-set(ENV{IDF_PATH} "${slash(dir)}/sdk")
-include("${slash(root)}/cmake/hosted_idf55_compat.cmake")
-m3_hosted_idf55_compat()
-get_target_property(result hosted_fixture SOURCES)
-file(WRITE "${'$'}{CMAKE_BINARY_DIR}/sources.txt" "${'$'}{result}")
+include("${slash(root)}/cmake/hosted_v2_migration.cmake")
+m3_hosted_v2_migration()
+project(hosted_v2_fixture LANGUAGES NONE)
 `);
-  const args = ['-S', dir, '-B', path.join(dir, 'configured')];
-  const configure = () => spawnSync('cmake', args, {encoding: 'utf8'});
-  const result = configure();
-  assert.equal(result.status === 0, success, result.stdout + result.stderr);
-  assert.equal(fs.readFileSync(path.join(sources, 'rpc_req.c'), 'utf8'), request);
-  assert.equal(fs.readFileSync(path.join(sources, 'rpc_rsp.c'), 'utf8'), response);
-  if (!success) return;
-  const selected = fs.readFileSync(path.join(dir, 'configured/sources.txt'), 'utf8');
-  assert(selected.includes(slash(path.join(dir, 'other.c'))));
-  if (!header.includes('reserved1')) {assert(!selected.includes('m3_hosted_compat')); return;}
-  const generated = path.join(dir, 'configured/m3_hosted_compat');
-  const outputReq = fs.readFileSync(path.join(generated, 'rpc_req.c'), 'utf8');
-  const outputRsp = fs.readFileSync(path.join(generated, 'rpc_rsp.c'), 'utf8');
-  assert.equal(outputReq.replace(/\r\n/g, '\n'), request.replace(/\r\n/g, '\n')
-    .replace('WIFI_CONFIG_STA_SET_RESERVED_VAL(p_a_sta->reserved, p_c_sta->bitmask);', '/* M3 IDF5.5: STA reserved wire bits remain zero. */')
-    .replace('WIFI_HE_STA_SET_RESERVED_VAL(p_a_sta->he_reserved, p_c_sta->he_bitmask);', '/* M3 IDF5.5: HE reserved wire bits remain zero. */'));
-  assert.equal(outputRsp.replace(/\r\n/g, '\n'), response.replace(/\r\n/g, '\n').replace('p_a_sta->reserved = WIFI_CONFIG_STA_GET_RESERVED_VAL(p_c_sta->bitmask);',
-    '/* M3 IDF5.5: do not import reserved wire bits into SDK config. */'));
-  assert(outputReq.includes('other_ap->reserved = 1;') || request !== req);
-  assert(outputRsp.includes('sta_info->reserved = 0;') || response !== rsp);
-  const before = fs.statSync(path.join(generated, 'rpc_req.c')).mtimeMs;
-  const again = configure(); assert.equal(again.status, 0, again.stdout + again.stderr);
-  assert.equal(fs.statSync(path.join(generated, 'rpc_req.c')).mtimeMs, before);
+  const run = () => spawnSync('cmake', ['-S', dir, '-B', path.join(dir, 'configured')], {encoding: 'utf8'});
+  let result = run(); assert.equal(result.status, 0, result.stdout + result.stderr);
+  if (!existing) { assert(!fs.existsSync(path.join(dir, 'sdkconfig'))); return; }
+  const config = fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8');
+  for (const line of ['CONFIG_UNRELATED_USER_CHOICE=17\n', 'CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y\n',
+    '# CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW is not set\n', 'CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54\n',
+    '# CONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW is not set\n']) assert(config.includes(line), line);
+  assert(!/\nCONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y/.test(config));
+  result = run(); assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8'), config, 'migration is idempotent');
 }
-const modern = 'uint32_t reserved1:26;\nuint32_t reserved2:19;\n';
-run('modern', modern);
-run('legacy', 'uint32_t reserved:26;\nuint32_t he_reserved:22;\n');
-run('wrong-version', modern, '1.5.0', req, rsp, false);
-run('changed-source', modern, '1.4.1', 'unexpected source', rsp, false);
-const actual = path.join(root, 'managed_components/espressif__esp_hosted/host/drivers/rpc/core');
-if (fs.existsSync(actual)) run('downloaded-component', modern, '1.4.1',
-  fs.readFileSync(path.join(actual, 'rpc_req.c'), 'utf8'), fs.readFileSync(path.join(actual, 'rpc_rsp.c'), 'utf8'));
-assert(fs.readFileSync(path.join(root, 'CMakeLists.txt'), 'utf8').includes('m3_hosted_idf55_compat()'));
-assert(fs.readFileSync(path.join(root, 'm3.ps1'), 'utf8').includes("Join-Path $PSScriptRoot 'cmake'"));
-console.log('PASS: Hosted reserved-bit compatibility, legacy SDK, fail-closed guards, unchanged originals and idempotent CMake configuration.');
+fixture('saved-config', true);
+fixture('new-config', false);
+
+const cmake = read('CMakeLists.txt');
+assert(cmake.indexOf('m3_hosted_v2_migration()') > 0 && cmake.indexOf('m3_hosted_v2_migration()') < cmake.indexOf('project(mini-webserver-m3)'));
+assert(!cmake.includes('hosted_idf55_compat') && !cmake.includes('hosted_dma_guard'), '1.4.1-only source patches are retired');
+const deps = read('main/idf_component.yml');
+assert(/esp_wifi_remote:\n\s+version: "1\.6\.5"/.test(deps) && /esp_hosted:\n\s+version: "2\.13\.0"/.test(deps));
+const defaults = read('sdkconfig.defaults');
+assert(defaults.includes('\nCONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y\n') && !defaults.includes('\nCONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y'));
+assert(defaults.includes('CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54'));
+
+// C6 image: same partition table as the module's flash, so it fits an OTA slot.
+const c6 = read('c6_sdkconfig.defaults');
+assert(c6.includes('CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="m3_c6_partitions.csv"'));
+assert(!c6.includes('# CONFIG_BT_ENABLED is not set'), 'BLE controller stays available on the C6');
+const table = read('m3_c6_partitions.csv').split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(','));
+const slots = table.filter(r => r[1] === 'app');
+assert.deepEqual(slots.map(r => [r[0], r[3], r[4]]), [['ota_0', '0x10000', '1536K'], ['ota_1', '0x190000', '1536K']]);
+const update = read('main/m3_c6_update.c');
+assert(update.includes('#define C6_SLOT_BYTES  (1536U * 1024U)'));
+assert(update.includes('#define C6_CHUNK_BYTES 1400U'), '1.4.1 slaves accept 1400-byte OTA writes');
+assert(update.includes('image.chip_id != ESP_CHIP_ID_ESP32C6') && update.includes('ESP_APP_DESC_MAGIC_WORD'));
+const order = ['esp_hosted_connect_to_slave()', 'esp_hosted_slave_ota_begin()', 'esp_hosted_slave_ota_write(chunk, n)',
+  'esp_hosted_slave_ota_end()', 'retire(C6_DONE_PATH);\n    /* Slaves', 'esp_hosted_slave_ota_activate()', 'esp_restart()'];
+order.reduce((at, token) => { const i = update.indexOf(token, at); assert(i > at, token); return i; }, -1);
+// Every flash attempt retires the staged file so a bad image cannot boot-loop.
+const failure = update.slice(update.indexOf('if (err != ESP_OK) {\n        ESP_LOGE(TAG, "C6 update failed'));
+assert(failure.indexOf('retire(C6_FAILED_PATH)') < failure.indexOf('return err;'));
+assert(update.includes('running.major1 == 2 && running.minor1 > 5'), 'activate only on slaves that implement it');
+const network = read('main/network_manager.c');
+assert(network.indexOf('m3_c6_update_from_sd()') > 0 && network.indexOf('m3_c6_update_from_sd()') < network.indexOf('esp_wifi_init(&cfg)'));
+const runtime = read('main/m3_runtime.c');
+assert(runtime.indexOf('sd_media_init()') < runtime.indexOf('network_init()'), 'SD is mounted before the C6 update check');
+assert(read('main/CMakeLists.txt').match(/"m3_c6_update\.c"/g).length === 1);
+const prepare = read('prepare_c6.ps1');
+assert(prepare.includes('2\\.13\\.0') && prepare.includes("'m3_c6_partitions.csv'") && prepare.includes('c6_update.bin'));
+console.log('PASS: Hosted 2.13 reset-pin migration (idempotent), retired 1.4.1 patches, C6 partition/slot bounds, SD update order, failure retirement and activate gating.');

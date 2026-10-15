@@ -56,7 +56,7 @@ const glyphs=new Set(/unicode_list\[\] = \{([^}]*)\}/.exec(font)[1].split(',').m
 for(const id of [...header.matchAll(/\bTITLE\((\w+)\)/g)].map(m=>m[1]))
  for(const c of entries[id].ko)if(/[가-힣]/.test(c))assert(glyphs.has(c),`title font lacks ${c} (run tools/generate_ui_fonts.py)`);
 // Status translations must match real service messages (catches drift when a message is reworded).
-const services=['m3_runtime.c','m3_audio.c','m3_radio.c','m3_agent.c','m3_voice.c','m3_tts.c','m3_google_audio.c','m3_tube.c','m3_music.c']
+const services=['m3_runtime.c','m3_audio.c','m3_radio.c','m3_agent.c','m3_voice.c','m3_recorder.c','m3_tts.c','m3_google_audio.c','m3_tube.c','m3_tube_download.inc','m3_music.c','m3_mp4.c']
  .map(f=>read('main/'+f)).join('\n');
 const statuses=[...source.slice(source.indexOf('statuses[] = {'),source.indexOf('tokens[] = {')).matchAll(/\{"((?:[^"\\]|\\.)*)", "((?:[^"\\]|\\.)*)"\}/g)];
 assert(statuses.length>100);

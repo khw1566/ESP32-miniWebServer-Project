@@ -20,3 +20,5 @@ typedef struct {
 } storage_view_t;
 void storage_view_read(bool sd, const char *folder, unsigned offset, storage_view_t *view);
 void storage_capacity_read(bool sd, storage_capacity_t *capacity);
+/* SD lock must be held by the service task. Never overwrites a destination. */
+esp_err_t storage_view_mutate(bool sd, const char *source, const char *destination, bool remove);

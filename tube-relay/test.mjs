@@ -1,6 +1,6 @@
 // Offline tests for the relay helpers. No network, yt-dlp or ffmpeg.
 import assert from 'node:assert';
-import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, parsePackets, Interleaver, toItem, validVideoId } from './lib.mjs';
+import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, parsePackets, Interleaver, toItem, validVideoId, musicItem } from './lib.mjs';
 
 // Text: board fonts have ASCII + Hangul only.
 assert.equal(sanitize('뉴진스 ‘Ditto’ — Official \u{1F496}MV【HD】'), "뉴진스 'Ditto' - Official MV[HD]");
@@ -55,4 +55,14 @@ assert.deepEqual(toItem({ id: 'ArmDp-zijuc', ie_key: 'Youtube', url: 'https://ww
 assert.equal(toItem({ id: 'UC3IZKseVpdzPSBaWxBxundA', ie_key: 'YoutubeTab', url: 'https://www.youtube.com/channel/UC3IZKseVpdzPSBaWxBxundA' }), null);
 assert.equal(toItem({ id: 'abc' }), null);
 assert(!validVideoId('../../etc/pa') && validVideoId('ArmDp-zijuc'));
-console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering.');
+// Mono PCM keeps whole 2-byte frames.
+const mono = []; const monoChunker = new PcmChunker(1920, (pcm, offset) => mono.push([pcm.length, offset]), 2);
+monoChunker.push(Buffer.alloc(2001)); monoChunker.flush();
+assert.deepEqual(mono, [[1920, 0], [80, 1920]]);
+
+// Music search: songs only.
+const song = { id: 'ArmDp-zijuc', ie_key: 'Youtube', url: 'https://www.youtube.com/watch?v=ArmDp-zijuc', title: 'Song', duration: 200 };
+assert(musicItem(song));
+assert.equal(musicItem({ ...song, duration: 3 * 3600 }), null, 'long mixes are skipped');
+assert.equal(musicItem({ ...song, live_status: 'is_live' }), null, 'live streams are skipped');
+console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering, mono PCM, music filtering.');

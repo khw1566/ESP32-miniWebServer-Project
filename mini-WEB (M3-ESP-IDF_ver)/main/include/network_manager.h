@@ -32,6 +32,7 @@ typedef struct {
 
 esp_err_t network_init(void);
 net_mode_t network_get_mode(void);
+bool network_setup_has_clients(void);
 esp_err_t network_start_softap(void);
 esp_err_t network_connect_sta(const char *ssid, const char *pass);
 esp_err_t network_save_credentials(const char *ssid, const char *pass);

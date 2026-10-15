@@ -4,6 +4,20 @@
 `.agents/rules/project_rules.md`를 함께 따른다. M1·S3·C3 등 다른 보드에
 M3 메모리 설정이나 핀 설정을 그대로 적용하지 않는다.
 
+## ESP-IDF 개발 스킬
+
+- M3 펌웨어 구현·수정·빌드 오류 분석에는 `espidf-verify`를 사용한다.
+  사용자 스킬 폴더의 `espidf-verify/SKILL.md`를 읽고, 미설치 환경에서는
+  저장소의 [스킬 원본](../.skill-drafts/espidf-verify/SKILL.md)을 읽는다.
+- 변경 전 스킬의 `scripts/preflight.py`에 현재 M3 프로젝트 절대 경로와
+  실제 설치된 ESP-IDF 경로를 전달해 타깃·버전·기존 빌드 메타데이터를 확인한다.
+  SDK나 관리 컴포넌트가 없으면 누락을 보고하며, API 호환성 확인을 완료했다고 하지 않는다.
+- Wi-Fi 변경은 NVS 저장·비밀번호 재사용·부팅 자동 연결·설정 AP 복귀·이벤트와
+  재시도의 소유 작업을 함께 확인한다. `test_touch_apps.cjs`와 저장소의
+  `tools/test_network_setup.cjs` 중 변경에 해당하는 검사를 실행한다.
+- 스킬 참조 문서의 PC 경로·SDK 버전은 과거 환경의 예시다. 현재 설정을 우선한다.
+  스킬 설치는 아래 컴파일·플래시 제한을 변경하지 않는다.
+
 ## 작업 원칙
 
 - 요청을 코드와 검증 결과로 마무리한다. 기존 기능을 삭제하거나 숨기는 방식으로
@@ -69,6 +83,12 @@ M3 메모리 설정이나 핀 설정을 그대로 적용하지 않는다.
 - 홈 위젯 변경은 `test_home_widgets.cjs`와 `test_photo_worker.cjs`로 캘린더,
   페이지 선택, 배경/콘텐츠 레이어, 사진 버퍼 소유권·취소·오류 해제를 확인한다.
   실제 사진 디코딩과 스와이프는 PC/실기 결과를 따로 보고한다.
+- 기기 설정·집중 모드 변경은 `tools/test_preferences.cjs`와
+  `tools/test_device_settings.cjs`로 저장·인증·재시작·복귀·작업 중단 조건을 확인한다.
+  실제 밝기·FPS와 집중 모드 자원 절감은 사용자 빌드·실기에서 별도로 확인한다.
+- 녹음 앱 변경은 `tools/test_recorder.cjs`와 `tools/test_audio_output.cjs`로
+  WAV 헤더·스트리밍·SD 오류·정지 저장·작업 취소·마이크 해제·파일 소유권을 확인한다.
+  실제 마이크·SD 쓰기 지연·전원 중단은 호스트 모의 검사와 구분한다.
 - 음악은 SD/Flash 목록·재생·일시정지·음량 150·페이지 이동을 확인한다.
   `tools/test_music_player.cjs`로 증폭 포화·재생 취소·오류 후 해제를 검사한다.
 - 파일명/글꼴 변경은 `tools/test_unicode_filenames.cjs`와
@@ -90,8 +110,16 @@ M3 메모리 설정이나 핀 설정을 그대로 적용하지 않는다.
 실물에서는 Wi-Fi 연결/재연결, SoftAP, 라디오 시작·정지·장시간 재생,
 STT 녹음 후 스피커 재개, TTS, 영상·게임 전환을 확인한다. 최소 힙과 가장 큰
 DMA 블록, 스택 여유, underrun 및 할당 실패 로그를 비교한다. 단순 부팅 성공은
-장시간 안정성의 증거가 아니다. Flash 사용량과 OTA 4MiB 슬롯 크기도 사용자 빌드에서 확인한다.
+장시간 안정성의 증거가 아니다. Flash 사용량과 OTA 7.375MiB(0x760000) 슬롯 크기도 사용자 빌드에서 확인한다.
 
 최종 보고는 변경 목적·호스트 검사·PC 렌더링·사용자 빌드·실기 확인을 구분한다.
 실행하지 않은 단계와 남은 확인을 명시한다. 상세 절차는
 [`docs/OPTIMIZATION_AND_VALIDATION.md`](docs/OPTIMIZATION_AND_VALIDATION.md)를 따른다.
+
+## SD 앱 실행 변경
+
+- `tools/test_sd_apps.cjs`로 실제 C 파일명·파일 유형/크기·소스·할당·실행 제한 정책을 확인한다.
+- `tools/sd_apps`에서 `npm ci --ignore-scripts`, `npm test`로 실제 SD 게임 Lua 소스를 검사한다.
+  이는 호스트 WebAssembly 실행이며 펌웨어 컴파일이나 실기 확인으로 보고하지 않는다.
+- 앱 종료 시 Lua 작업과 UI 버퍼 소유권, SD 잠금 해제, 웹서버 집중 모드 제외를 보존한다.
+- 스크립트를 LVGL 작업에서 직접 실행하지 않는다. 새 파일/네트워크 API는 별도 검토한다.

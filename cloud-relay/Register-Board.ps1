@@ -1,7 +1,7 @@
 param(
     [string]$BoardUrl = 'http://m1-v1-2-b0cbd899de80.local',
     [string]$Serial = 'b0cbd899de80',
-    [ValidateSet('m1', 's3', 'c3')][string]$Product = 'm1'
+    [ValidateSet('m1', 'm3', 's3', 'c3')][string]$Product = 'm1'
 )
 $ErrorActionPreference = 'Stop'
 if ($Serial -notmatch '^[a-f0-9]{12}$') { throw 'Invalid board serial.' }

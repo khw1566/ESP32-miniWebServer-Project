@@ -1,4 +1,5 @@
 #include "network_manager.h"
+#include "m3_c6_update.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -122,6 +123,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         atomic_fetch_add(&s_diagnostic_disconnects, 1);
         if (event_data) atomic_store(&s_diagnostic_last_reason, ((wifi_event_sta_disconnected_t *)event_data)->reason);
         s_sta_link_up = false;
@@ -180,6 +182,9 @@ esp_err_t network_init(void) {
     ESP_RETURN_ON_ERROR(esp_timer_create(&recovery_args, &s_recovery_timer), TAG, "recovery timer");
     ESP_RETURN_ON_ERROR(esp_timer_start_periodic(s_recovery_timer, 30ULL * 1000000), TAG, "recovery timer start");
 
+    /* Flash a C6 image staged on SD before Wi-Fi RPCs depend on its version. */
+    esp_err_t c6_update = m3_c6_update_from_sd();
+    if (c6_update != ESP_OK && c6_update != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "C6 update skipped: %s", esp_err_to_name(c6_update));
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     /* A missing/incompatible C6 must leave the local display running. */
     ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "C6 Wi-Fi init");
@@ -204,6 +209,11 @@ esp_err_t network_init(void) {
 
 net_mode_t network_get_mode(void) {
     return s_net_mode;
+}
+bool network_setup_has_clients(void) {
+    wifi_sta_list_t clients = {0};
+    /* Leave an active setup session alone, including when the query fails. */
+    return esp_wifi_ap_get_sta_list(&clients) != ESP_OK || clients.num > 0;
 }
 
 // -------------------------------------------------------------
@@ -278,9 +288,11 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
     }
 
     char saved_ssid[33] = {0}, saved_pass[65] = {0};
-    s_auto_retry = network_has_saved_credentials(saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass)) &&
+    bool auto_retry = network_has_saved_credentials(saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass)) &&
         !strcmp(saved_ssid, ssid) && !strcmp(saved_pass, pass ? pass : "");
     memset(saved_pass, 0, sizeof(saved_pass));
+    s_sta_connect_requested = false;
+    s_auto_retry = false;
     s_sta_link_up = false;
 
     // Wi-Fi 설정 구성
@@ -295,10 +307,6 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
     wifi_config.sta.pmf_cfg.capable  = true;
     wifi_config.sta.pmf_cfg.required = false;
 
-    // 이벤트 비트 초기화 및 재시도 카운터 리셋
-    s_retry_num = 0;
-    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-
     // Wi-Fi 스택이 이미 실행 중인 경우 정지 후 재설정
     wifi_mode_t cur_mode = WIFI_MODE_NULL;
     esp_wifi_get_mode(&cur_mode);
@@ -309,6 +317,11 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 
+    /* Discard old stop/disconnect results before starting this attempt. */
+    s_retry_num = 0;
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_auto_retry = auto_retry;
+    s_net_mode = NET_MODE_STA_CONNECTING;
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_mode(STA) 실패: %d", err);

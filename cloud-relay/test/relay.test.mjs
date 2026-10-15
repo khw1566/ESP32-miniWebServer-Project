@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import worker, { RelayDevice, publicPath } from '../worker.mjs';
 const id = 'm1-aabbccddeeff', token = 'a'.repeat(64);
-function setup() {
+function setup(deviceId = id) {
+  const id = deviceId;
   const env = { PUBLIC_DOMAIN: 'audeaming.com', DEMO_DEVICE: id,
     DEVICE_REGISTRY: JSON.stringify({ [id]: { tokenHash: createHash('sha256').update(token).digest('hex') } }) };
   const device = new RelayDevice({}, env); device.pollMs = 100; device.requestMs = 500;
@@ -42,6 +43,26 @@ test('device credentials are required; idle poll returns no job', async () => {
   assert.equal((await s.call('poll', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status, 401);
   assert.equal((await s.call('poll')).status, 204);
   assert.ok(s.device.lastSeen > 0);
+});
+
+test('M3 hostname reaches its registered board and preserves device authentication', async () => {
+  const id = 'm3-aabbccddeeff', s = setup(id);
+  const visit = (host, path = '/') => worker.fetch(new Request(`https://${host}.audeaming.com${path}`), s.env);
+  assert.equal((await visit(id)).status, 503);
+  assert.equal((await visit('m3-112233445566')).status, 404);
+  assert.equal((await s.call('poll', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status, 401);
+  s.device.pollMs = 3000;
+  const poll = s.call('poll');
+  while (!s.device.poll) await tick();
+  const visitor = visit(id, '/index.html');
+  const reply = await poll; assert.equal(reply.status, 200);
+  const j = await reply.json(); assert.equal(j.path, '/index.html');
+  await post(s, j, 'start', { status: 200 });
+  const result = await visitor; const text = result.text();
+  await post(s, j, 'chunk', 'M3 online', { 'x-sequence': '0' });
+  await post(s, j, 'end', { bytes: 9, chunks: 1 });
+  assert.equal(result.status, 200); assert.equal(await text, 'M3 online');
+  assert.equal((await visit(id, '/api/system')).status, 403);
 });
 test('HTML and arbitrary binary bytes arrive without corruption', async () => {
   const s = setup(); const { job: j, visitor } = await job(s, '/index.html');

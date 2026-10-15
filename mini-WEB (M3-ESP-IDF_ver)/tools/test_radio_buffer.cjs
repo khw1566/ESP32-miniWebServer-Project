@@ -129,9 +129,9 @@ assert(source.includes('MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT'));
 assert(source.indexOf('while (receiver_started && !atomic_load(&rx.done))')<source.indexOf('esp_http_client_cleanup(http)'));
 assert(source.includes('xTaskCreatePinnedToCore(radio_receive'));
 // Execute station selection, including codec selection and bounds.
-const stations=[...ui.matchAll(/\{"([^"]+)", "(https:[^"]+)", (true|false)\}/g)]
+const stations=[...ui.matchAll(/\{"([^"]+)", "(https:[^"]+)", (true|false)(?:, [012])?\}/g)]
  .map(m=>({name:m[1],url:m[2],aac:m[3]==='true'}));
-assert.equal(stations.length,7);assert(stations.some(s=>s.aac&&s.url.includes('64-aac')));
+assert.equal(stations.length,10);assert(stations.some(s=>s.name.includes("Korea")));assert(stations.some(s=>s.name.includes("Japan")));assert(stations.some(s=>s.aac&&s.url.includes('64-aac')));
 const picker={radio_stations:stations,radio_url:{},radio_codec:{},marked:null,
  lv_event_get_user_data:event=>event.index,hide_keyboard:()=>{},radio_mark:index=>picker.marked=index,
  lv_textarea_set_text:(_,url)=>picker.url=url,segment_select:(_,codec)=>picker.codec=codec};
@@ -141,4 +141,4 @@ const cast=source=>source.replace('unsigned index = (unsigned)(uintptr_t)','let 
 vm.runInContext('function radio_select(index){'+cast(body('radio_select',ui))+'}\nfunction select(event){'+cast(body('radio_preset',ui))+'}',picker);
 for(let i=0;i<stations.length;i++){picker.select({index:i});assert.equal(picker.url,stations[i].url);assert.equal(picker.codec,stations[i].aac?1:0);assert.equal(picker.marked,i);}
 picker.select({index:99});assert.equal(picker.url,stations.at(-1).url,'out-of-range station is ignored');
-console.log('PASS: adaptive bitrate reserve, PCM hysteresis/EOF, two-ring 5s receive and 300ms decode jitter model, long-outage resume, partial-send integrity, blocked-producer cancellation, 7 presets.');
+console.log('PASS: adaptive bitrate reserve, PCM hysteresis/EOF, two-ring 5s receive and 300ms decode jitter model, long-outage resume, partial-send integrity, blocked-producer cancellation, 10 presets including KR/JP.');
