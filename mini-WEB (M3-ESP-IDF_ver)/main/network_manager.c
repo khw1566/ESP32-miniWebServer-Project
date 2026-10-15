@@ -1,5 +1,6 @@
 #include "network_manager.h"
 #include "m3_c6_update.h"
+#include "m3_wifi_performance.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -172,6 +173,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 // 초기화
 // -------------------------------------------------------------
 esp_err_t network_init(void) {
+    ESP_RETURN_ON_ERROR(m3_wifi_performance_init(),TAG,"Wi-Fi performance lock");
     s_wifi_event_group = xEventGroupCreate();
     if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");

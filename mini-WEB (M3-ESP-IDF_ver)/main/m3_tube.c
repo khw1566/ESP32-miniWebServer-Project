@@ -1,4 +1,5 @@
 #include "m3_memory.h"
+#include "m3_wifi_performance.h"
 #include "m3_tube.h"
 #include "m3_tube_config.h"
 #include "network_manager.h"
@@ -479,7 +480,6 @@ static void mono_to_stereo(int16_t *samples, unsigned frames) {
 void m3_tube_run(const char *id, unsigned start_seconds, bool audio_only, const m3_audio_output_t *out) {
     const char *error = "Video connection failed";
     bool leased = false, lease_owned = false, ps_changed = false, receiver_started = false, codec_open = false, ended = false;
-    wifi_ps_type_t previous_ps = WIFI_PS_NONE;
     esp_http_client_handle_t http = NULL;
     uint8_t *pcm = NULL;
     char *info = NULL;
@@ -501,7 +501,7 @@ void m3_tube_run(const char *id, unsigned start_seconds, bool audio_only, const 
     if (!audio_only && !frames_ready()) { error = "Video decoder memory unavailable"; goto done; }
     leased = !strncmp(M3_TUBE_URL, "https://", 8) ? lease_tls(1500, &lease_owned) : true;
     if (!leased) { error = "HTTPS busy; stop radio or video and retry"; goto done; }
-    if (esp_wifi_get_ps(&previous_ps) == ESP_OK && previous_ps != WIFI_PS_NONE) ps_changed = esp_wifi_set_ps(WIFI_PS_NONE) == ESP_OK;
+    ps_changed = m3_wifi_performance_acquire();
     rx.storage = heap_caps_malloc(RING_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     rx.chunk = heap_caps_malloc(READ_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     pcm = heap_caps_malloc(AUDIO_LIMIT, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -613,7 +613,7 @@ done:
     }
     if (http) { esp_http_client_close(http); esp_http_client_cleanup(http); }
     free(rx.storage); free(rx.chunk); free(pcm); free(info);
-    if (ps_changed) esp_wifi_set_ps(previous_ps);
+    if (ps_changed) m3_wifi_performance_release();
     if (lease_owned) https_memory_exclusive_end();
     frames_reset();
     portENTER_CRITICAL(&player_lock);

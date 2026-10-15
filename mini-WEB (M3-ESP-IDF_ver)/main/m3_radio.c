@@ -1,4 +1,5 @@
 #include "m3_cores.h"
+#include "m3_wifi_performance.h"
 #include "m3_audio_apps.h"
 #include "network_manager.h"
 #include "https_memory.h"
@@ -221,7 +222,6 @@ static bool radio_wait_pcm(radio_decode_t *dec, const m3_audio_output_t *out, un
 void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { out->message("Connect Wi-Fi before starting radio", false, 0); return; }
     bool leased = false, opened = false, ps_changed = false;
-    wifi_ps_type_t previous_ps = WIFI_PS_NONE;
     const char *error = "Radio connection failed";
     esp_http_client_handle_t http = NULL;
     uint8_t *output = NULL;
@@ -235,12 +235,8 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
         if (!leased) { error = "TLS memory busy; stop AI request and retry"; goto done; }
     }
     if (out->cancelled()) goto done;
-    /* Remember and restore the user's prior Wi-Fi power policy. Some ESP-Hosted
-     * slave firmware does not implement this RPC; failure is non-fatal. */
-    if (esp_wifi_get_ps(&previous_ps) == ESP_OK && previous_ps != WIFI_PS_NONE) {
-        ps_changed = esp_wifi_set_ps(WIFI_PS_NONE) == ESP_OK;
-        if (!ps_changed) ESP_LOGW(TAG, "Wi-Fi power-save disable unavailable");
-    }
+    ps_changed = m3_wifi_performance_acquire();
+    if (!ps_changed) ESP_LOGW(TAG, "Wi-Fi power-save disable unavailable");
     rx.storage = heap_caps_malloc(RADIO_BUFFER_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     rx.chunk = heap_caps_malloc(RADIO_READ_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     dec.storage = heap_caps_malloc(RADIO_PCM_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -350,7 +346,7 @@ done:
     if (http) esp_http_client_cleanup(http);
     if (dec.decoder) esp_audio_simple_dec_close(dec.decoder);
     free(output); free(rx.storage); free(rx.chunk); free(dec.storage); free(dec.input); free(dec.pcm); free(dec.stereo);
-    if (ps_changed) esp_wifi_set_ps(previous_ps);
+    if (ps_changed) m3_wifi_performance_release();
     if (leased) https_memory_exclusive_end();
     out->message(out->cancelled() ? "Radio stopped" : error, false, 0);
 }

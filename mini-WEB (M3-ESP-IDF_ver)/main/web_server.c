@@ -1,5 +1,6 @@
 #include "m3_cores.h"
 #include "web_server.h"
+#include "m3_web_assets.h"
 #include "cloud_relay.h"
 #include "m3_preferences.h"
 #include "m3_audio.h"
@@ -271,8 +272,12 @@ static bool is_valid_initial_page(const char *page) {
 #include "web_ai_login.inc"
 
 static esp_err_t send_chunk_string(httpd_req_t *req, const char *str);
+static esp_err_t send_cached_asset(httpd_req_t *req, const char *path);
+static void ai_page_headers(httpd_req_t *req);
 #include "web_wifi_setup_html.inc"
 static esp_err_t render_setup_page(httpd_req_t *req) {
+  esp_err_t cached = send_cached_asset(req, "/setup.html");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return send_chunk_string(req, HTML_WIFI_SETUP);
@@ -374,8 +379,32 @@ static esp_err_t send_gzip_page(httpd_req_t *req, const unsigned char *data, siz
   if (result != ESP_OK) return result;
   return send_chunk_bytes(req, (const char *)data, bytes);
 }
+static esp_err_t send_cached_asset(httpd_req_t *req, const char *path) {
+  const m3_web_asset_t *asset = m3_web_assets_find(path);
+  if (!asset) return ESP_ERR_NOT_FOUND;
+  char range[96] = ""; size_t first = 0, length = 0;
+  size_t range_size = httpd_req_get_hdr_value_len(req, "Range");
+  bool valid = !range_size || (range_size < sizeof(range) && httpd_req_get_hdr_value_str(req, "Range", range, sizeof(range)) == ESP_OK);
+  httpd_resp_set_type(req, asset->mime);
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+  httpd_resp_set_hdr(req, "Accept-Ranges", "bytes");
+  char header[80];
+  if (!valid || !m3_web_assets_slice(asset->bytes, range, &first, &length)) {
+    snprintf(header, sizeof(header), "bytes */%u", (unsigned)asset->bytes);
+    httpd_resp_set_status(req, "416 Range Not Satisfiable"); httpd_resp_set_hdr(req, "Content-Range", header);
+    return httpd_resp_send(req, NULL, 0);
+  }
+  if (range_size) {
+    snprintf(header, sizeof(header), "bytes %u-%u/%u", (unsigned)first, (unsigned)(first + length - 1), (unsigned)asset->bytes);
+    httpd_resp_set_status(req, "206 Partial Content"); httpd_resp_set_hdr(req, "Content-Range", header);
+  }
+  return send_chunk_bytes(req, (const char *)asset->data + first, length);
+}
 
 static esp_err_t help_get_handler(httpd_req_t *req) {
+  esp_err_t cached = send_cached_asset(req, "/help.html");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_send(req, HTML_HELP_GUIDE, HTTPD_RESP_USE_STRLEN);
 }
@@ -418,7 +447,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
 
   // 관리자가 지정한 업로드 HTML을 IPv4/IPv6 루트 접속 화면으로 우선 제공
-  esp_err_t sd_result=try_sd_public_file(req,"/");
+  esp_err_t cached = send_cached_asset(req, "/");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
+  esp_err_t sd_result=m3_web_assets_ready() ? ESP_ERR_NOT_FOUND : try_sd_public_file(req,"/");
   if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
   char initial_page[128] = {0};
   if (get_initial_page(initial_page, sizeof(initial_page)) &&
@@ -1029,10 +1060,10 @@ static esp_err_t api_file_download_handler(httpd_req_t *req) {
 static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
   const char *uri = req->uri;
   // 쿼리 스트링 제거
-  char clean_name[128] = {0};
+  char clean_name[192] = {0};
   const char *qmark = strchr(uri, '?');
   size_t len = qmark ? (size_t)(qmark - uri) : strlen(uri);
-  char encoded[384];
+  char encoded[576];
   if (len >= sizeof(encoded)) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Path too long");
   memcpy(encoded, uri, len); encoded[len] = '\0';
   if (!decode_file_url(clean_name, sizeof(clean_name), encoded, false))
@@ -1045,7 +1076,13 @@ static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
   }
 
   char filepath[280];
-  esp_err_t sd_result=try_sd_public_file(req,clean_name);
+  if (!strcasecmp(clean_name, "/ai_studio.html")) {
+    if (!ai_require_auth(req)) return ESP_OK;
+    ai_page_headers(req);
+  } else if (!strcasecmp(clean_name, "/ai.html")) ai_page_headers(req);
+  esp_err_t cached = send_cached_asset(req, clean_name);
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
+  esp_err_t sd_result=m3_web_assets_ready() && strncmp(clean_name,"/media/",7) ? ESP_ERR_NOT_FOUND : try_sd_public_file(req,clean_name);
   if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
   snprintf(filepath, sizeof(filepath), "%s%s", STORAGE_BASE_PATH, clean_name);
 
@@ -1293,6 +1330,8 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
 #include "web_sd_admin.inc"
 
 static esp_err_t admin_get_handler(httpd_req_t *req) {
+  esp_err_t cached = send_cached_asset(req, "/admin.html");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   ESP_LOGI(
       TAG,
@@ -1316,11 +1355,15 @@ static void ai_page_headers(httpd_req_t *req) {
 }
 static esp_err_t ai_chat_get_handler(httpd_req_t *req) {
   ai_page_headers(req);
+  esp_err_t cached = send_cached_asset(req, "/ai.html");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
   return send_chunk_string(req, HTML_AI_LOGIN);
 }
 static esp_err_t ai_studio_get_handler(httpd_req_t *req) {
   if (!ai_require_auth(req)) return ESP_OK;
   ai_page_headers(req);
+  esp_err_t cached = send_cached_asset(req, "/ai_studio.html");
+  if (cached != ESP_ERR_NOT_FOUND) return cached;
   return send_gzip_page(req, HTML_AI_STUDIO_GZIP, HTML_AI_STUDIO_GZIP_LEN);
 }
 
@@ -1334,7 +1377,9 @@ static esp_err_t relay_file_get_handler(httpd_req_t *req) {
   if (!cloud_relay_public_path(path))
     return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Public file not found");
   if(!strcmp(path,"/")) __atomic_fetch_add(&s_home_requests,1,__ATOMIC_RELAXED);
-  esp_err_t sd_result=try_sd_public_file(req,path);
+  esp_err_t cached=send_cached_asset(req,path);
+  if(cached!=ESP_ERR_NOT_FOUND) return cached;
+  esp_err_t sd_result=m3_web_assets_ready() && strncmp(path,"/media/",7) ? ESP_ERR_NOT_FOUND : try_sd_public_file(req,path);
   if(sd_result!=ESP_ERR_NOT_FOUND) return sd_result;
   char filepath[280];
   if (!strcmp(path, "/")) {

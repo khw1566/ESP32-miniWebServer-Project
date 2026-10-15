@@ -6,6 +6,7 @@
 #include "m3_gallery.h"
 #include "m3_runtime.h"
 #include "web_server.h"
+#include "m3_web_assets.h"
 #include "sd_media.h"
 #include "m3_preferences.h"
 #include "cloud_relay.h"
@@ -202,6 +203,7 @@ static void services(void *unused) {
     esp_err_t storage = web_server_storage_init();
     if (storage != ESP_OK) ESP_LOGW("M3", "Flash storage: %s", esp_err_to_name(storage));
     next.sd = sd_media_init() == ESP_OK;
+    m3_web_assets_load(); /* Boot snapshot: before HTTP and cloud workers can read the immutable cache. */
     m3_boot_splash_step(M3_BOOT_NETWORK);
     esp_err_t net = network_init();
     next.wifi_ready = net == ESP_OK;
