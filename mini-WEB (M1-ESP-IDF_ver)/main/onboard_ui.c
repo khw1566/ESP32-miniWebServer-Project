@@ -1,5 +1,7 @@
 #include "board_display.h"
 #include "screen_saver.h"
+#include "m1_sound.h"
+#include "sdkconfig.h"
 #include "network_manager.h"
 #include "web_server.h"
 #include "cloud_relay.h"
@@ -28,6 +30,7 @@ static QueueHandle_t commands,results;
 static lv_obj_t *body,*status,*ssid,*password,*scan_list;
 static lv_obj_t *pager,*page_label;
 static lv_obj_t *router_info;
+static lv_obj_t *volume_button;
 static lv_obj_t *setup_actions[3];
 static wifi_scan_item_t scan_cache[12];
 static int scan_count,scan_offset;
@@ -116,6 +119,8 @@ static void worker(void *arg) {
             storage_capacity_read(true,&r.sd);
         } else if(cmd.op==7) {
             r.err=cmd.offset?network_router_start(true):network_router_stop(true);
+        } else if(cmd.op==8) {
+            r.err=m1_sound_set_volume(cmd.offset);
         }
         memset(cmd.pass,0,sizeof(cmd.pass));
         xQueueSend(results,&r,portMAX_DELAY);
@@ -179,6 +184,7 @@ static void clear_page(const char *title) {
     m1_keyboard_reset();
     m1_dashboard_reset();
     router_info=NULL;
+    volume_button=NULL;
     lv_obj_clean(lv_scr_act());
     /* The canvas is deleted before its backing pixels are released. */
     free(qr_pixels); qr_pixels=NULL;
@@ -187,6 +193,10 @@ static void clear_page(const char *title) {
     lv_obj_set_style_text_line_space(lv_scr_act(),0,0);
     lv_obj_t *heading=lv_label_create(lv_scr_act());
     lv_label_set_text(heading,title);lv_obj_align(heading,LV_ALIGN_TOP_MID,0,5);
+    if(page==0) {
+        rect(heading,4,5,128,20);
+        lv_label_set_long_mode(heading,LV_LABEL_LONG_DOT);
+    }
     body=lv_obj_create(lv_scr_act());rect(body,0,28,240,264);fixed_container(body);
     status=lv_label_create(lv_scr_act());lv_label_set_text(status,"");
     rect(status,4,296,232,20);lv_label_set_long_mode(status,LV_LABEL_LONG_DOT);
@@ -563,6 +573,23 @@ static void sleep_cb(lv_event_t *e) {
     lv_label_set_text(status,"화면 끄는 중");
     screen_saver_request();
 }
+static void volume_render(void) {
+    if(!volume_button) return;
+    lv_obj_t *text=lv_obj_get_child(volume_button,0);
+    unsigned level=m1_sound_get_volume();
+    if(level) lv_label_set_text_fmt(text,"음량 %u",level);
+    else lv_label_set_text(text,"무음");
+    lv_obj_center(text);
+}
+static void volume_cb(lv_event_t *e) {
+    (void)e;
+    if(busy) return;
+    command_t cmd={.op=8,.offset=(m1_sound_get_volume()+1)%5};
+    if(xQueueSend(commands,&cmd,0)==pdTRUE) {
+        busy=true;
+        lv_label_set_text(status,"음량 저장 중");
+    }
+}
 static void update_stats(void) {
     net_mode_t mode=network_get_mode();
     m1_dashboard_update(mode==NET_MODE_STA_CONNECTED,mode==NET_MODE_AP_CAPTIVE,
@@ -578,6 +605,12 @@ static void home(void) {
     rect(m1_dashboard_button(body,"서버",M1_ICON_SERVER,toggle_cb),124,192,112,32);
     rect(m1_dashboard_button(body,"SoftAP",M1_ICON_AP,softap_cb),4,232,112,32);
     rect(m1_dashboard_button(body,"도움",M1_ICON_HELP,help_cb),124,232,112,32);
+    volume_button=button(lv_scr_act(),"",volume_cb,NULL);rect(volume_button,138,2,60,24);
+    lv_obj_set_style_pad_all(volume_button,0,0);
+    volume_render();
+#ifndef CONFIG_M1_SYSTEM_SOUNDS
+    lv_obj_add_state(volume_button,LV_STATE_DISABLED);
+#endif
     /* A dark monitor, not a power symbol: only the display turns off. */
     lv_obj_t *sleep=lv_btn_create(lv_scr_act());rect(sleep,202,2,34,24);
     lv_obj_add_event_cb(sleep,sleep_cb,LV_EVENT_CLICKED,NULL);
@@ -629,6 +662,9 @@ static void ui_task(void *arg) {
                                   r.err==ESP_ERR_INVALID_STATE?"상위 Wi-Fi 연결 필요":"공유기 모드 전환 실패");
             } else if(r.op==4) {
                 softap();lv_label_set_text(status,r.err==ESP_OK?"SoftAP 준비 완료":"SoftAP 시작 실패");
+            } else if(r.op==8) {
+                if(page==0) volume_render();
+                lv_label_set_text(status,r.err==ESP_OK?"음량 저장 완료":"음량 저장 실패");
             } else lv_label_set_text(status,r.err==ESP_OK?"완료":"실패: 다시 시도");
         }
         if(!busy && auto_server_requested && !server_running && network_get_mode()==NET_MODE_STA_CONNECTED &&

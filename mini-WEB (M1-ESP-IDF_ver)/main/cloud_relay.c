@@ -1,4 +1,5 @@
 #include "cloud_relay.h"
+#include "m1_sound.h"
 #include "https_memory.h"
 #include "sd_media.h"
 #include "network_manager.h"
@@ -244,7 +245,10 @@ static void relay_task(void *arg) {
         if (!cloud_relay_is_online()) atomic_store(&state, CONNECTING);
         int code = exchange(cloud, reply, "poll", NULL, 0, -1);
         if (code == 200 || code == 204) {
-            atomic_store(&last_ok_seconds, (uint32_t)(esp_timer_get_time()/1000000)); atomic_store(&state, ONLINE); retry = 1;
+            atomic_store(&last_ok_seconds, (uint32_t)(esp_timer_get_time()/1000000));
+            if (atomic_exchange(&state, ONLINE) != ONLINE)
+                m1_sound_play(M1_SOUND_DOMAIN_CONNECTED);
+            retry = 1;
             if (code == 204 || serve_job(cloud, reply)) continue;
         }
         atomic_store(&state, RETRY);

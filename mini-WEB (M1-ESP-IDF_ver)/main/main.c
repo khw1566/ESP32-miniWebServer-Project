@@ -1,4 +1,5 @@
 #include "board_display.h"
+#include "m1_sound.h"
 #include "cloud_relay.h"
 #include "memory_monitor.h"
 #include "sd_media.h"
@@ -13,6 +14,8 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(web_server_log_init());
+    err=m1_sound_init();
+    if(err!=ESP_OK) ESP_LOGW("M1","Sound unavailable: %s",esp_err_to_name(err));
     err=web_server_storage_init();
     if(err!=ESP_OK) ESP_LOGW("M1","Storage unavailable: %s",esp_err_to_name(err));
     ESP_ERROR_CHECK(network_init());
