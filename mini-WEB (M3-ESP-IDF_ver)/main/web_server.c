@@ -1,3 +1,4 @@
+#include "m3_cores.h"
 #include "web_server.h"
 #include "cloud_relay.h"
 #include "https_memory.h"
@@ -1514,7 +1515,7 @@ esp_err_t web_server_start(void) {
     ESP_LOGI(TAG, "HTTP Server started successfully (Admin, WebP & File "
                   "Manager Enabled)");
     atomic_store(&s_server_running, true);
-    if(!sd_index_task_handle && xTaskCreate(sd_index_task,"sd_index",4096,NULL,1,&sd_index_task_handle)!=pdPASS)
+    if(!sd_index_task_handle && xTaskCreatePinnedToCore(sd_index_task,"sd_index",4096,NULL,1,&sd_index_task_handle,M3_CORE_MEDIA)!=pdPASS)
       ESP_LOGW(TAG,"SD background index task unavailable; direct listing remains available");
     return ESP_OK;
   }
