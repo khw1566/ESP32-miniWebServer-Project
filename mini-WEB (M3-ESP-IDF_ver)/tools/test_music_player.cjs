@@ -12,10 +12,12 @@ for(let percent=100;percent<=150;percent++)for(let sample=-32768;sample<=32767;s
  assert.equal(dsp.gain(sample,percent),Math.min(32767,Math.max(-32768,Math.trunc(sample*percent/100))));
 assert.equal(dsp.gain(30000,150),32767);assert.equal(dsp.gain(-30000,150),-32768);assert.equal(dsp.gain(1000,150),1500);
 assert.equal(dsp.gain(-1,101),-1);assert.equal(dsp.gain(1234,0),1234,'hardware owns attenuation 0..100');
-const writer={volume:150,writes:[],boost_pcm:new Int16Array(960),codec:{},cancelled:()=>false,apply_volume:()=>true,
+const writer={volume:150,feedback_volume:4294967295,UINT_MAX:4294967295,writes:[],boost_pcm:new Int16Array(960),codec:{},cancelled:()=>false,apply_volume:()=>true,
  m3_pcm_gain:dsp.gain,codec_result:(_,result)=>result===0,
  esp_codec_dev_write:(_,samples,bytes)=>{writer.writes.push(Array.from(samples.subarray(0,bytes/2)));return 0;}};
-vm.createContext(writer);vm.runInContext('function write(samples,bytes){'+body('write_pcm',audio)
+vm.createContext(writer);
+vm.runInContext('function output_volume(){'+body('output_volume',audio).replace('unsigned master','let master').replace('atomic_load(&volume)','volume')+'}',writer);
+vm.runInContext('function write(samples,bytes){'+body('write_pcm',audio)
  .replace(/\bunsigned (\w+)/g,'let $1').replace('const int16_t *input','let input')
  .replace('atomic_load(&volume)','volume').replaceAll('sizeof(int16_t)','2').replaceAll('(int)','')
  .replace('input += count','input = input.subarray(count)')+'}',writer);
@@ -147,5 +149,5 @@ const registry={initialized:false,ESP_AUDIO_ERR_OK:0,low:0,simple:0,
 vm.createContext(registry);vm.runInContext('function ready(){'+body('m3_audio_decoders_ready',audio).replace('static bool initialized;','')+'}',registry);
 assert(registry.ready());assert(registry.ready());assert.equal(registry.low,1);assert.equal(registry.simple,1);
 assert(music.includes('m3_audio_decoders_ready()')&&read('main/m3_radio.c').includes('m3_audio_decoders_ready()'));
-assert(read('main/m3_runtime.c').includes('m3_music_poll()'));assert(read('main/m3_ui.c').includes('APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_COUNT'));
+assert(read('main/m3_runtime.c').includes('m3_music_poll()'));assert(read('main/m3_ui.c').includes('APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_READER, APP_COUNT'));
 console.log('PASS: saturating 100..150 gain, storage path isolation, actual local-player WAV/MP3/AAC loop with mocked decoders, mono/stereo bytes, prefetch and fallback, cancel/read/write/OOM cleanup, sole codec ownership and service/UI integration.');

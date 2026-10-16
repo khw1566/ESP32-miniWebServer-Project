@@ -438,6 +438,13 @@ CONFIG_MINI_WEB_PUBLIC_HOST=""
 # end of Mini WEB automatic cloud connection
 
 #
+# M1 speaker notifications
+#
+CONFIG_M1_SYSTEM_SOUNDS=y
+CONFIG_M1_SOUND_ATTENUATION=3
+# end of M1 speaker notifications
+
+#
 # Compiler options
 #
 CONFIG_COMPILER_OPTIMIZATION_DEBUG=y

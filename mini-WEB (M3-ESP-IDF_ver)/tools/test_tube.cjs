@@ -44,6 +44,8 @@ vm.runInContext('function encode(bytes,size){let out=[];let n=0;let i=0;'+body('
  .replace('out[n] = 0;','')+'return out.join("");}',encoder);
 const query=[...Buffer.from('뉴진스 MV&x=1','utf8')];
 assert.equal(encoder.encode(query,1000),encodeURIComponent('뉴진스 MV&x=1'));
+for(const text of ['日本語の歌 YOASOBI','夜に駆ける','日'.repeat(100)])
+ assert.equal(encoder.encode([...Buffer.from(text)],3*385+1),encodeURIComponent(text),'Japanese UTF-8 URL bytes');
 assert(!encoder.encode(query,12).includes('%E')||encoder.encode(query,12).length<=11,'stays inside the buffer');
 
 // Protocol contract with the relay.
@@ -81,7 +83,9 @@ assert(audio.includes('m3_tube_run(request.name, request.speed, request.aac, &ou
 assert(tube.includes('request->music ? "&music=1" : ""')&&server.includes("url.searchParams.get('music') === '1'"));
 assert(tube.includes('audio_only ? "&audio=1" : ""')&&server.includes("url.searchParams.get('audio') === '1'"));
 assert(tube.includes('if (!audio_only && !frames_ready())'),'music never allocates video frames');
-assert(tube.includes('if (!request->music) list.thumb_set ^= 1;'),'song lists never touch the displayed thumbnails');
+assert(tube.includes('target->thumb_set = (request->music ? 2 : 0) + ((target->thumb_set ^ 1) & 1);'),'music and video have separate thumbnail pairs');
+assert(tube.includes('static uint8_t *thumb_sets[4]'));
+assert(tube.includes('strlen(text) >= M3_TUBE_QUERY_BYTES')&&tube.includes('!m3_utf8_valid(text)'),'reject byte truncation rather than splitting a Japanese character');
 assert(ui.includes('#include "m3_ytmusic_ui.inc"')&&ui.includes('if (player.audio_only) player.active = player.buffering = player.paused = false;'));
 assert(!/\blv_\w+\(/.test(tube),'tube worker must not call LVGL');
 assert(read('../.gitignore').includes('m3_tube_private.h')||fs.readFileSync(path.join(root,'..','.gitignore'),'utf8').includes('m3_tube_private.h'));

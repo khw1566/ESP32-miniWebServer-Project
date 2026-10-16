@@ -1,6 +1,7 @@
 #include "m3_cores.h"
 #include "network_manager.h"
 #include "m3_google_audio.h"
+#include "m3_azure_audio.h"
 #include "m3_audio.h"
 #include "m3_board.h"
 #include "m3_wav.h"
@@ -8,7 +9,9 @@
 #include "m3_voice.h"
 #include "m3_recorder.h"
 #include "m3_preferences.h"
+#include "m3_feedback.h"
 #include "m3_tube.h"
+#include "m3_tube_config.h"
 #include "m3_music.h"
 #include "m3_gallery.h"
 #include "m3_memory.h"
@@ -43,7 +46,13 @@ static atomic_uint cancel_epoch;
 /* Only the audio worker writes active_epoch. A stop cannot be lost while dequeuing. */
 static unsigned active_epoch;
 static atomic_uint volume = 40;
-static atomic_uint tts_provider; /* 0 OpenAI, 1 Google, 2 offline eSpeak */
+static atomic_bool feedback_active;
+static unsigned feedback_volume = UINT_MAX; /* Audio worker only; never writes media preferences. */
+static unsigned output_volume(void) {
+    unsigned master = atomic_load(&volume);
+    return !master ? 0 : feedback_volume != UINT_MAX ? feedback_volume : master;
+}
+static atomic_uint tts_provider; /* 0 OpenAI, 1 Google, 2 offline eSpeak, 3 Azure */
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_audio_state_t state;
 static M3_PSRAM_BSS int16_t boost_pcm[960];
@@ -56,7 +65,7 @@ bool m3_audio_decoders_ready(void) {
     }
     return true;
 }
-typedef enum { PLAY_FILE, PLAY_RADIO, PLAY_TTS, PLAY_CLOUD_TTS, PLAY_OPENAI_TTS, PLAY_VOICE, PLAY_TUBE, PLAY_MUSIC, PLAY_RECORD, PLAY_RECORDING, PLAY_MP4 } request_kind_t;
+typedef enum { PLAY_FILE, PLAY_RADIO, PLAY_TTS, PLAY_CLOUD_TTS, PLAY_OPENAI_TTS, PLAY_VOICE, PLAY_TUBE, PLAY_MUSIC, PLAY_RECORD, PLAY_RECORDING, PLAY_MP4, PLAY_AZURE_TTS } request_kind_t;
 typedef struct { char name[513]; unsigned epoch, speed; request_kind_t kind; bool aac; } request_t;
 static bool cancelled(void) { return atomic_load(&cancel_epoch) != active_epoch; }
 static void message(const char *text, bool playing, unsigned progress) {
@@ -79,12 +88,21 @@ void m3_audio_stop(void) {
     m3_recorder_cancel();
     m3_gallery_audio_cancel();
     if (requests) xQueueReset(requests);
+    m3_feedback_clear();
+}
+static void interrupt_feedback(void) {
+    /* Only a cue owns the codec here. Do not invalidate a microphone/gallery
+     * job that the caller has just prepared while the cue was playing. */
+    atomic_fetch_add(&cancel_epoch, 1);
+    if (requests) xQueueReset(requests);
+    m3_feedback_clear();
 }
 bool m3_audio_play(const char *name) {
     if (m3_preferences_restarting()) return false;
     if (!requests || !name || !sd_media_name_valid(name)) return false;
     m3_audio_state_t current; m3_audio_state(&current);
-    if (!current.ready || current.playing) return false;
+    if (!current.ready || (current.playing && !atomic_load(&feedback_active))) return false;
+    if (atomic_load(&feedback_active)) interrupt_feedback();
     const char *ext = strrchr(name, '.');
     if (!ext || strcasecmp(ext, ".wav")) return false;
     request_t request = {.epoch = atomic_load(&cancel_epoch), .kind = PLAY_FILE}; snprintf(request.name, sizeof(request.name), "%s", name);
@@ -93,7 +111,8 @@ bool m3_audio_play(const char *name) {
 static bool enqueue_app(request_kind_t kind, const char *text, unsigned speed, bool aac) {
     if (m3_preferences_restarting()) return false;
     m3_audio_state_t current; m3_audio_state(&current);
-    if (!requests || !current.ready || current.playing) return false;
+    if (!requests || !current.ready || (current.playing && !atomic_load(&feedback_active))) return false;
+    if (atomic_load(&feedback_active)) interrupt_feedback();
     request_t request = {.kind = kind, .epoch = atomic_load(&cancel_epoch), .speed = speed, .aac = aac};
     snprintf(request.name, sizeof(request.name), "%s", text);
     bool accepted = xQueueSend(requests, &request, 0) == pdTRUE;
@@ -102,6 +121,15 @@ static bool enqueue_app(request_kind_t kind, const char *text, unsigned speed, b
 bool m3_audio_radio(const char *url, bool aac) {
     return m3_radio_url_valid(url) && enqueue_app(PLAY_RADIO, url, 0, aac);
 }
+bool m3_audio_radio_preset(const char *station, unsigned profile) {
+    static const char *const profiles[] = {"economy", "balanced", "high"};
+    if (!m3_tube_configured() || !station || !station[0] || strlen(station) > 40 || profile >= 3) return false;
+    for (const char *p = station; *p; ++p)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-')) return false;
+    char url[513];
+    int n = snprintf(url, sizeof(url), "%s/api/radio?station=%s&profile=%s", M3_TUBE_URL, station, profiles[profile]);
+    return n > 0 && (size_t)n < sizeof(url) && m3_audio_radio(url, false);
+}
 bool m3_audio_mp4(const char *relative, unsigned gallery_job) {
     if (!relative || relative[0] != '/' || strlen(relative) > 255 || strstr(relative, "..") || strchr(relative, '\\')) return false;
     m3_recorder_state_t recording; m3_recorder_state(&recording);
@@ -109,7 +137,7 @@ bool m3_audio_mp4(const char *relative, unsigned gallery_job) {
 }
 bool m3_audio_record(void) {
     m3_audio_state_t current; m3_audio_state(&current);
-    if (!requests || !current.ready || current.playing) return false;
+    if (!requests || !current.ready || (current.playing && !atomic_load(&feedback_active))) return false;
     unsigned job = m3_recorder_prepare();
     if (!job) return false;
     if (enqueue_app(PLAY_RECORD, "", job, false)) return true;
@@ -141,7 +169,15 @@ bool m3_audio_music_follow(const char *path) {
 /* YouTube via the PC relay; speed carries the start position in seconds. */
 bool m3_audio_tube(const char *id, unsigned start_seconds, bool audio_only) {
     /* The request's aac flag carries audio-only (YouTube Music) mode. */
-    return network_get_mode() == NET_MODE_STA_CONNECTED && enqueue_app(PLAY_TUBE, id, start_seconds, audio_only);
+    bool ready = network_get_mode() == NET_MODE_STA_CONNECTED;
+    if (!ready && audio_only) { m3_tube_music_cache_t cache; m3_tube_music_cache(id,&cache); ready=cache.ready; }
+    return ready && enqueue_app(PLAY_TUBE, id, start_seconds, audio_only);
+}
+bool m3_audio_tube_follow(const char *id) {
+    if (!requests || cancelled() || m3_preferences_restarting() || !id || strlen(id)!=11) return false;
+    request_t request={.kind=PLAY_TUBE,.epoch=active_epoch,.aac=true};
+    snprintf(request.name,sizeof(request.name),"%s",id);
+    return xQueueSend(requests,&request,0)==pdTRUE;
 }
 bool m3_audio_tts(const char *text, unsigned speed) {
     return m3_tts_text_valid(text) && enqueue_app(PLAY_TTS, text, speed, false);
@@ -150,9 +186,12 @@ bool m3_audio_cloud_tts(const char *text) {
     return m3_google_tts_ready() && network_get_mode() == NET_MODE_STA_CONNECTED &&
         m3_tts_text_valid(text) && enqueue_app(PLAY_CLOUD_TTS, text, 0, false);
 }
-void m3_audio_tts_provider(unsigned provider) { if (provider < 3) atomic_store(&tts_provider, provider); }
+void m3_audio_tts_provider(unsigned provider) { if (provider < 4) atomic_store(&tts_provider, provider); }
+unsigned m3_audio_tts_selected(void) { return atomic_load(&tts_provider); }
 bool m3_audio_speak(const char *text, unsigned speed) {
     unsigned provider = atomic_load(&tts_provider);
+    if (provider == 3) return m3_azure_audio_ready() && network_get_mode() == NET_MODE_STA_CONNECTED &&
+        m3_tts_text_valid(text) && enqueue_app(PLAY_AZURE_TTS, text, 0, false);
     if (provider == 2) return m3_audio_tts(text, speed);
     if (provider == 1) return m3_audio_cloud_tts(text);
     return m3_openai_audio_ready() && network_get_mode() == NET_MODE_STA_CONNECTED &&
@@ -160,7 +199,7 @@ bool m3_audio_speak(const char *text, unsigned speed) {
 }
 bool m3_audio_voice(void) {
     m3_audio_state_t current; m3_audio_state(&current);
-    if (!requests || !current.ready || current.playing) return false;
+    if (!requests || !current.ready || (current.playing && !atomic_load(&feedback_active))) return false;
     unsigned job = m3_voice_prepare();
     if (!job) return false;
     if (!enqueue_app(PLAY_VOICE, "", job, false)) { m3_voice_cancel(); return false; }
@@ -207,7 +246,7 @@ static bool codec_result(const char *operation, int result) {
     return false;
 }
 static bool apply_volume(void) {
-    unsigned requested = atomic_load(&volume);
+    unsigned requested = output_volume();
     if (requested == applied_volume) return true;
     if (!codec_result("set volume", esp_codec_dev_set_out_vol(codec, requested > 100 ? 100 : requested))) return false;
     if (!codec_result("set mute", esp_codec_dev_set_out_mute(codec, requested == 0))) return false;
@@ -245,7 +284,7 @@ static bool open_rate(uint32_t rate) {
 static bool write_pcm(void *samples, unsigned bytes) {
     if (cancelled()) return false;
     if (!apply_volume()) return false;
-    unsigned gain = atomic_load(&volume);
+    unsigned gain = output_volume();
     if (gain <= 100) return codec_result("PCM write", esp_codec_dev_write(codec, samples, (int)bytes));
     if (bytes % sizeof(int16_t)) return false;
     const int16_t *input = samples;
@@ -335,8 +374,17 @@ static void audio_worker(void *unused) {
                                      .drain = drain_output, .message = message};
     const m3_voice_capture_t capture = {.begin = capture_begin, .read = capture_read, .end = capture_end, .cancelled = cancelled};
     unsigned saved_volume = atomic_load(&volume);
+    m3_feedback_job_t cue;
+    if (m3_feedback_boot(&cue) && atomic_load(&volume)) {
+        active_epoch = atomic_load(&cancel_epoch);
+        feedback_volume = cue.volume; atomic_store(&feedback_active, true);
+        if (!uxQueueMessagesWaiting(requests) && !cancelled()) m3_feedback_run(&cue, &output);
+        esp_codec_dev_close(codec);
+        feedback_volume = UINT_MAX; atomic_store(&feedback_active, false);
+    }
     for (;;) {
-        if (xQueueReceive(requests, &request, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (xQueueReceive(requests, &request, pdMS_TO_TICKS(20)) == pdTRUE) {
+            m3_feedback_clear();
             active_epoch = request.epoch;
             if (cancelled()) continue;
             if (request.kind == PLAY_VOICE) {
@@ -348,6 +396,7 @@ static void audio_worker(void *unused) {
             else if (request.kind == PLAY_MUSIC) { m3_music_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_RADIO) { m3_radio_run(request.name, request.aac, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_TUBE) { m3_tube_run(request.name, request.speed, request.aac, &output); esp_codec_dev_close(codec); }
+            else if (request.kind == PLAY_AZURE_TTS) { m3_azure_tts_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_OPENAI_TTS) { m3_openai_tts_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_CLOUD_TTS) { m3_google_tts_run(request.name, &output); esp_codec_dev_close(codec); }
             else if (request.kind == PLAY_TTS) { m3_tts_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
@@ -359,6 +408,12 @@ static void audio_worker(void *unused) {
                 message("SD recording finished", false, 0);
             }
             memset(&request, 0, sizeof(request));
+        } else if (m3_feedback_take(&cue) && atomic_load(&volume)) {
+            active_epoch = atomic_load(&cancel_epoch);
+            feedback_volume = cue.volume; atomic_store(&feedback_active, true);
+            if (!uxQueueMessagesWaiting(requests) && !cancelled()) m3_feedback_run(&cue, &output);
+            esp_codec_dev_close(codec);
+            feedback_volume = UINT_MAX; atomic_store(&feedback_active, false);
         }
         unsigned current = atomic_load(&volume);
         if (current != saved_volume) {
@@ -371,6 +426,7 @@ static void audio_worker(void *unused) {
     }
 }
 esp_err_t m3_audio_start(void) {
+    m3_audio_tts_provider(m3_azure_audio_ready() ? 3 : 0);
     m3_preferences_t preferences; m3_preferences_get(&preferences);
     m3_audio_volume(preferences.volume);
     requests = xQueueCreate(1, sizeof(request_t));

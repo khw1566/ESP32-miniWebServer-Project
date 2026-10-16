@@ -8,7 +8,12 @@
 #include "web_server.h"
 #include "m3_web_assets.h"
 #include "sd_media.h"
+#include "m3_sd_settings.h"
+#include "m3_azure_audio.h"
+#include "m3_voice.h"
 #include "m3_preferences.h"
+#include "m3_feedback.h"
+#include "m3_i18n.h"
 #include "cloud_relay.h"
 #include "dns_server.h"
 #include "freertos/queue.h"
@@ -36,31 +41,47 @@ static m3_runtime_state_t state;
 static bool setup_requested;
 static bool clock_started;
 static int64_t next_wifi_retry;
-/* Logs each HP core's busy share every 30 s from the idle tasks' run-time
+/* Samples each HP core's busy share from the idle tasks' run-time
  * counters (microseconds with the default esp_timer clock), so core placement
  * can be checked on the board with real apps running. IDF 5.5's kernel only
  * reads the calling core's idle counter, so each read runs on its own core. */
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
 static void read_idle_counter(void *out) { *(configRUN_TIME_COUNTER_TYPE *)out = ulTaskGetIdleRunTimeCounter(); }
 #endif
-static void log_core_load(void) {
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
-    static int64_t last_us;
+static unsigned core_busy(uint64_t elapsed, uint64_t idle) {
+    if (!elapsed || idle >= elapsed) return 0;
+    return 100 - (unsigned)(idle * 100 / elapsed);
+}
+#endif
+static void log_core_load(m3_runtime_state_t *next) {
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    static int64_t last_us, last_log;
     static configRUN_TIME_COUNTER_TYPE last_idle[2];
     int64_t now = esp_timer_get_time();
-    if (last_us && now - last_us < 30000000) return;
+    if (last_us && now - last_us < 1000000) return;
     unsigned busy[2] = {0};
+    configRUN_TIME_COUNTER_TYPE idle[2] = {0};
     for (int core = 0; core < 2; ++core) {
-        configRUN_TIME_COUNTER_TYPE idle = 0;
-        if (esp_ipc_call_blocking(core, read_idle_counter, &idle) != ESP_OK) return;
-        if (last_us && now > last_us) {
-            uint64_t share = (uint64_t)(idle - last_idle[core]) * 100 / (uint64_t)(now - last_us);
-            busy[core] = share >= 100 ? 0 : 100 - (unsigned)share;
-        }
-        last_idle[core] = idle;
+        if (esp_ipc_call_blocking(core, read_idle_counter, &idle[core]) != ESP_OK) return;
     }
-    if (last_us) ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]);
+    for (int core = 0; core < 2; ++core) {
+        if (last_us && now > last_us) {
+            busy[core] = core_busy(now - last_us, (configRUN_TIME_COUNTER_TYPE)(idle[core] - last_idle[core]));
+        }
+        last_idle[core] = idle[core];
+    }
+    if (last_us) {
+        next->cpu_valid = true;
+        next->cpu_percent[0] = busy[0]; next->cpu_percent[1] = busy[1];
+        ++next->cpu_revision;
+        if (now - last_log >= 30000000) {
+            ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]); last_log = now;
+        }
+    }
     last_us = now;
+#else
+    (void)next;
 #endif
 }
 /* One service task owns SNTP, including when cloud access is unprovisioned. */
@@ -112,6 +133,7 @@ bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings
 static bool restore_wifi_password(network_settings_t *settings) {
     network_settings_t saved;
     bool found = network_settings_load(&saved) && saved.pass[0] && !strcmp(saved.ssid, settings->ssid);
+    if (!found) found = m3_sd_wifi_find(settings->ssid, &saved) && saved.pass[0];
     if (found) snprintf(settings->pass, sizeof(settings->pass), "%s", saved.pass);
     memset(&saved, 0, sizeof(saved));
     return found;
@@ -166,6 +188,8 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
             cloud_relay_start();
         }
     }
+    if (request->action != M3_WIFI_SCAN && request->action != M3_WIFI_IPV6)
+        m3_feedback_emit(result == ESP_OK ? (network_get_mode() == NET_MODE_STA_CONNECTED ? M3_CUE_WIFI_CONNECTED : M3_CUE_WIFI_SETUP) : M3_CUE_WIFI_FAILED, m3_i18n_language());
     memset(request, 0, sizeof(*request));
     next_wifi_retry = esp_timer_get_time() + 60000000LL;
     ++next->wifi_revision;
@@ -204,6 +228,9 @@ static void services(void *unused) {
     if (storage != ESP_OK) ESP_LOGW("M3", "Flash storage: %s", esp_err_to_name(storage));
     next.sd = sd_media_init() == ESP_OK;
     m3_web_assets_load(); /* Boot snapshot: before HTTP and cloud workers can read the immutable cache. */
+    m3_sd_settings_init();
+    m3_voice_set_key(m3_sd_openai_key());
+    if (m3_azure_audio_ready()) { m3_voice_set_provider(3); m3_audio_tts_provider(3); }
     m3_boot_splash_step(M3_BOOT_NETWORK);
     esp_err_t net = network_init();
     next.wifi_ready = net == ESP_OK;
@@ -224,6 +251,8 @@ static void services(void *unused) {
             cloud_relay_start();
         }
     }
+    m3_feedback_emit(M3_CUE_READY, m3_i18n_language());
+    m3_feedback_emit(connected ? M3_CUE_WIFI_CONNECTED : saved_wifi ? M3_CUE_WIFI_FAILED : M3_CUE_WIFI_SETUP, m3_i18n_language());
     next.initialized = true;
     m3_boot_splash_step(M3_BOOT_READY);
     network_settings_load(&next.settings);
@@ -254,7 +283,9 @@ static void services(void *unused) {
             atomic_store(&mutation_pending, false);
         }
         m3_preferences_poll();
-        log_core_load();
+        m3_power_poll(&next.power);
+        m3_feedback_poll();
+        log_core_load(&next);
         if (!m3_preferences_web_active()) { m3_music_poll(); m3_photos_poll(); m3_sd_apps_poll(); }
         wifi_request_t request;
         if (xQueueReceive(wifi_queue, &request, 0) == pdTRUE) wifi_execute(&next, &request);

@@ -20,6 +20,18 @@
       "file": "7_OTHER.png",
       "url": "https://raw.githubusercontent.com/guitionofficial/P4-series/master/JC4880P443C_I_W/JC4880P443C_I_W/5-Schematic/7_OTHER.png",
       "sha256": "70b58f2b7f432831fbf03903747609e1f74b5c91a02926924998c9c8823e7f47"
+    },
+    {
+      "file": "1_PWR.png",
+      "url": "https://raw.githubusercontent.com/guitionofficial/P4-series/master/JC4880P443C_I_W/JC4880P443C_I_W/5-Schematic/1_PWR.png",
+      "sha256": "102b9cb4306b64f6ba657fd565c7a0d5076c48f3c04a1ac865f4565a45d8dd3d",
+      "checked": "2026-10-15"
+    },
+    {
+      "file": "IIC_IP5306_REG_V1.4.pdf",
+      "url": "https://raw.githubusercontent.com/m5stack/M5-Schematic/master/Core/IIC_IP5306_REG_V1.4.pdf",
+      "sha256": "38f0f94adb2af36ea33242337ffe4e1bb0f51035fb201396a0d60f367b5bb06b",
+      "checked": "2026-10-15"
     }
   ]
 }

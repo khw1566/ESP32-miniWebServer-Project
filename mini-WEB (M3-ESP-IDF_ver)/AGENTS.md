@@ -31,7 +31,36 @@ M3 메모리 설정이나 핀 설정을 그대로 적용하지 않는다.
 - Node/Python 호스트 검사와 컴파일러를 사용하지 않는 CMake fixture는 실행한다.
   화면 수정이 없으면 불필요한 화면 렌더링을 반복하지 않는다.
 - 이모지·그림문자를 UI, 코드, 로그, 문서에 추가하지 않는다. 웹 UI는 반응형으로
-  유지한다. 실제 API 키는 Git 제외 로컬 헤더에만 보관하고 출력·화면·fixture에 넣지 않는다.
+  유지한다. 실제 API 키는 아래 SD 카드 보관 정책을 따르며 출력·화면·fixture에 넣지 않는다.
+
+## API 키의 SD 카드 로컬 보관
+
+- 실제 API 키의 기기 내 영구 저장 위치는 SD 카드의 `.private/api_keys.json`이다.
+  Azure TTS·STT는 이 파일의 `azure_speech`와 `azure_region`을 사용한다.
+  현재 Azure 지역은 `koreacentral`이다.
+- 실제 키를 소스, 로컬 헤더, 빌드 설정, Flash/NVS 또는 펌웨어 바이너리에
+  내장하지 않는다. SD 설정을 읽지 못하면 키가 없는 상태로 처리하고,
+  내장 키로 우회하지 않는다. 키 교체는 SD 설정 갱신으로 수행한다.
+- PC의 Git 제외 파일 `sd_private/.private/api_keys.json`은 SD 설치용 로컬
+  원본이다. 실제 키를 Git에 추가하거나 로그·스크린샷·테스트 데이터에 노출하지 않는다.
+- 저장소 루트에서 다음 명령으로 SD 카드 설정을 복사한다. `E:/`는 사용자의
+  실제 SD 카드 드라이브로 바꾼다. `--replace-keys`는 기존 API 키 파일을
+  갱신하며 Wi-Fi 설정은 유지한다. 복사 후 카드를 보드에 넣고 재부팅한다.
+
+  ```powershell
+  python -X utf8 tools/copy_m3_sd_settings.py E:/ --replace-keys
+  ```
+
+- 과거 Azure 내장 키 파일이 남아 있다면 저장소 루트에서 아래 명령으로
+  제거한다. 이미 빌드된 바이너리에 포함된 키는 파일 삭제만으로 제거되지
+  않으므로 사용자가 새로 빌드·플래시해야 한다. 에이전트 빌드 금지는 유지한다.
+
+  ```powershell
+  Remove-Item -LiteralPath '.\mini-WEB (M3-ESP-IDF_ver)\main\include\m3_azure_private.h'
+  ```
+
+- 상세 설정 형식과 복사 절차는
+  [`docs/SD_PRIVATE_SETTINGS.md`](docs/SD_PRIVATE_SETTINGS.md)를 참고한다.
 
 ## 최적화 실행
 

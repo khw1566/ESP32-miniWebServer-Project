@@ -87,6 +87,9 @@ esp_err_t network_save_configuration(const network_settings_t *s) {
         if (err == ESP_OK) err = nvs_commit(h);
         nvs_close(h);
     }
+    #ifdef NETWORK_SETTINGS_SAVED_HOOK
+    if (err == ESP_OK) NETWORK_SETTINGS_SAVED_HOOK(&clean);
+    #endif
     memset(&clean, 0, sizeof(clean));
     return err;
 }

@@ -156,6 +156,8 @@ worker=worker.replaceAll('60000000LL','60000000').replace('request.settings.pass
 const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPTIVE:1,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,M3_WIFI_RESULTS:8,
  setup_requested:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
  restore_wifi_password:()=>false,
+ NET_MODE_STA_CONNECTED:2,M3_CUE_WIFI_CONNECTED:3,M3_CUE_WIFI_SETUP:4,M3_CUE_WIFI_FAILED:5,
+ m3_i18n_language:()=>0,m3_feedback_emit:()=>{},
  pending:true,events:[],saved:0,connected:0,fallback:0,scanned:2,web:true,
  record_message:()=>{},publish:()=>radio.events.push('publish'),
  network_scan_wifi:()=>{radio.events.push('scan');return radio.scanned;},
@@ -224,7 +226,8 @@ passwords.wifi_open_selected=true;assert.equal(passwords.choose({ssid:'Saved',pa
 passwords.wifi_selected_ssid='Other';assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
 passwords.snapshot.wifi_password_saved=false;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
 // Execute secret restoration from the actual C helper, with an NVS mock.
-const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,
+const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,sdSaved:null,
+ m3_sd_wifi_find:(ssid,s)=>{if(!secrets.sdSaved || secrets.sdSaved.ssid!==ssid)return false;Object.assign(s,secrets.sdSaved);return true;},
  network_settings_load:s=>{Object.assign(s,secrets.saved);return secrets.available;},strcmp:passwords.strcmp,
  snprintf:(s,_size,_format,value)=>{s.pass=value;},memset:s=>{for(const k of Object.keys(s))s[k]='';secrets.cleared=s;}};
 vm.createContext(secrets);
@@ -238,6 +241,8 @@ assert(secrets.restore(candidate));assert.equal(candidate.pass,'stored-secret');
 assert.equal(secrets.cleared.pass,'');assert.equal(secrets.saved.pass,'stored-secret');
 candidate={ssid:'Other',pass:''};assert(!secrets.restore(candidate));assert.equal(candidate.pass,'');
 secrets.available=false;assert(!secrets.restore({ssid:'Saved',pass:''}));
+secrets.sdSaved={ssid:'Other',pass:'sd-fixture-secret'};candidate={ssid:'Other',pass:''};
+assert(secrets.restore(candidate));assert.equal(candidate.pass,'sd-fixture-secret');assert.equal(secrets.cleared.pass,'');
 // Both security icons are drawn with primitives; no font glyph dependency.
 const locks={GREEN:1,MUTED:2,LV_BORDER_SIDE_TOP:1,LV_BORDER_SIDE_LEFT:2,LV_BORDER_SIDE_RIGHT:4,
  lv_obj_get_child:(obj,i)=>obj.children[i],lv_color_hex:x=>x,

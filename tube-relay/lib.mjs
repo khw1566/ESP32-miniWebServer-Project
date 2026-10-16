@@ -1,7 +1,8 @@
 // Pure helpers shared by server.mjs and the tests: text cleanup, MJPEG splitting,
 // PCM chunking, the M3TV packet format and the packet interleaver.
 
-// The board fonts contain ASCII, Hangul syllables and compatibility jamo only.
+// Display text follows the board's Hangul + Unifont CJK fallback, not the old
+// Hangul-only font. Search text is kept separately so glyph policy never changes a query.
 const PUNCTUATION = new Map(Object.entries({
   '‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-', '―': '-',
   '…': '...', '·': '-', '•': '-', '【': '[', '】': ']', '「': '[', '」': ']',
@@ -17,12 +18,26 @@ export function sanitize(text, maxBytes = 160) {
     if (code >= 0x20 && code < 0x7f) mapped = ch;
     else if ((code >= 0xac00 && code <= 0xd7a3) || (code >= 0x3131 && code <= 0x318e)) mapped = ch;
     else if (PUNCTUATION.has(ch)) mapped = PUNCTUATION.get(ch);
+    else if ((code >= 0x3000 && code <= 0x30ff) || (code >= 0x31f0 && code <= 0x31ff) ||
+        (code >= 0x3400 && code <= 0x9fff) || (code >= 0xf900 && code <= 0xfaff) ||
+        (code >= 0xff66 && code <= 0xff9f) || (code >= 0x20000 && code <= 0x3134f)) mapped = ch;
     else if (code === 0x0a || code === 0x09) mapped = ' ';
     else if (code >= 0xff01 && code <= 0xff5e) mapped = String.fromCharCode(code - 0xfee0); // full-width ASCII
     else if (code >= 0xc0 && code < 0x2000) {
       const base = ch.normalize('NFD').replace(/[̀-ͯ]/g, ''); // e.g. "ễ" -> "e"
       if (/^[\x20-\x7e]+$/.test(base)) mapped = base;
     }
+    if (Buffer.byteLength(out + mapped) > maxBytes) break;
+    out += mapped;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+export function searchText(text, maxBytes = 384) {
+  let out = '';
+  for (const ch of String(text ?? '').normalize('NFC')) {
+    const code = ch.codePointAt(0);
+    const mapped = /\s/u.test(ch) ? ' ' :
+      code < 32 || code === 127 || (code >= 0xd800 && code <= 0xdfff) || /\p{Cf}/u.test(ch) ? '' : ch;
     if (Buffer.byteLength(out + mapped) > maxBytes) break;
     out += mapped;
   }

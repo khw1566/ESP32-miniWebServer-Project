@@ -97,7 +97,8 @@ void storage_view_read(bool sd, const char *folder, unsigned offset, storage_vie
     memset(view, 0, sizeof(*view));
     view->offset = offset;
     if (!folder || strlen(folder) > 255 || strstr(folder, "..") ||
-        (folder[0] && folder[0] != '/') || (!sd && folder[0])) {
+        (folder[0] && folder[0] != '/') || (!sd && folder[0]) ||
+        (sd && folder[0] && strcmp(folder, "/") && !mutation_path(folder))) {
         view->error = ESP_ERR_INVALID_ARG;
         return;
     }
@@ -119,7 +120,7 @@ void storage_view_read(bool sd, const char *folder, unsigned offset, storage_vie
     }
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        if (entry->d_name[0] == '.') continue;
         /* Interrupted downloads are never presented as saved videos. */
         const char *extension = strrchr(entry->d_name, '.');
         if (sd && !strcmp(folder, M3_TUBE_DOWNLOAD_FOLDER) && extension && !strcmp(extension, ".part")) continue;

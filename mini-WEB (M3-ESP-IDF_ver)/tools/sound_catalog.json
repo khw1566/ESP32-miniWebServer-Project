@@ -1,0 +1,238 @@
+{
+  "version": 1,
+  "voices": {
+    "ko": {
+      "languageCode": "ko-KR",
+      "name": "ko-KR-Chirp3-HD-Aoede",
+      "ssmlGender": "FEMALE"
+    },
+    "en": {
+      "languageCode": "en-US",
+      "name": "en-US-Chirp3-HD-Aoede",
+      "ssmlGender": "FEMALE"
+    },
+    "ja": {
+      "languageCode": "ja-JP",
+      "name": "ja-JP-Chirp3-HD-Aoede",
+      "ssmlGender": "FEMALE"
+    }
+  },
+  "cues": [
+    {
+      "id": 2,
+      "name": "ready",
+      "text": {
+        "en": "Mini WebServer is ready.",
+        "ko": "미니 웹서버가 준비되었습니다.",
+        "ja": "ミニウェブサーバーの準備ができました。"
+      }
+    },
+    {
+      "id": 3,
+      "name": "wifi_connected",
+      "text": {
+        "en": "Wi-Fi connected.",
+        "ko": "와이파이에 연결되었습니다.",
+        "ja": "ワイファイに接続しました。"
+      }
+    },
+    {
+      "id": 4,
+      "name": "wifi_setup",
+      "text": {
+        "en": "Open Wi-Fi settings to connect.",
+        "ko": "와이파이 설정에서 연결해 주세요.",
+        "ja": "ワイファイ設定から接続してください。"
+      }
+    },
+    {
+      "id": 5,
+      "name": "wifi_failed",
+      "text": {
+        "en": "Wi-Fi connection failed. Please check your settings.",
+        "ko": "와이파이 연결에 실패했습니다. 설정을 확인해 주세요.",
+        "ja": "ワイファイに接続できませんでした。設定を確認してください。"
+      }
+    },
+    {
+      "id": 6,
+      "name": "saved",
+      "text": {
+        "en": "Settings saved.",
+        "ko": "설정을 저장했습니다.",
+        "ja": "設定を保存しました。"
+      }
+    },
+    {
+      "id": 7,
+      "name": "error",
+      "text": {
+        "en": "Please check and try again.",
+        "ko": "확인한 뒤 다시 시도해 주세요.",
+        "ja": "確認して、もう一度お試しください。"
+      }
+    },
+    {
+      "id": 8,
+      "name": "accessibility",
+      "text": {
+        "en": "Accessibility. Choose voice guidance or sound cues.",
+        "ko": "접근성 설정입니다. 안내음성이나 효과음을 선택해 주세요.",
+        "ja": "アクセシビリティ設定です。音声案内か効果音を選んでください。"
+      }
+    },
+    {
+      "id": 9,
+      "name": "language",
+      "text": {
+        "en": "English voice guidance selected.",
+        "ko": "한국어 안내음성을 선택했습니다.",
+        "ja": "日本語の音声案内を選択しました。"
+      }
+    },
+    {
+      "id": 10,
+      "name": "app_home",
+      "text": {
+        "en": "Home.",
+        "ko": "홈 화면입니다.",
+        "ja": "ホーム画面です。"
+      }
+    },
+    {
+      "id": 11,
+      "name": "app_wifi",
+      "text": {
+        "en": "Wi-Fi settings.",
+        "ko": "와이파이 설정입니다.",
+        "ja": "ワイファイ設定です。"
+      }
+    },
+    {
+      "id": 12,
+      "name": "app_files",
+      "text": {
+        "en": "Files.",
+        "ko": "파일 목록입니다.",
+        "ja": "ファイル一覧です。"
+      }
+    },
+    {
+      "id": 13,
+      "name": "app_recorder",
+      "text": {
+        "en": "Voice recorder.",
+        "ko": "녹음기입니다.",
+        "ja": "ボイスレコーダーです。"
+      }
+    },
+    {
+      "id": 14,
+      "name": "app_monitor",
+      "text": {
+        "en": "System monitor.",
+        "ko": "시스템 상태입니다.",
+        "ja": "システムの状態です。"
+      }
+    },
+    {
+      "id": 15,
+      "name": "app_settings",
+      "text": {
+        "en": "Settings.",
+        "ko": "설정입니다.",
+        "ja": "設定です。"
+      }
+    },
+    {
+      "id": 16,
+      "name": "app_radio",
+      "text": {
+        "en": "Radio.",
+        "ko": "라디오입니다.",
+        "ja": "ラジオです。"
+      }
+    },
+    {
+      "id": 17,
+      "name": "app_games",
+      "text": {
+        "en": "Games.",
+        "ko": "게임입니다.",
+        "ja": "ゲームです。"
+      }
+    },
+    {
+      "id": 18,
+      "name": "app_tts",
+      "text": {
+        "en": "Text to speech.",
+        "ko": "음성합성입니다.",
+        "ja": "音声合成です。"
+      }
+    },
+    {
+      "id": 19,
+      "name": "app_agent",
+      "text": {
+        "en": "AI assistant.",
+        "ko": "인공지능 도우미입니다.",
+        "ja": "人工知能アシスタントです。"
+      }
+    },
+    {
+      "id": 20,
+      "name": "app_tube",
+      "text": {
+        "en": "YouTube.",
+        "ko": "유튜브입니다.",
+        "ja": "ユーチューブです。"
+      }
+    },
+    {
+      "id": 21,
+      "name": "app_music",
+      "text": {
+        "en": "Music player.",
+        "ko": "음악 재생기입니다.",
+        "ja": "音楽プレーヤーです。"
+      }
+    },
+    {
+      "id": 22,
+      "name": "app_gallery",
+      "text": {
+        "en": "Gallery.",
+        "ko": "갤러리입니다.",
+        "ja": "ギャラリーです。"
+      }
+    },
+    {
+      "id": 23,
+      "name": "app_calculator",
+      "text": {
+        "en": "Calculator.",
+        "ko": "계산기입니다.",
+        "ja": "電卓です。"
+      }
+    },
+    {
+      "id": 24,
+      "name": "app_ytmusic",
+      "text": {
+        "en": "YouTube Music.",
+        "ko": "유튜브 뮤직입니다.",
+        "ja": "ユーチューブミュージックです。"
+      }
+    },
+    {
+      "id": 25,
+      "name": "app_reader",
+      "text": {
+        "en": "Text reader.",
+        "ko": "텍스트 리더입니다.",
+        "ja": "テキストリーダーです。"
+      }
+    }
+  ]
+}

@@ -371,6 +371,8 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
 // -------------------------------------------------------------
 // NVS: Wi-Fi 자격증명 저장
 // -------------------------------------------------------------
+#include "m3_sd_settings.h"
+#define NETWORK_SETTINGS_SAVED_HOOK m3_sd_wifi_save
 #include "network_settings.inc"
 
 esp_err_t network_get_ip_str(char *out_ip, size_t ip_len) {

@@ -1,6 +1,7 @@
 #include "m3_cores.h"
 #include "m3_wifi_performance.h"
 #include "m3_audio_apps.h"
+#include "m3_tube_config.h"
 #include "network_manager.h"
 #include "https_memory.h"
 #include "esp_http_client.h"
@@ -264,6 +265,8 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
     };
     http = esp_http_client_init(&config);
     if (!http) goto done;
+    bool relay = !strncmp(url, M3_TUBE_URL "/api/radio?", sizeof(M3_TUBE_URL "/api/radio?") - 1);
+    if (relay) esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN);
     esp_http_client_set_header(http, "Icy-MetaData", "0");
     esp_http_client_set_header(http, "Accept-Encoding", "identity");
     for (unsigned redirect = 0;; ++redirect) {
@@ -272,7 +275,7 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
         if (esp_http_client_fetch_headers(http) < 0) goto done;
         int status = esp_http_client_get_status_code(http);
         if (status == 200) break;
-        if (!leased || redirect >= 3 ||
+        if (relay || !leased || redirect >= 3 ||
             (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) ||
             esp_http_client_set_redirection(http) != ESP_OK) {
             error = "Use a direct HTTPS MP3/AAC stream, not a playlist"; goto done;

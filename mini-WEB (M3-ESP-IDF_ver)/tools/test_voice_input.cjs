@@ -22,7 +22,7 @@ function literal(name){
  const m=new RegExp('static const char '+name+'\\[\\] =([\\s\\S]*?);').exec(source);assert(m,name);
  // Match to the terminating C declaration, allowing semicolons inside MIME strings.
  const start=source.indexOf('static const char '+name+'[] =');
- const rest=source.slice(start).split(/;\n/)[0];
+ const rest=source.slice(start).split(/;\r?\n/)[0];
  return [...rest.matchAll(/"(?:\\.|[^"\\])*"/g)].map(m=>JSON.parse(m[0])).join('');
 }
 const prefix=literal('prefix'),suffix=literal('suffix');
