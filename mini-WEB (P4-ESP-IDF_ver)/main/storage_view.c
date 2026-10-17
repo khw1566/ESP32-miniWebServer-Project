@@ -1,7 +1,5 @@
 #include "storage_view.h"
 #include "sd_media.h"
-#include "esp_spiffs.h"
-#include "esp_flash.h"
 #include "esp_vfs_fat.h"
 #include <dirent.h>
 #include <stdio.h>
@@ -10,25 +8,11 @@
 
 void storage_capacity_read(bool sd, storage_capacity_t *view) {
     memset(view, 0, sizeof(*view));
-    const char *base = sd ? SD_MEDIA_ROOT : "/spiffs";
-    if (sd) {
-        if (!sd_media_ready()) { view->error = ESP_ERR_INVALID_STATE; return; }
-        uint64_t free_bytes = 0;
-        view->error = esp_vfs_fat_info(base, &view->total, &free_bytes);
-        if (view->error != ESP_OK) return;
-        view->used = view->total >= free_bytes ? view->total - free_bytes : 0;
-    } else {
-        size_t total = 0, used = 0;
-        uint32_t flash = 0;
-        view->error = esp_spiffs_info("littlefs", &total, &used);
-        if (view->error != ESP_OK) return;
-        view->total = total;
-        view->used = used;
-        if (esp_flash_get_size(NULL, &flash) == ESP_OK && flash >= total) {
-            view->total = flash;
-            view->reserved = flash - total;
-        }
-    }
+    if (!sd) { view->error = ESP_ERR_NOT_SUPPORTED; return; }
+    if (!sd_media_ready()) { view->error = ESP_ERR_INVALID_STATE; return; }
+    uint64_t free_bytes = 0;
+    view->error = esp_vfs_fat_info(SD_MEDIA_ROOT, &view->total, &free_bytes);
+    if (view->error == ESP_OK) view->used = view->total >= free_bytes ? view->total-free_bytes : 0;
 }
 void storage_view_read(bool sd, const char *folder, unsigned offset, storage_view_t *view) {
     memset(view, 0, sizeof(*view));
@@ -45,7 +29,7 @@ void storage_view_read(bool sd, const char *folder, unsigned offset, storage_vie
     view->reserved = capacity.reserved;
     view->error = capacity.error;
     if (view->error != ESP_OK) return;
-    const char *base = sd ? SD_MEDIA_ROOT : "/spiffs";
+    const char *base = SD_MEDIA_ROOT;
     char directory[272];
     int length = snprintf(directory, sizeof(directory), "%s%s", base, folder);
     if (length < 0 || (size_t)length >= sizeof(directory)) { view->error = ESP_ERR_INVALID_SIZE; return; }

@@ -39,8 +39,8 @@ vm.createContext(validator);vm.runInContext('function valid(path){'+body('m3_mus
  .replaceAll('strlen(SD_MEDIA_ROOT "/media/")','strlen("/sdcard/media/")')
  .replace('for (const char *p = path; *p; ++p)','for (let i=0;i<path.length;i++)')
  .replace('(unsigned char)*p','path.charCodeAt(i)').replaceAll('*p','path[i]')+'}',validator);
-for(const p of ['/sdcard/media/한국어.mp3','/sdcard/media/album/song.wav','/spiffs/media/song.aac','/spiffs/song.MP3'])assert(validator.valid(p),p);
-for(const p of ['/etc/test.wav','/sdcard/song.mp3','/spiffs/../secret.mp3','/spiffs/index.html','/spiffs/a\n.mp3','/spiffs/a\\b.mp3','/spiffs//song.mp3'])assert(!validator.valid(p),p);
+for(const p of ['/sdcard/media/한국어.mp3','/sdcard/media/album/song.wav','/sdcard/media/song.aac','/sdcard/media/song.MP3'])assert(validator.valid(p),p);
+for(const p of ['/spiffs/media/song.aac','/spiffs/song.MP3','/etc/test.wav','/sdcard/song.mp3','/spiffs/../secret.mp3','/spiffs/index.html','/sdcard/media/a\n.mp3','/sdcard/media/a\\b.mp3','/sdcard/media//song.mp3'])assert(!validator.valid(p),p);
 
 const playback=body('m3_music_run')
  .replace('music_filter_t filter = {0};', 'var filter = {low:[0,0],upper:[0,0]};')
@@ -71,12 +71,12 @@ const playback=body('m3_music_run')
  .replace('decoder, info','decoderRef.value, info').replace('if (decoder) esp_audio_simple_dec_close(decoder)','if (decoderRef.value) esp_audio_simple_dec_close(decoderRef.value)')
  .replaceAll('goto done;','break run;').replace('\ndone:','\n}\n')
  ;
-const script='function play(path,out){run:{'+playback+'return {ok,frames,rate};}';
+const script='"use strict";function play(path,out){run:{'+playback+'return {ok,frames,rate,error};}';
 function wave(channels=2){const frames=1700,b=Buffer.alloc(44+frames*channels*2);
  b.write('RIFF');b.writeUInt32LE(b.length-8,4);b.write('WAVEfmt ',8);b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);
  b.writeUInt16LE(channels,22);b.writeUInt32LE(24000,24);b.writeUInt32LE(24000*channels*2,28);b.writeUInt16LE(channels*2,32);b.writeUInt16LE(16,34);
  b.write('data',36);b.writeUInt32LE(b.length-44,40);for(let i=0;i<frames*channels;i++)b.writeInt16LE(i%2? -12000:23000,44+i*2);return b;}
-function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=Infinity,failWrite=false,failRead=false,repeat_mode=0,shuffle=false,tracks=[name]}={}){
+function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=Infinity,failWrite=false,failRead=false,repeat_mode=0,shuffle=false,tracks=[name],validate=validator.valid}={}){
  const ctx={MUSIC_FILE_LIMIT:256*1024*1024,MUSIC_PREFETCH_LIMIT:8*1024*1024,MUSIC_READ_BYTES:4096,MUSIC_PCM_BYTES:32768,
  shuffle_played:[],memset:(arr,value)=>arr.fill(value),
  M3_MUSIC_REPEAT_ALL:1,M3_MUSIC_ROWS:5,esp_random:()=>0, music_target:features.target,
@@ -85,7 +85,7 @@ function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=I
  MALLOC_CAP_SPIRAM:4,MALLOC_CAP_8BIT:2,ESP_AUDIO_SIMPLE_DEC_TYPE_AAC:1,ESP_AUDIO_SIMPLE_DEC_TYPE_MP3:2,ESP_AUDIO_ERR_OK:0,
  state:{repeat:repeat_mode!==0,repeat_mode,shuffle,selected:0,count:tracks.length,title:""},catalog_set:0,catalogs:[tracks.map(path=>({path,name:"Mock song"}))],decoderRef:{value:null},allocations:[],freed:[],writes:[],statuses:[],reads:0,position:0,closed:0,unlocks:0,drains:0,begins:[],encoded:[],followed:[],
  m3_audio_music_follow:buffer=>{ctx.followed.push(buffer.toString().split('\0')[0]);return true;},
- Buffer,strcmp:(a,b)=>a===b?0:1,snprintf:(out,n,format,text)=>{out.fill(0);out.write(text,0,n-1);},m3_music_path_valid:validator.valid,strlen:s=>s.length,strncmp:validator.strncmp,strcasecmp:(a,b)=>a.toLowerCase()===b.toLowerCase()?0:1,
+ Buffer,strcmp:(a,b)=>a===b?0:1,snprintf:(out,n,format,text)=>{out.fill(0);out.write(text,0,n-1);},m3_music_path_valid:validate,strlen:s=>s.length,strncmp:validator.strncmp,strcasecmp:(a,b)=>a.toLowerCase()===b.toLowerCase()?0:1,
  extension:s=>path.extname(s),status:(...args)=>ctx.statuses.push(args),sd_media_admin_lock:()=>true,sd_media_admin_unlock:()=>ctx.unlocks++,
  fopen:()=>({}),SEEK_END:2,SEEK_SET:0,ftell:()=>data.length,
  fseek:(_,offset,origin)=>{ctx.position=origin===2?data.length+offset:offset;return 0;},setvbuf:()=>0,_IOFBF:1,
@@ -108,6 +108,10 @@ function run(data,{name='/sdcard/media/song.wav',failAllocation=0,cancelAtRead=I
  message:()=>{},drain:()=>{ctx.drains++;return true;}};
  vm.createContext(ctx);vm.runInContext(script,ctx);ctx.result=ctx.play(name,out);return ctx;
 }
+// Exercise the defensive storage branch even if a caller bypasses validation.
+const nonSd=run(wave(),{name:'/spiffs/song.wav',validate:()=>true});
+assert(!nonSd.result.ok);assert.equal(nonSd.result.error,'File storage is SD only; select SD');
+assert.equal(nonSd.closed,0);assert.equal(nonSd.unlocks,0);assert.equal(nonSd.allocations.length,0);
 for(const channels of [1,2]){
  const data=wave(channels),r=run(data);assert(r.result.ok);assert.equal(r.closed,1);assert.equal(r.unlocks,1);assert.equal(r.drains,1);
  const pcm=Buffer.concat(r.writes);assert.equal(pcm.length,1700*4);
@@ -116,12 +120,12 @@ for(const channels of [1,2]){
  const fallback=run(data,{failAllocation:5});assert(fallback.result.ok);assert.deepEqual(Buffer.concat(fallback.writes),pcm,'cache failure falls back to buffered file reads');
 }
 const compressed=Buffer.from(Array.from({length:12345},(_,i)=>i%251));
-for(const ext of ['mp3','aac']){const r=run(compressed,{name:'/spiffs/track.'+ext});assert(r.result.ok);assert.equal(r.unlocks,0);assert.deepEqual(Buffer.from(r.encoded),compressed);assert(r.writes.length>0);}
+for(const ext of ['mp3','aac']){const r=run(compressed,{name:'/sdcard/media/track.'+ext});assert(r.result.ok);assert.equal(r.unlocks,1);assert.deepEqual(Buffer.from(r.encoded),compressed);assert(r.writes.length>0);}
 for(const opts of [{failAllocation:3},{cancelAtRead:1},{failRead:true},{failWrite:true}]){
  const r=run(wave(),opts);assert(!r.result.ok);assert.equal(r.closed,1);assert.equal(r.unlocks,1);
  assert.equal(r.freed.length,r.allocations.filter(Boolean).length,'all allocated working buffers released');
 }
-const tracks=['/spiffs/a.wav','/spiffs/b.wav','/spiffs/c.wav'];
+const tracks=['/sdcard/media/a.wav','/sdcard/media/b.wav','/sdcard/media/c.wav'];
 assert.deepEqual(run(wave(),{name:tracks[2],tracks}).followed,[],'last track stops');
 assert.deepEqual(run(wave(),{name:tracks[0],tracks}).followed,[tracks[1]],'natural advance');
 assert.deepEqual(run(wave(),{name:tracks[2],tracks,repeat_mode:1}).followed,[tracks[0]],'repeat list wraps');
@@ -139,10 +143,10 @@ vm.createContext(follow);vm.runInContext('function follow(path){'+body('m3_audio
  .replace('request_t request = {.kind = PLAY_MUSIC, .epoch = active_epoch};','let request = {kind:PLAY_MUSIC,epoch:active_epoch};')
  .replace('snprintf(request.name, sizeof(request.name), "%s", path);','request.name = path;')
  .replace('&request','request')+'}',follow);
-assert(follow.follow('/spiffs/next.mp3'));assert.equal(follow.requests[0].epoch,7);
-assert(!follow.follow('/spiffs/another.mp3'),'auto advance does not overwrite a queued request');
-follow.requests=[];follow.cancelled=()=>true;assert(!follow.follow('/spiffs/next.mp3'));
-follow.cancelled=()=>false;follow.restarting=true;assert(!follow.follow('/spiffs/next.mp3'),'restart blocks automatic playback admission');
+assert(follow.follow('/sdcard/media/next.mp3'));assert.equal(follow.requests[0].epoch,7);
+assert(!follow.follow('/sdcard/media/another.mp3'),'auto advance does not overwrite a queued request');
+follow.requests=[];follow.cancelled=()=>true;assert(!follow.follow('/sdcard/media/next.mp3'));
+follow.cancelled=()=>false;follow.restarting=true;assert(!follow.follow('/sdcard/media/next.mp3'),'restart blocks automatic playback admission');
 assert(!body('m3_audio_music_follow',audio).includes('m3_audio_stop()'),'auto advance must not cancel a newer user action');
 const registry={initialized:false,ESP_AUDIO_ERR_OK:0,low:0,simple:0,
  esp_audio_dec_register_default:()=>{registry.low++;return 0;},esp_audio_simple_dec_register_default:()=>{registry.simple++;return 0;}};

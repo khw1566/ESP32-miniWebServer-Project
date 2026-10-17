@@ -7,7 +7,8 @@ typedef struct {
     bool wired_known, wired, charge_known, charging;
     unsigned percent, millivolts;
 } m3_power_state_t;
-/* Read-only diagnostic at board startup, before audio/service workers. */
+/* Battery comes from the BAT+ divider on GPIO53; external 5V is inferred.
+ * Read-only diagnostic and ADC setup at board startup, before workers. */
 void m3_power_init(void);
 /* Service-task owner only. Never perform sensor I/O on the LVGL task. */
 void m3_power_poll(m3_power_state_t *out);

@@ -123,7 +123,7 @@ bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings
     bool expected = false;
     if (!ready || !atomic_compare_exchange_strong(&wifi_pending, &expected, true)) return false;
     wifi_request_t request = {.action = action};
-    if (settings && action == M3_WIFI_CONNECT) request.settings = *settings;
+    if (settings && (action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED)) request.settings = *settings;
     bool sent = xQueueSend(wifi_queue, &request, 0) == pdPASS;
     memset(&request, 0, sizeof(request));
     if (!sent) atomic_store(&wifi_pending, false);
@@ -224,9 +224,9 @@ static void services(void *unused) {
     m3_runtime_state_t next = {0};
     snprintf(next.message, sizeof(next.message), "Starting storage and C6 Wi-Fi"); publish(&next);
     m3_boot_splash_step(M3_BOOT_STORAGE);
-    esp_err_t storage = web_server_storage_init();
-    if (storage != ESP_OK) ESP_LOGW("M3", "Flash storage: %s", esp_err_to_name(storage));
     next.sd = sd_media_init() == ESP_OK;
+    esp_err_t storage = web_server_storage_init();
+    if (storage != ESP_OK) ESP_LOGW("M3", "SD file storage: %s", esp_err_to_name(storage));
     m3_web_assets_load(); /* Boot snapshot: before HTTP and cloud workers can read the immutable cache. */
     m3_sd_settings_init();
     m3_voice_set_key(m3_sd_openai_key());
@@ -264,7 +264,7 @@ static void services(void *unused) {
         saved_wifi ? "Connection failed. Setup hotspot restored; check password/IP." :
         "Enter Wi-Fi details here, or use the setup hotspot.");
     snprintf(next.message, sizeof(next.message), "%s", net == ESP_OK ? "Services ready" : "C6 Wi-Fi failed; inspect serial log");
-    browse_t browse = {.sd = false};
+    browse_t browse = {.sd = true};
     bool refresh = true;
     unsigned tick = 0;
     for (;;) {

@@ -1,7 +1,6 @@
 /* HTTPS-only provider proxy. A separate task keeps the HTTP server responsive. */
 typedef struct {
     httpd_req_t *req;
-    unsigned char wrapping_key[32];
     char model[81];
 } ai_proxy_job_t;
 static atomic_bool s_ai_proxy_busy;
@@ -10,7 +9,6 @@ static bool s_ai_sntp_started;
 static void ai_proxy_task(void *arg) {
     ai_proxy_job_t *job = arg;
     httpd_req_t *req = job->req;
-    ai_security_record_t record = {0};
     char api_key[256] = {0}, url[256];
     char *payload = NULL;
     cJSON *body = NULL;
@@ -29,8 +27,8 @@ static void ai_proxy_task(void *arg) {
         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < payload_capacity) {
         status = "503 Service Unavailable"; error = "보드 메모리가 부족합니다. 대화를 줄이거나 새 대화를 시작하세요."; goto done;
     }
-    if (ai_record_read(&record) != ESP_OK || !ai_key_decrypt(&record, job->wrapping_key, api_key)) {
-        status = "409 Conflict"; error = "먼저 유효한 API 키를 보드에 저장하세요."; goto done;
+    if (!m3_sd_key_copy("gemini", api_key)) {
+        status = "409 Conflict"; error = "SD의 .private/api_keys.json에 gemini 키를 저장하세요."; goto done;
     }
     ai_json_error_t input_error = AI_JSON_OK;
     body = ai_read_json_buffer_ex(req, 48 * 1024, 512, &payload, &input_error);
@@ -126,7 +124,7 @@ done:
     if (client) { esp_http_client_close(client); esp_http_client_cleanup(client); }
     if (payload) { ai_wipe(payload, payload_capacity); free(payload); }
     cJSON_Delete(body);
-    ai_wipe(api_key, sizeof(api_key)); ai_wipe(&record, sizeof(record));
+    ai_wipe(api_key, sizeof(api_key));
     ESP_LOGI(TAG, "[AI] Complete: free=%u, largest=%u, stack_min=%u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
@@ -161,7 +159,7 @@ static esp_err_t ai_chat_post_handler(httpd_req_t *req) {
             return ai_error(req, "400 Bad Request", "모델 ID 형식이 올바르지 않습니다.");
     ai_proxy_job_t *job = calloc(1, sizeof(*job));
     if (!job) return httpd_resp_send_500(req);
-    memcpy(job->wrapping_key, session->wrapping_key, 32); snprintf(job->model, sizeof(job->model), "%s", model);
+    snprintf(job->model, sizeof(job->model), "%s", model);
     esp_err_t err = httpd_req_async_handler_begin(req, &job->req);
     if (err != ESP_OK) { ai_wipe(job, sizeof(*job)); free(job); return httpd_resp_send_500(req); }
     atomic_store(&s_ai_proxy_busy, true);

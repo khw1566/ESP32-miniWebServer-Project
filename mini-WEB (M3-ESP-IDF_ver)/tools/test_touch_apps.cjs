@@ -145,6 +145,36 @@ function removeCall(source,name,replacement){
   result+=source.slice(offset,start)+replacement;offset=end;
  }
 }
+// Exercise UI -> queue admission too: worker-only tests bypassed a lost-SSID bug.
+const admission = {M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,
+ wifi_queue:true,state:{initialized:true,wifi_ready:true},state_lock:0,wifi_pending:false,
+ portENTER_CRITICAL:()=>{},portEXIT_CRITICAL:()=>{},network_settings_valid:s=>!!s && !!s.ssid,
+ claim:()=>{if(admission.wifi_pending)return false;admission.wifi_pending=true;return true;},
+ pdPASS:1,accept:true,xQueueSend:(_q,r)=>{admission.queued=structuredClone(r);return admission.accept?1:0;},
+ clear:r=>{r.settings={};},release:()=>{admission.wifi_pending=false;}};
+vm.createContext(admission);
+let admit=body('m3_runtime_wifi',runtime)
+ .replaceAll('&state_lock','state_lock').replaceAll('network_settings_valid(settings)','network_settings_valid(settings)')
+ .replace(/\bbool\s+/g,'let ')
+ .replace('atomic_compare_exchange_strong(&wifi_pending, &expected, true)','claim()')
+ .replace('wifi_request_t request = {.action = action};','let request = {action,settings:{}};')
+ .replace('request.settings = *settings','request.settings = {...settings}')
+ .replaceAll('&request','request').replace('memset(request, 0, sizeof(request))','clear(request)')
+ .replace('atomic_store(&wifi_pending, false)','release()');
+vm.runInContext('function admit(action,settings){'+admit+'}',admission);
+for(const action of [1,4]) {
+ admission.wifi_pending=false;
+ const selected={version:1,ssid:'Fixture Wi-Fi',pass:action===4?'':'fixture-secret',use_static:1,ip:'192.168.1.20'};
+ assert(admission.admit(action,selected));
+ assert.equal(admission.queued.settings.ssid,selected.ssid);
+ assert.equal(admission.queued.settings.ip,selected.ip);
+ assert.equal(admission.queued.settings.pass,selected.pass);
+ assert.equal(selected.ssid,'Fixture Wi-Fi','queue cleanup must not mutate caller settings');
+}
+admission.wifi_pending=false;admission.accept=false;
+assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));assert(!admission.wifi_pending);
+admission.accept=true;admission.state.wifi_ready=false;
+assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));
 let worker=removeCall(body('wifi_execute',runtime),'snprintf','record_message()')
  .replace('memset(next->settings.pass, 0, sizeof(next->settings.pass))','next->settings.pass = ""')
  .replace('memset(request, 0, sizeof(*request))','request.cleared = true')

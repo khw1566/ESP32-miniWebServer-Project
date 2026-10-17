@@ -7,7 +7,7 @@ TTS와 STT는 같은 Speech 리소스 키를 사용한다. 유료 S0로 변경�
 ## 키 보관
 
 - `sd_private/.private/api_keys.json`에 `azure_speech`와 `azure_region`을 추가했다. 기존 Gemini·Google·OpenAI 키는 보존했다.
-- Git 제외 `main/include/m3_azure_private.h`에 로컬 빌드용 키·지역 fallback을 저장했다. `m3_azure_config.h`에는 비밀 값이 없다.
+- 키·지역은 SD의 `.private/api_keys.json`에서 읽습니다. 이전 로컬 헤더의 키 fallback은 사용하지 않습니다. JSON 형식과 복사는 [SD_PRIVATE_SETTINGS.md](SD_PRIVATE_SETTINGS.md)를 따릅니다.
 - 기존 SD 파일에 Azure 필드가 없으면 새 펌웨어의 로컬 헤더 fallback을 사용한다. 따라서 이번 PC에서 빌드한 펌웨어는 Azure 키를 쓰기 위해 SD 파일을 반드시 교체할 필요는 없다.
 - 다른 PC에는 private 헤더가 Git으로 전달되지 않는다. SD의 비공개 설정을 사용하거나 개인 백업에서 복구한다.
 - 키를 채팅·로그·스크린샷·테스트 fixture에 출력하지 않았다. 복사에 사용한 클립보드는 비웠다.

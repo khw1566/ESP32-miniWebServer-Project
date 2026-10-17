@@ -51,10 +51,63 @@ assert(!unavailable.battery_present && !unavailable.percent_known && !unavailabl
 assert.equal(unavailable.percent, 0);
 assert(/i2c_master_probe\(bus, 0x75, 25\)/.test(power));
 assert(!/i2c_master_transmit\(/.test(power), 'never write power-control registers');
-assert(/memset\(out, 0, sizeof\(\*out\)\)/.test(body(power, 'm3_power_poll')));
+assert(/BATTERY_GPIO\s+53\b/.test(power) && /DIVIDER_NUM\s+168\b/.test(power) && /DIVIDER_DEN\s+100\b/.test(power),
+  'BAT+ -> R52 68k / R57 100k -> GPIO53 per manufacturer 4_USB&IO schematic');
+assert(read('main/CMakeLists.txt').includes(' esp_adc '));
+
+// Run the real estimator/percent bodies on synthetic 2 s battery samples.
+for (const m of power.matchAll(/^#define\s+(\w+)\s+(\d+)/gm)) ctx[m[1]] = Number(m[2]);
+const toJs = (src, divisions) => {
+  let js = src.replaceAll('t->', 't.').replaceAll('out->', 'out.')
+    .replace(/\b(?:(?:static|const)\s+)*(?:bool|unsigned)\s+(?=\w)/g, 'let ');
+  for (const d of divisions) { assert(js.includes(d), d); js = js.replaceAll(d, `Math.trunc(${d})`); }
+  return js;
+};
+let percentJs = toJs(body(power, 'm3_power_percent'), ['(mv - v0) * (p1 - p0) / (v1 - v0)'])
+  .replace(/let table\[\]\[2\] = \{\{([\s\S]*?)\}\};/, (_, t) => 'const table = [[' + t.replace(/\},\s*\{/g, '], [') + ']];')
+  .replace('let n = sizeof(table) / sizeof(table[0]);', 'const n = table.length;');
+vm.runInContext('function m3_power_percent(mv){' + percentJs + '}', ctx);
+let estimateJs = toJs(body(power, 'm3_power_estimate'), ['(t.smooth * 3 + now) / 4', 't.bucket_sum / t.bucket_samples'])
+  .replace('memset(out, 0, sizeof(*out));', 'for (const k of Object.keys(out)) out[k] = typeof out[k] === "number" ? 0 : false;')
+  .replace('now /= now_n;', 'now = Math.trunc(now / now_n);').replace('before /= before_n;', 'before = Math.trunc(before / before_n);');
+vm.runInContext('function estimate(t, mv, out){' + estimateJs + '}', ctx);
+const tracker = () => ({recent: Array(ctx.SPREAD_N).fill(0), recent_count: 0, recent_pos: 0, bucket: Array(ctx.BUCKETS).fill(0),
+  bucket_count: 0, bucket_sum: 0, bucket_samples: 0, smooth: 0, wired_known: false, wired: false, charging: false});
+const feed = (t, samples) => { const out = fixture(); for (const mv of samples) { ctx.estimate(t, Math.round(mv), out); ctx.normalize(out); } return out; };
+const series = (n, f) => Array.from({length: n}, (_, i) => f(i));
+assert.equal(ctx.m3_power_percent(3000), 0); assert.equal(ctx.m3_power_percent(3800), 50);
+assert.equal(ctx.m3_power_percent(4180), 100); assert.equal(ctx.m3_power_percent(4300), 100);
+assert(!feed(tracker(), [3800, 3800]).battery_known, 'too few samples stay unknown');
+let st = feed(tracker(), series(20, i => 3800 + (i % 3) * 4));
+assert(st.battery_present && st.percent_known && st.percent >= 49 && st.percent <= 52 && !st.wired_known, 'steady battery');
+st = feed(tracker(), series(20, () => 40));
+assert(st.battery_known && !st.battery_present && st.wired_known && st.wired, 'empty BAT pin: external 5V only');
+ctx.render(st); assert(ctx.power_plug.visible && !ctx.power_battery.visible);
+st = feed(tracker(), series(20, i => i % 4 < 2 ? 3500 : 4250));
+assert(!st.battery_present && st.wired, 'charger cycling without a cell');
+// Charging: CC phase rises ~6 mV/min with ADC noise; recognised after six rising minutes.
+let t = tracker();
+st = feed(t, series(30 * 5, i => 3800 + i * 0.2 + (i % 2) * 3));
+assert(!st.wired_known, 'not before the trend window fills');
+st = feed(t, series(30 * 2, i => 3830 + i * 0.2 + (i % 2) * 3));
+assert(st.wired && st.charging && st.charge_known, 'rising trend -> wired + charging');
+ctx.render(st); assert(ctx.power_plug.visible && ctx.power_charge.visible);
+st = feed(t, series(10, () => 3700));
+assert(st.wired_known && !st.wired && !st.charging, 'step drop while wired -> unplugged');
+// Battery-only discharge and speaker-load relaxation must not look like charging.
+t = tracker();
+st = feed(t, series(30 * 7, i => 3900 - i * 0.15));
+assert(st.wired_known && !st.wired, 'falling trend -> battery only');
+t = tracker();
+st = feed(t, [...series(30, () => 3800), ...series(30, () => 3740), ...series(30 * 5, i => 3800 - 60 * Math.exp(-i / 15))]);
+assert(!st.charging && !(st.wired_known && st.wired), 'load relaxation is not charging');
+// Full: wired and flat near CV voltage.
+t = tracker(); feed(t, series(30 * 7, i => 4100 + i * 0.2));
+st = feed(t, series(30 * 7, () => 4190));
+assert(st.wired && !st.charging && st.percent === 100, 'flat at CV voltage -> full on external power');
 assert(read('main/CMakeLists.txt').includes('"m3_power.c"'));
 assert(read('main/m3_runtime.c').includes('m3_power_poll(&next.power)'));
 assert(ui.includes('update_power(&snapshot.power)'));
 for (const scenario of ['84_power_unknown','85_power_wired_only','86_power_battery','87_power_charging','88_power_full_wired','89_power_low'])
   assert(read('tools/ui_sim/scenarios.inc').includes(scenario));
-console.log('Power status: unknown/absent/wired/battery/charging/full/low, saturation and read-only diagnostics passed (host mocks only).');
+console.log('Power status: unknown/absent/wired/battery/charging/full/low, GPIO53 battery estimator, saturation and read-only diagnostics passed (host mocks only).');

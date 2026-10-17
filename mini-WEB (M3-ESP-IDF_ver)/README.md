@@ -250,3 +250,7 @@ PSRAM 추가 활용: 일반 할당 threshold 0, TLS 외부 힙, eSpeak BSS와 UI
 지원합니다. 사용법과 지원 범위는 [텍스트 리더 안내](docs/TEXT_READER.md)를 참고하세요.
 
 유튜브 뮤직의 현재·다음 곡 PSRAM 캐시, SD 저장, 자동 다음 곡과 앱별 새로고침 아이콘: [설명](docs/YOUTUBE_MUSIC_CACHE.md).
+
+## SD 전용 관리자 파일 관리
+
+P4 계열 사용자 파일은 SD카드에만 저장합니다. 추가·UTF-8 내용 편집·교체·삭제·다운로드는 [SD_ADMIN.md](SD_ADMIN.md)를 참고하세요. 펌웨어·OTA·NVS는 플래시를 유지합니다.
