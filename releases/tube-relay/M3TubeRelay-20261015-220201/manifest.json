@@ -1,0 +1,97 @@
+[
+  {
+    "file": "M3TubeRelay.exe",
+    "bytes": 39936,
+    "sha256": "7AE6DE478047F8ACD915FBD7A6C55071CC1C5362E6D4355B2C9E869ACF9274A1"
+  },
+  {
+    "file": "server.mjs",
+    "bytes": 23026,
+    "sha256": "B4485B4E7C88B3F03FA42E2085728107B8E4494059EA1F65BB8CCCA48F25EACA"
+  },
+  {
+    "file": "lib.mjs",
+    "bytes": 8520,
+    "sha256": "D7F4F8D260F538194FD28ACB9D2A735EFF5649ADB3292F9BB94C1A21ABFCE19D"
+  },
+  {
+    "file": "radio.mjs",
+    "bytes": 4210,
+    "sha256": "4DF38DED5A776E70213E37A1122658EF5E7D6EDE14721F225A85019A070D1610"
+  },
+  {
+    "file": "radio_stations.json",
+    "bytes": 3653,
+    "sha256": "02775F3C5B4B4BF6B52BD7DB932E6D74CDC72B2E61AFD86606DFDCE6449C3410"
+  },
+  {
+    "file": "audio_cache.mjs",
+    "bytes": 2919,
+    "sha256": "53914C573732ABD26108377BDB851AC6FBAAFDE667D4B6F0DB0D7F346109CA7D"
+  },
+  {
+    "file": "video_cache.mjs",
+    "bytes": 3104,
+    "sha256": "30E82D072174B0A90729FE09FB61C39493DE76E317F8BDE3197A8E76C1E32E80"
+  },
+  {
+    "file": "package.json",
+    "bytes": 238,
+    "sha256": "CF165B935E690E6857FD66E73F0E2BB9326C6388A5D44F177AD8AFC3EA5E2675"
+  },
+  {
+    "file": "README.md",
+    "bytes": 13417,
+    "sha256": "0E37B22A2509A112654C02887227D95CFB24CEE57E88CCE2E855B363CE19E154"
+  },
+  {
+    "file": "StartTubeRelay.bat",
+    "bytes": 1936,
+    "sha256": "DE6DE8FEB771AF080141BD38F80139231CB5DE5C43DCBB183B334B13CEB0124E"
+  },
+  {
+    "file": "start.ps1",
+    "bytes": 1840,
+    "sha256": "472528E96CDD7CF5457B7C993F8381B70EBCE6F851305C9DEDC3A5713D3D3E7A"
+  },
+  {
+    "file": "setup.mjs",
+    "bytes": 1516,
+    "sha256": "5D2588034D4F7D5F150BD07B1D5FE4841960DF7E60B376B281967272DEBE5AC6"
+  },
+  {
+    "file": "setup-tunnel.ps1",
+    "bytes": 2274,
+    "sha256": "F33FEADEBBF10E516D63CE09B82D38A4499C8CC56B403A0A38695213A654F22E"
+  },
+  {
+    "file": "test.mjs",
+    "bytes": 5233,
+    "sha256": "BB1E32F29BB4E13D46A396A091E135122CFC2BBD20920456564742D37AC8DAB9"
+  },
+  {
+    "file": "test_video_cache.mjs",
+    "bytes": 3326,
+    "sha256": "E9701FF2999EE49D924F370F0518DDB2A1A8D6C76F6EDC254AE5F56A382B130B"
+  },
+  {
+    "file": "test_media.mjs",
+    "bytes": 9231,
+    "sha256": "439F20A951499A78CF53FC9AC4622893876AA23696F7F4418F05CEDC227CA01A"
+  },
+  {
+    "file": "test_radio.mjs",
+    "bytes": 4511,
+    "sha256": "1E26654C37D78864ADAA383CC997055740E5147FBDF39E4DE73EFCEBF1A20A64"
+  },
+  {
+    "file": "verify-live.mjs",
+    "bytes": 3790,
+    "sha256": "3A7B7261EFC92395BD06C57ECBB932474C2BCF26FBBE4BF7B29F9A7EC71D0782"
+  },
+  {
+    "file": "verify-radio.mjs",
+    "bytes": 3169,
+    "sha256": "D7B2B5B4F458CB31E70D409134D30B692593F0B9AE28EC8D7D05668E88B2B509"
+  }
+]
