@@ -1,6 +1,7 @@
 #include "m3_boot_splash.h"
 #include "m3_board.h"
 #include "m3_boot_logo.inc"
+#include "m3_boot_product_mark.inc"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <math.h>
@@ -24,10 +25,14 @@ static const char *TAG = "m3_splash";
 #define BAR_Y 724
 #define FADE_MS 450
 #define BG 0x050B1A
-#define ACCENT 0x22D3EE
-#define ACCENT_2 0xE879F9
+#define ACCENT 0x00E5EF
+#define ACCENT_2 0xF548BA
+#define PRODUCT_TEXT_X 24
+#define PRODUCT_TEXT_W 352
+#define PRODUCT_MARK_X 376
+#define PRODUCT_MARK_Y 648
 
-static lv_obj_t *root, *canvas, *caption, *english, *headline_1, *headline_2, *bar_fill, *status;
+static lv_obj_t *root, *canvas, *caption, *english, *headline_1, *headline_2, *product_mark, *bar_fill, *status;
 static lv_timer_t *frame_timer;
 static uint16_t *pixels;
 static uint32_t started_ms, last_frame_ms, intro_ms, logo_ms;
@@ -173,6 +178,7 @@ static void start_intro(void) {
     animate(headline_1, set_rise, 24, 0, 400, 450, lv_anim_path_ease_out, 0, 0);
     animate(headline_2, set_opa, 0, 255, 800, 300, lv_anim_path_linear, 0, 0);
     animate(headline_2, set_scale, 460, 256, 800, 650, lv_anim_path_overshoot, 0, 0);
+    animate(product_mark, set_opa, 0, 255, 1500, 300, lv_anim_path_ease_out, 0, 0);
     animate(headline_2, set_pulse, 256, 284, 1700, 260, lv_anim_path_ease_in_out, 260, 2);
     animate(headline_2, set_glow, 0, 255, 1700, 260, lv_anim_path_ease_in_out, 260, 2);
 }
@@ -202,7 +208,7 @@ static void deleted(lv_event_t *e) {
     if (frame_timer) lv_timer_delete(frame_timer);
     frame_timer = NULL;
     heap_caps_free(pixels);
-    pixels = NULL; root = canvas = caption = english = headline_1 = headline_2 = bar_fill = status = NULL;
+    pixels = NULL; root = canvas = caption = english = headline_1 = headline_2 = product_mark = bar_fill = status = NULL;
 }
 
 static lv_obj_t *text(const char *value, const lv_font_t *font, uint32_t colour, int y) {
@@ -245,8 +251,14 @@ esp_err_t m3_boot_splash_start(void) {
     lv_obj_set_style_text_letter_space(english, 4, 0);
     headline_1 = text("창업경진대회", &m3_font_splash, 0xF8FAFC, 594);
     headline_2 = text("MiniWEB 시제품", &m3_font_splash, ACCENT, 650);
-    lv_obj_set_style_transform_pivot_x(headline_2, M3_WIDTH / 2, 0);
+    lv_obj_set_width(headline_2, PRODUCT_TEXT_W);
+    lv_obj_set_pos(headline_2, PRODUCT_TEXT_X, 650);
+    lv_obj_set_style_transform_pivot_x(headline_2, PRODUCT_TEXT_W / 2, 0);
     lv_obj_set_style_transform_pivot_y(headline_2, m3_font_splash.line_height / 2, 0);
+    product_mark = lv_image_create(root);
+    lv_image_set_src(product_mark, &m3_boot_product_mark);
+    lv_obj_set_pos(product_mark, PRODUCT_MARK_X, PRODUCT_MARK_Y);
+    lv_obj_set_style_opa(product_mark, LV_OPA_TRANSP, 0);
     lv_obj_t *track = lv_obj_create(root);
     lv_obj_remove_style_all(track);
     lv_obj_set_size(track, BAR_W, 8);

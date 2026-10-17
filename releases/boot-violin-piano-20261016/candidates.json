@@ -1,0 +1,52 @@
+[
+  {
+    "id": "01",
+    "name": "Clear Dawn",
+    "korean": "맑은 시작",
+    "description": "밝고 투명한 피아노 아르페지오에 바이올린이 부드럽게 상승합니다.",
+    "seconds": 3.4,
+    "peak_dbfs": -8.92,
+    "mp3": "01_clear_dawn.mp3",
+    "device": "01_clear_dawn_device.wav"
+  },
+  {
+    "id": "02",
+    "name": "Warm Welcome",
+    "korean": "따뜻한 환영",
+    "description": "중저음 피아노와 길게 이어지는 바이올린으로 차분하고 따뜻합니다.",
+    "seconds": 3.8,
+    "peak_dbfs": -7.68,
+    "mp3": "02_warm_welcome.mp3",
+    "device": "02_warm_welcome_device.wav"
+  },
+  {
+    "id": "03",
+    "name": "Minimal Signature",
+    "korean": "미니멀 시그니처",
+    "description": "짧은 세 음의 선율과 여백. 매번 켜도 부담이 적은 간결한 방향입니다.",
+    "seconds": 2.65,
+    "peak_dbfs": -9.26,
+    "mp3": "03_minimal_signature.mp3",
+    "device": "03_minimal_signature_device.wav"
+  },
+  {
+    "id": "04",
+    "name": "Quiet Horizon",
+    "korean": "고요한 수평선",
+    "description": "살짝 신비로운 마이너 나인 화음과 절제된 바이올린. 분위기 중심의 안입니다.",
+    "seconds": 4.0,
+    "peak_dbfs": -9.07,
+    "mp3": "04_quiet_horizon.mp3",
+    "device": "04_quiet_horizon_device.wav"
+  },
+  {
+    "id": "05",
+    "name": "Bright Motion",
+    "korean": "경쾌한 연결",
+    "description": "피아노의 또렷한 리듬과 바이올린의 상승형 마무리로 가볍고 활기찹니다.",
+    "seconds": 3.0,
+    "peak_dbfs": -8.96,
+    "mp3": "05_bright_motion.mp3",
+    "device": "05_bright_motion_device.wav"
+  }
+]

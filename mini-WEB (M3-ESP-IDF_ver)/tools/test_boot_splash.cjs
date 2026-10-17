@@ -29,6 +29,28 @@ const logo = read('main/m3_boot_logo.inc'), grid = +logo.match(/GRID (\d+)/)[1];
 const palette = logo.match(/palette\[\] = \{([^}]*)\}/)[1].split(',').length;
 const dots = logo.split('m3_boot_logo_dots')[1].match(/^\s+[\d,]+,$/gm).join(',').split(',').filter(v => v.trim()).map(Number);
 assert.equal(dots.length, grid * grid); assert(dots.every(v => v >= 0 && v < palette)); assert(dots.some(v => v));
+// UC stays the dot emblem; the new product mark is a separate sharp image.
+const {spawnSync} = require('child_process');
+const generated = spawnSync('python', ['-X','utf8','-c',
+  'import sys,json;sys.path.insert(0,sys.argv[1]);import generate_boot_splash as g;print(json.dumps([*g.placeholder(),list(g.product_mark()[1])]))',
+  path.join(root,'tools')], {encoding:'utf8'});
+assert.equal(generated.status,0,generated.stderr);
+const [expectedDots, expectedPalette, expectedSharp] = JSON.parse(generated.stdout);
+assert.deepEqual(dots,expectedDots,'original UC geometry and firmware dots must stay synchronized');
+const actualPalette=logo.match(/palette\[\] = \{([^}]*)\}/)[1].split(',').slice(1).map(v=>parseInt(v,16));
+assert.deepEqual(actualPalette,expectedPalette.map(([r,g,b])=>(r<<16)|(g<<8)|b));
+assert(logo.includes('UC overlap emblem'));assert.equal(grid,33);
+const sharp=read('main/m3_boot_product_mark.inc');
+const sharpBytes=[...sharp.split('};',1)[0].matchAll(/0x([0-9a-f]{2})/g)].map(m=>parseInt(m[1],16));
+assert.deepEqual(sharpBytes,expectedSharp);assert.equal(sharpBytes.length,56*56*4);
+const alpha=sharpBytes.filter((_,i)=>i%4===3);assert(alpha.includes(0)&&alpha.includes(255)&&alpha.some(v=>v>0&&v<255),'sharp transparent mark has antialiased edges');
+assert(splash.includes('lv_image_set_src(product_mark, &m3_boot_product_mark)'));
+assert(splash.includes('#define ACCENT 0x00E5EF'));
+assert(splash.includes('lv_obj_set_pos(product_mark, PRODUCT_MARK_X, PRODUCT_MARK_Y)'));
+const number=n=>+splash.match(new RegExp('#define '+n+' ([\\d.]+)'))[1];
+const halfLogo=(grid-1)*number('PITCH')/2+number('DOT_RADIUS');
+assert(halfLogo<number('CANVAS_W')/2);
+assert(halfLogo+number('WAVE_PX')*2.5<number('CANVAS_H')/2,'ripple must stay inside the canvas');
 // Buffer lives in PSRAM, the splash always dismisses itself and frees on delete.
 assert(splash.includes('MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT'));
 assert(/deleted\(lv_event_t[\s\S]*lv_timer_delete\(frame_timer\)[\s\S]*heap_caps_free\(pixels\)/.test(splash));
