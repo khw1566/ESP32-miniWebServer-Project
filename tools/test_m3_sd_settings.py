@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from copy_m3_sd_settings import install
+from copy_m3_sd_settings import install, install_wifi
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / 'mini-WEB (M3-ESP-IDF_ver)/main'
@@ -20,7 +20,7 @@ class SettingsTests(unittest.TestCase):
             private = sd / '.private'; private.mkdir()
             wifi = private / 'wifi.json'; wifi.write_bytes(b'preserved wifi fixture')
             target = install(source, sd)
-            self.assertEqual(source.read_bytes(), target.read_bytes())
+            self.assertEqual(json.loads(source.read_bytes()), json.loads(target.read_bytes()))
             with self.assertRaises(ValueError):
                 install(source, sd)
             install(source, sd, replace=True)
@@ -70,8 +70,37 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(common, p.read_bytes())
         text = common.decode()
         self.assertLess(text.index('nvs_commit(h)'), text.index('NETWORK_SETTINGS_SAVED_HOOK(&clean)'))
-        self.assertIn('#define NETWORK_SETTINGS_SAVED_HOOK m3_sd_wifi_save',
+        self.assertIn('#define NETWORK_SETTINGS_SAVE_HOOK m3_sd_wifi_store',
                       (MAIN / 'network_manager.c').read_text(encoding='utf-8'))
+
+    def test_single_provider_without_version_is_supported(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root = Path(temp); sd = root / 'sd'; sd.mkdir()
+            source = root / 'source.json'
+            source.write_text(json.dumps(dict(gemini='fake-gemini-' * 3)))
+            target = install(source, sd)
+            self.assertEqual(json.loads(target.read_text()), dict(gemini='fake-gemini-' * 3))
+
+    def test_utf16_wifi_and_keys_are_normalized_without_cross_overwrite(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root = Path(temp); sd = root / 'sd'; sd.mkdir()
+            source = root / 'keys.json'; wifi = root / 'wifi.json'
+            source.write_text(json.dumps(dict(gemini='fake-gemini-' * 3)), encoding='utf-16')
+            target = install(source, sd)
+            self.assertFalse(target.read_bytes().startswith(b'\xff\xfe'))
+            before = target.read_bytes()
+            data = dict(ssid='한글-Fixture', password='fixture-secret')
+            wifi.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-16')
+            installed = install_wifi(wifi, sd)
+            self.assertEqual(json.loads(installed.read_text(encoding='utf-8')), data)
+            self.assertEqual(target.read_bytes(), before)
+            with self.assertRaises(ValueError):
+                install_wifi(wifi, sd)
+            data['password'] = 'short'
+            wifi.write_text(json.dumps(data))
+            with self.assertRaises(ValueError):
+                install_wifi(wifi, sd, replace=True)
+            self.assertEqual(json.loads(installed.read_text(encoding='utf-8'))['password'], 'fixture-secret')
 
     def test_private_paths_are_hidden_and_ignored(self):
         view = (MAIN / 'storage_view.c').read_text(encoding='utf-8')

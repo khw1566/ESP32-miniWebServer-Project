@@ -369,10 +369,11 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
 }
 
 // -------------------------------------------------------------
-// NVS: Wi-Fi 자격증명 저장
+// M3: SD JSON Wi-Fi configuration (shared NVS backend is bypassed)
 // -------------------------------------------------------------
 #include "m3_sd_settings.h"
-#define NETWORK_SETTINGS_SAVED_HOOK m3_sd_wifi_save
+#define NETWORK_SETTINGS_LOAD_HOOK m3_sd_wifi_load
+#define NETWORK_SETTINGS_SAVE_HOOK m3_sd_wifi_store
 #include "network_settings.inc"
 
 esp_err_t network_get_ip_str(char *out_ip, size_t ip_len) {

@@ -46,6 +46,9 @@ bool network_settings_valid(const network_settings_t *s) {
 bool network_settings_load(network_settings_t *s) {
     if (!s) return false;
     memset(s, 0, sizeof(*s)); s->version = 1;
+    #ifdef NETWORK_SETTINGS_LOAD_HOOK
+    return NETWORK_SETTINGS_LOAD_HOOK(s);
+    #else
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return false;
     size_t length = sizeof(*s);
@@ -67,6 +70,7 @@ bool network_settings_load(network_settings_t *s) {
         memset(s, 0, sizeof(*s)); s->version = 1; return false;
     }
     return true;
+    #endif
 }
 esp_err_t network_save_configuration(const network_settings_t *s) {
     if (!network_settings_valid(s)) return ESP_ERR_INVALID_ARG;
@@ -80,6 +84,9 @@ esp_err_t network_save_configuration(const network_settings_t *s) {
         snprintf(clean.netmask, sizeof(clean.netmask), "%s", s->netmask);
         snprintf(clean.dns, sizeof(clean.dns), "%s", s->dns);
     }
+    #ifdef NETWORK_SETTINGS_SAVE_HOOK
+    esp_err_t err = NETWORK_SETTINGS_SAVE_HOOK(&clean);
+    #else
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
     if (err == ESP_OK) {
@@ -87,6 +94,7 @@ esp_err_t network_save_configuration(const network_settings_t *s) {
         if (err == ESP_OK) err = nvs_commit(h);
         nvs_close(h);
     }
+    #endif
     #ifdef NETWORK_SETTINGS_SAVED_HOOK
     if (err == ESP_OK) NETWORK_SETTINGS_SAVED_HOOK(&clean);
     #endif

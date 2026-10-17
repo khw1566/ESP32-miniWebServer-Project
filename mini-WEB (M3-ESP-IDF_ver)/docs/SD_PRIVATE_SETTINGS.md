@@ -1,57 +1,106 @@
-# M3 SD 설정 보존
+# M3 시제품 JSON 설정
 
-SD카드 루트의 `.private/api_keys.json`을 부팅 시 읽습니다. Gemini 에이전트·음성인식,
-Google TTS, OpenAI 음성인식·음성합성에서 사용합니다. 키 파일이 없으면 기존
-Git 제외 `m3_gemini_private.h` 설정으로 동작합니다. 키 파일 변경 후 재부팅하세요.
+M3는 SD카드의 평문 JSON 두 개를 설정 원본으로 사용합니다.
+Wi-Fi 자격 증명은 NVS로 복사하지 않으며, 예전 NVS Wi-Fi가 SD 설정을 덮어쓰지
+않습니다. API 키도 내장 헤더나 별도 웹 AI NVS 저장값으로 우회하지 않습니다.
+관리자 비밀번호·세션 인증 등 일반 설정은 기존 NVS를 유지합니다.
 
-현재 PC용 키 원본은 `sd_private/.private/api_keys.json`입니다. `.private` 폴더는
-모든 경로에서 Git 제외 대상이며, 실제 키를 예제·소스·커밋에 넣지 않습니다.
-Git pull/push는 이 파일이나 SD카드 설정을 변경하지 않습니다. 다른 PC에 clone하면
-개인 키 파일은 내려오지 않으므로 SD카드나 개인 백업에서 가져와야 합니다.
+## SD 파일 배치
 
-빌드·업로드는 프로젝트 규칙에 따라 사용자가 실행합니다. 새 펌웨어를 설치한 뒤,
-PC에 SD카드를 연결하고 저장소 루트에서 실행하세요. `E:/`는 실제 SD 드라이브로 바꿉니다.
+SD카드 루트에 `.private` 폴더를 만들고 다음 두 파일을 UTF-8로 저장하세요.
+Windows에서 파일 확장자가 `.json.txt`가 되지 않도록 확인합니다.
 
-```powershell
-python tools/copy_m3_sd_settings.py E:/
-```
-
-기존 SD 키를 교체할 때만 `--replace-keys`를 추가합니다. 이 도구는 Wi-Fi 기록을
-덮어쓰거나 삭제하지 않습니다. 카드에 `.private/api_keys.json`을 직접 복사해도 됩니다.
-
-파일 형식 예시(실제 키는 이 문서에 넣지 않음):
+`.private/api_keys.json`:
 
 ```json
-{"version":1,"google_tts":"YOUR_GOOGLE_TTS_KEY","gemini":"YOUR_GEMINI_KEY","openai":"YOUR_OPENAI_KEY"}
+{
+  "gemini": "YOUR_GEMINI_API_KEY",
+  "google_tts": "YOUR_GOOGLE_TTS_API_KEY",
+  "openai": "YOUR_OPENAI_API_KEY",
+  "azure_speech": "YOUR_AZURE_SPEECH_KEY",
+  "azure_region": "koreacentral"
+}
 ```
 
-## Wi-Fi 기록
+사용하는 제공자 항목만 넣어도 됩니다. 빈 문자열은 미설정이며, `version`은
+생략할 수 있습니다. 넣는 경우 숫자 1을 사용합니다. 키는 공백 없는 16~255자
+문자열로 읽고 실제 제공자의 키 형식·접근 권한 검사는 요청 시 해당 제공자가 합니다.
+키를 펌웨어 코드나 Git에 넣지 않습니다.
 
-기기 화면 또는 웹 설정에서 유효한 Wi-Fi 설정을 저장하면 기존 내부 NVS 저장에
-추가하여 SD의 `.private/wifi.json`에 SSID·비밀번호·DHCP/고정 IP 정보를 기록합니다.
-연결 시도에 실패해도 입력한 유효한 설정은 기록됩니다. 같은 SSID는 최신 설정으로
-갱신하며 다른 SSID 기록은 유지합니다. NVS가 비어 있으면 마지막 저장 SSID의 설정을
-SD에서 NVS로 복원한 뒤 기존 자동 연결·실패 시 설정 AP·재시도 절차를 사용합니다.
-기존 NVS 설정이 있으면 그것을 우선하고 SD에 백업합니다. 다른 SSID의 기록도
-보관하지만 부팅 시 주변의 모든 저장 네트워크를 순회하는 기능은 아닙니다.
+`.private/wifi.json`:
 
-기존 기록은 삭제하지 않고 최대 64 KiB까지 보존합니다. SD가 없거나 업로드 중 잠김,
-손상·용량 초과·쓰기 실패가 발생하면 NVS 설정은 유지하고 키 값 없이 `SD_CONFIG`
-경고를 기록합니다. 실패한 SD 백업은 카드를 확인한 뒤 다시 설정을 저장하세요.
-`.tmp`에 쓰고 flush/fsync 후 교체하며 이전 파일은 `.bak`에 남깁니다.
-FAT 전원 차단의 모든 상황에 대한 복구를 보장하지 않으므로 중요한 카드는 별도 백업하세요.
+```json
+{"ssid":"YOUR_WIFI_SSID","password":"YOUR_WIFI_PASSWORD"}
+```
 
-이 폴더는 기기 파일 목록·이름 변경·삭제·미디어 업로드 경로에서 접근하지 않도록
-분리합니다. SD의 파일은 평문이므로 카드를 가진 사람은 읽을 수 있습니다.
-웹 AI 페이지의 기존 암호화 키 저장은 별도 기능이며 이 SD 키로 자동 덮어쓰지 않습니다.
-음성인식 화면의 임시 키 입력은 기존 세션 동작을 유지하며 재부팅하면 SD 키를 사용합니다.
+`static` 생략 또는 false는 DHCP입니다. 공개 Wi-Fi는 password를 빈 문자열로
+둡니다. SSID는 UTF-8 최대 32바이트, 비밀번호는 8~63바이트입니다.
+고정 IP는 아래처럼 모든 주소 필드를 지정합니다.
 
-## 확인
+```json
+{"ssid":"YOUR_WIFI_SSID","password":"YOUR_WIFI_PASSWORD","static":true,
+ "ip":"192.168.1.50","gateway":"192.168.1.1","netmask":"255.255.255.0","dns":"1.1.1.1"}
+```
 
-호스트 검사: `python tools/test_m3_sd_settings.py`, `node tools/test_network_setup.cjs`.
-펌웨어 빌드 후 SD 키 로드, Wi-Fi 두 개 저장, 재부팅, NVS 초기화 후 마지막 설정 복원,
-카드 없음/쓰기 실패, 실제 제공자 인증을 보드에서 확인해야 합니다.
+예전 `version:1, networks:[...], last_ssid` 형식도 읽습니다. 화면 또는 웹 Wi-Fi
+설정에서 저장하면 최신 선택 하나를 위 단일 프로필 JSON으로 기록합니다. 이전
+파일은 `.bak`에 남깁니다. 저장 실패 시 성공이라고 표시하지 않고, 기존 실행 중
+프로필을 유지합니다. 부팅 때 JSON을 읽은 뒤 RAM의 설정 스냅샷으로 자동 연결·
+고정 IP·재시도·저장 비밀번호 재사용을 처리합니다. SD 파일을 PC에서 바꾼 경우
+카드를 넣고 재부팅하세요. 설정 AP 동작과 명시적 설정 모드 선택은 유지합니다.
 
-## Azure Speech
+## 웹 관리자와 AI 어시스턴트
 
-Azure TTS·STT는 `azure_speech` 공용 키와 `azure_region`을 사용합니다. 두 필드는 선택 사항이며 기존 키 파일 형식과 호환됩니다. 키가 없으면 Git 제외 `m3_azure_private.h`를 사용하고, 지역 기본값은 `koreacentral`입니다. 키가 준비되면 부팅 기본 제공자로 Azure를 선택하며 기존 제공자도 유지합니다. [연결 및 검증 절차](AZURE_SPEECH.md)를 참고하세요.
+- 관리자에서 연결되는 AI 어시스턴트(`/ai`, `/ai_studio.html`)의 키 상태는
+  `.private/api_keys.json`의 `gemini`를 확인합니다. 키 원문은 반환하지 않습니다.
+- 웹의 **키 저장·교체**와 **저장 키 삭제**는 같은 JSON의 `gemini`만 갱신하며
+  다른 제공자 키는 보존합니다. 별도의 AES/NVS API 키 저장을 사용하지 않습니다.
+- 실제 `/api/ai/chat`의 Gemini HTTPS 요청도 요청마다 같은 JSON에서 키 사본을
+  읽습니다. 따라서 웹에서 바꾼 키는 다음 요청부터 사용합니다.
+- 기기의 Gemini 에이전트·Google STT/TTS·OpenAI·Azure 음성은 부팅 때 읽은 같은
+  JSON의 제공자 항목을 사용합니다. 웹에서 키를 바꾼 뒤 이 기능들에도 반영하려면
+  재부팅합니다. 진행 중 요청이 참조하는 키 메모리를 변경하지 않습니다.
+- 관리자 로그인을 유지하고 `.private`를 공개 웹·파일 관리 경로에서 숨깁니다.
+  관리자 기본값 복원은 SD의 키와 Wi-Fi JSON을 삭제하지 않습니다.
+
+`Main WebFlie`에 예전 웹 AI 화면을 별도로 올려 사용한다면 새 내장 화면이
+그 파일에 가려질 수 있습니다. 업데이트된 내장 화면으로 확인하거나 기존
+`tools/export_main_web.py`로 최신 웹 패키지를 다시 내보낸 뒤 SD를 갱신합니다.
+백엔드 API는 두 화면 모두 같은 JSON 키를 사용합니다.
+
+## PC에서 복사
+
+기존 Git 제외 로컬 키 원본 `sd_private/.private/api_keys.json`을 실제 SD에
+복사하려면 저장소 루트에서 다음 명령을 실행합니다. E:/는 실제 카드입니다.
+기존 SD 키 교체를 명시한 경우에만 `--replace-keys`를 사용합니다.
+
+```powershell
+python -X utf8 tools/copy_m3_sd_settings.py E:/ --replace-keys
+```
+
+Wi-Fi도 복사하려면 예제 `docs/examples/wifi.example.json`을 개인 폴더에 복사하여
+실제 값으로 수정하고 `--wifi-source`로 지정합니다. 키 파일은 기존 설치용 원본을
+사용하며 Wi-Fi 원문도 출력하지 않습니다. UTF-16 또는 BOM JSON 원본은 UTF-8로
+변환하여 SD에 설치합니다. Wi-Fi 옵션이 없으면 SD Wi-Fi 파일을 건드리지 않습니다.
+
+```powershell
+python -X utf8 tools/copy_m3_sd_settings.py E:/ --replace-keys --wifi-source "개인폴더/wifi.json" --replace-wifi
+```
+
+예제 파일에는 실제 키·비밀번호가 없습니다. 로컬 설치 원본에 Wi-Fi JSON이 없어도
+카드의 기존 Wi-Fi JSON과는 별개이며, 새 펌웨어의 화면·웹 Wi-Fi 설정 저장으로
+카드에 생성할 수 있습니다.
+
+## 진단과 검증
+
+`SD_CONFIG`는 키 내용 대신 제공자별 로드 여부와 Wi-Fi 준비 여부만 기록합니다.
+`API JSON loaded: gemini=1 ...`, `Wi-Fi JSON boot profile: ready`,
+`Wi-Fi JSON committed`로 단계별 결과를 확인합니다. SD 마운트 실패는 앞선
+`SD_MEDIA` 로그로 확인합니다. JSON을 못 읽으면 NVS·내장 키로 우회하지 않습니다.
+`.tmp`에 flush/fsync 후 교체하고 `.bak` 복원을 지원합니다.
+
+저장소 루트의 `node tools/test_m3_json_runtime.cjs`, `python -X utf8 tools/test_m3_sd_settings.py`,
+`node tools/test_network_setup.cjs` 및 M3의 `test_sd_wifi_recovery.cjs`,
+`test_touch_apps.cjs`, `test_ai_key.cjs`, `test_ai_studio.cjs`, `test_azure_speech.cjs`로
+호스트 코드·모의 동작을 검사합니다. 빌드·플래시는 사용자가 실행하며 실제 카드,
+Wi-Fi 접속, 제공자 인증 성공은 별도로 확인해야 합니다.
