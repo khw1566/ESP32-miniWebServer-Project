@@ -1,0 +1,73 @@
+{
+  "capture_date": "2026-10-16",
+  "kind": "Actual LVGL UI source rendered on PC with mocked services; not hardware execution or actual AI inference",
+  "current_source_may_differ": true,
+  "screenshots": [
+    {
+      "model": "M1",
+      "file": "m1-home.png",
+      "scenario": "m1_home",
+      "sha256": "722982204379a45b429df0e1e1d5c05f58ee2c85bef2ab229ec7e9c8f25e915f"
+    },
+    {
+      "model": "M1",
+      "file": "m1-wifi.png",
+      "scenario": "m1_wifi",
+      "sha256": "60428bd8665d85b9cce165aa4bb0e0b5152df97703a23f6b3d5b4fd52822115c"
+    },
+    {
+      "model": "M1",
+      "file": "m1-keyboard.png",
+      "scenario": "m1_keyboard",
+      "sha256": "cf41cc0341fd9fa35a17f8a7a49f76359f96549c574474c2df09049246c9bd1b"
+    },
+    {
+      "model": "M1",
+      "file": "m1-storage.png",
+      "scenario": "m1_storage_sd",
+      "sha256": "257ae29f74792cfa39f00b342bfd2d2dfca5318e7e8168d139a744372d7ad915"
+    },
+    {
+      "model": "M1",
+      "file": "m1-qr.png",
+      "scenario": "m1_qr_local",
+      "sha256": "391403f1b97e70d8b3ecc3a3c789af30eecce1ef43b91011eeba6f8c5273d4d4"
+    },
+    {
+      "model": "M3",
+      "file": "m3-home.png",
+      "scenario": "ko_00_home",
+      "sha256": "92259df0c1272b2b7ed5d80b1f027a10fa1c2a21c3a161a4a7845f6194baf03c"
+    },
+    {
+      "model": "M3",
+      "file": "m3-wifi.png",
+      "scenario": "ko_01_wifi",
+      "sha256": "fb96a64fcd72389df8dd33761169ef7ef094d59f3b70fdcbf43053a2f97ff204"
+    },
+    {
+      "model": "M3",
+      "file": "m3-files.png",
+      "scenario": "ko_02_files",
+      "sha256": "5f4e0f7ecc9011be4adc61023651fa850be00f324fdb11f111b2595ce0b09deb"
+    },
+    {
+      "model": "M3",
+      "file": "m3-radio.png",
+      "scenario": "ko_06_radio",
+      "sha256": "bd3b8ec8e9b189694563dfa1fb35339b9d6ab00eb5957c147d0aa399d4563ca4"
+    },
+    {
+      "model": "M3",
+      "file": "m3-agent.png",
+      "scenario": "ko_09_agent",
+      "sha256": "33c357bb0874718ece1104444a7a313d902fde42bf961abfd9928f52c4ca5586"
+    },
+    {
+      "model": "M3",
+      "file": "m3-gallery.png",
+      "scenario": "ko_12_gallery",
+      "sha256": "a1391ac70402548295b23daad731ac66f8b25ac9eca3f2cdc346052fb8fea936"
+    }
+  ]
+}

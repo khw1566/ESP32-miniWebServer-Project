@@ -4,6 +4,7 @@
 
 | 분류 | 문서 |
 | --- | --- |
+| 구동 화면 | [M1·M3 시뮬레이터 캡처와 설명](SCREENSHOTS.md) |
 | 네트워크 | [Wi-Fi·서버 IP 설정](WIFI_SETUP.md), [mDNS 접속](MDNS_ACCESS.md), [IPv6 수정 기록](IPV6_FIX.md) |
 | 관리자 | [관리자 화면 설계](ADMIN_DESIGN.md), [업로드 후 새로고침](UPLOAD_REFRESH.md) |
 | 파일 관리 | [파일 관리자](FILE_MANAGER.md), [파일 날짜 처리](FILE_DATES.md) |
