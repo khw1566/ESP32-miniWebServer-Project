@@ -221,7 +221,7 @@ void m3_voice_run(unsigned job, const m3_voice_capture_t *capture) {
     reply[received] = 0;
     json = cJSON_Parse(reply);
     cJSON *text = cJSON_GetObjectItemCaseSensitive(json, "text");
-    if (!cJSON_IsString(text) || !m3_tts_text_valid(text->valuestring)) { error = "Recognition empty/too long; use shorter speech"; goto done; }
+    if (!cJSON_IsString(text) || !m3_speech_text_valid(text->valuestring)) { error = "Recognition empty/too long; use shorter speech"; goto done; }
     if (active(job, capture)) { publish(job, "Review recognized text, then Use text", false, false, text->valuestring); success = true; }
 done:
     if (opened) capture->end();

@@ -125,7 +125,7 @@ void m3_google_tts_run(const char *text, const m3_audio_output_t *output) {
     if (!m3_google_tts_ready() || network_get_mode() != NET_MODE_STA_CONNECTED) {
         output->message("Cloud TTS needs Wi-Fi and configured key", false, 0); return;
     }
-    if (!m3_tts_text_valid(text)) { output->message("Invalid/oversized TTS text", false, 0); return; }
+    if (!m3_speech_text_valid(text)) { output->message("Invalid/oversized TTS text", false, 0); return; }
     output->message("Google Korean TTS / downloading audio...", true, 0);
     body = cJSON_CreateObject(); if (!body) goto done;
     cJSON *input = cJSON_AddObjectToObject(body, "input"), *voice = cJSON_AddObjectToObject(body, "voice");
@@ -210,7 +210,7 @@ bool m3_google_transcribe(const unsigned char *wav, size_t bytes, unsigned model
         if (count > 384 - length) { *error = "Recognition too long; use shorter speech"; goto done; }
         memcpy(text + length, value->valuestring, count + 1); length += count;
     }
-    if (!m3_tts_text_valid(text)) { *error = "Recognition empty/invalid; retry"; goto done; }
+    if (!m3_speech_text_valid(text)) { *error = "Recognition empty/invalid; retry"; goto done; }
     ok = !cancelled(context);
 done:
     cJSON_Delete(body); cJSON_Delete(reply);
@@ -223,7 +223,7 @@ void m3_openai_tts_run(const char *text, const m3_audio_output_t *output) {
     const char *error = "OpenAI TTS failed"; bool ok = false;
     unsigned char *pcm = NULL; size_t bytes = 0;
     cJSON *body = NULL;
-    if (!m3_openai_audio_ready() || network_get_mode() != NET_MODE_STA_CONNECTED || !m3_tts_text_valid(text)) {
+    if (!m3_openai_audio_ready() || network_get_mode() != NET_MODE_STA_CONNECTED || !m3_speech_text_valid(text)) {
         output->message("OpenAI TTS needs Wi-Fi, key and valid short text", false, 0); return;
     }
     output->message("OpenAI TTS / downloading Korean audio...", true, 0);

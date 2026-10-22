@@ -17,15 +17,26 @@
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t storage_lock;
 static m3_preferences_t current = {1, 100, 30, 1, 0, 40, 40, 0};
+_Static_assert(sizeof(m3_preferences_t) == 8, "Preserve the existing NVS settings layout");
 static unsigned revision;
 static bool dirty, web_active;
 static atomic_int restart_phase;
 static int64_t next_save;
+static unsigned sound_effect; /* Separate NVS key keeps the existing 8-byte settings compatible. */
+unsigned m3_preferences_sound(void) {
+    portENTER_CRITICAL(&lock); unsigned value = sound_effect; portEXIT_CRITICAL(&lock); return value;
+}
+bool m3_preferences_set_sound(unsigned sound) {
+    if (sound > 3) return false;
+    portENTER_CRITICAL(&lock);
+    if (sound_effect != sound) { sound_effect = sound; dirty = true; ++revision; }
+    portEXIT_CRITICAL(&lock); return true;
+}
 
 bool m3_preferences_valid(const m3_preferences_t *p) {
     return p && p->version == 1 && p->brightness >= 5 && p->brightness <= 100 &&
         p->max_fps >= 5 && p->max_fps <= 60 && p->animations <= 1 && p->web_focus <= 1 &&
-        p->volume <= 150 && p->last_volume >= 1 && p->last_volume <= 150 && p->reserved == 0;
+        p->volume <= 150 && p->last_volume >= 1 && p->last_volume <= 150 && p->wake_mode <= 1;
 }
 unsigned m3_preferences_frame_ms(unsigned fps) {
     if (fps < 5) fps = 5;
@@ -56,6 +67,7 @@ static esp_err_t write_preferences(const m3_preferences_t *p) {
     esp_err_t err = nvs_open("m3_device", NVS_READWRITE, &nvs);
     if (err != ESP_OK) return err;
     err = nvs_set_blob(nvs, "preferences", p, sizeof(*p));
+    if (err == ESP_OK) err = nvs_set_u8(nvs, "click_sound", m3_preferences_sound());
     if (err == ESP_OK) err = nvs_commit(nvs);
     nvs_close(nvs); return err;
 }
@@ -65,6 +77,8 @@ esp_err_t m3_preferences_init(void) {
     nvs_handle_t nvs; size_t length = sizeof(current); m3_preferences_t saved;
     bool found = false;
     if (nvs_open("m3_device", NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t sound = 0;
+        if (nvs_get_u8(nvs, "click_sound", &sound) == ESP_OK && sound <= 3) sound_effect = sound;
         found = nvs_get_blob(nvs, "preferences", &saved, &length) == ESP_OK &&
             length == sizeof(saved) && m3_preferences_valid(&saved);
         nvs_close(nvs);

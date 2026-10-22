@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include "esp_err.h"
 esp_err_t cloud_relay_start(void);
+void cloud_relay_set_enabled(bool enabled);
+bool cloud_relay_enabled(void);
 /* Local administrator provisioning; takes effect after reboot. */
 esp_err_t cloud_relay_provision(const char *token);
 bool cloud_relay_is_online(void);

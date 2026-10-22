@@ -1,3 +1,4 @@
+import { parseDuration } from './ytmusic.mjs';
 // Offline tests for the relay helpers. No network, yt-dlp or ffmpeg.
 import assert from 'node:assert';
 import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, parsePackets, Interleaver, toItem, validVideoId, musicItem } from './lib.mjs';
@@ -65,4 +66,6 @@ const song = { id: 'ArmDp-zijuc', ie_key: 'Youtube', url: 'https://www.youtube.c
 assert(musicItem(song));
 assert.equal(musicItem({ ...song, duration: 3 * 3600 }), null, 'long mixes are skipped');
 assert.equal(musicItem({ ...song, live_status: 'is_live' }), null, 'live streams are skipped');
-console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering, mono PCM, music filtering.');
+// YouTube Music durations.
+assert.equal(parseDuration('3:45'), 225); assert.equal(parseDuration('1:02:03'), 3723); assert.equal(parseDuration('LIVE'), 0);
+console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering, mono PCM, music filtering, YouTube Music durations.');

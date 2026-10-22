@@ -4,7 +4,8 @@
 #include "esp_err.h"
 
 typedef struct {
-    uint8_t version, brightness, max_fps, animations, web_focus, volume, last_volume, reserved;
+    /* Reuse the former zero reserved byte: existing settings default to hold. */
+    uint8_t version, brightness, max_fps, animations, web_focus, volume, last_volume, wake_mode;
 } m3_preferences_t;
 typedef enum { M3_MODE_OK, M3_MODE_BUSY, M3_MODE_SAVE_FAILED, M3_MODE_RESTART_FAILED } m3_mode_result_t;
 esp_err_t m3_preferences_init(void);
@@ -12,6 +13,8 @@ bool m3_preferences_valid(const m3_preferences_t *settings);
 void m3_preferences_get(m3_preferences_t *out);
 bool m3_preferences_update(const m3_preferences_t *settings);
 void m3_preferences_volume(unsigned percent);
+unsigned m3_preferences_sound(void);
+bool m3_preferences_set_sound(unsigned sound);
 esp_err_t m3_preferences_save(const m3_preferences_t *settings);
 void m3_preferences_poll(void);
 void m3_preferences_boot_mode(bool force_setup);

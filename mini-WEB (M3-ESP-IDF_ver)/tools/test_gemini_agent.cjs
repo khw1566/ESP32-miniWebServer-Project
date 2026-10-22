@@ -13,7 +13,7 @@ const models=/static const char \*models\[\] = \{([^}]+)\}/.exec(source)[1].matc
 assert.deepEqual(models,['gemini-3.1-flash-lite','gemini-3.5-flash-lite']);
 const actions={deferred_speech:{0:0,value:""},sizeof:()=>385,
  snprintf:(dest,capacity,format,value)=>{dest[0]=1;dest.value=value;},
- m3_tts_text_valid:text=>!!text&&Buffer.byteLength(text)<=384,token:1,events:[],open_app:-1,open_generation:0,MALLOC_CAP_INTERNAL:1,MALLOC_CAP_8BIT:2,MALLOC_CAP_SPIRAM:4,NET_MODE_STA_CONNECTED:1,NET_MODE_AP_CAPTIVE:2,
+ m3_speech_text_valid:text=>!!text&&Buffer.byteLength(text)<=384,token:1,events:[],open_app:-1,open_generation:0,MALLOC_CAP_INTERNAL:1,MALLOC_CAP_8BIT:2,MALLOC_CAP_SPIRAM:4,NET_MODE_STA_CONNECTED:1,NET_MODE_AP_CAPTIVE:2,
  active:token=>token===actions.token,strcmp:(a,b)=>a===b?0:1,
  cJSON_CreateObject:()=>({}),cJSON_AddBoolToObject:(o,k,v)=>o[k]=v,cJSON_AddStringToObject:(o,k,v)=>o[k]=v,
  cJSON_AddNumberToObject:(o,k,v)=>o[k]=v,cJSON_GetObjectItemCaseSensitive:(o,k)=>o?.[k]??null,

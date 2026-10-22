@@ -8,9 +8,9 @@ function js(s){return s.replace(/\/\*[\s\S]*?\*\//g,'').replace(/port(?:ENTER|EX
  .replace(/\b(?:unsigned|int|bool|esp_err_t) (\w+)/g,'let $1').replace(/\b(\d+)U\b/g,'$1')
  .replace(/\(uint8_t\)/g,'').replace(/sizeof\([^)]*\)/g,'8').replaceAll('->','.')
  .replace(/atomic_store\(&restart_phase, (\d+)\)/g,'restart_phase = $1');}
-const defaults=()=>({version:1,brightness:100,max_fps:30,animations:1,web_focus:0,volume:40,last_volume:40,reserved:0});
+const defaults=()=>({version:1,brightness:100,max_fps:30,animations:1,web_focus:0,volume:40,last_volume:40,wake_mode:0});
 function setup(){
- const c={current:defaults(),revision:0,dirty:false,web_active:false,next_save:0,now:0,restart_phase:0,
+ const c={current:defaults(),sound_effect:0,revision:0,dirty:false,web_active:false,next_save:0,now:0,restart_phase:0,
  storage_lock:{},ESP_OK:0,ESP_ERR_INVALID_ARG:1,ESP_ERR_TIMEOUT:2,NVS_READWRITE:1,pdTRUE:1,pdPASS:1,NULL:null,
  M3_MODE_OK:0,M3_MODE_BUSY:1,M3_MODE_SAVE_FAILED:2,M3_MODE_RESTART_FAILED:3,
  saved:null,writes:0,tasks:0,fail:false,taskFail:false,lockFail:false,sdBusy:false,playing:false,recording:false,agent:false,download:false,
@@ -18,6 +18,7 @@ function setup(){
  memcmp:(a,b)=>JSON.stringify(a)===JSON.stringify(b)?0:1,
  xSemaphoreTake:()=>c.lockFail?0:1,xSemaphoreGive:()=>{},
  nvs_open:()=>0,nvs_set_blob:(_n,_key,p)=>{c.writes++;c.pending={...p};return c.fail?5:0;},
+ nvs_set_u8:(_n,key,value)=>{c.pendingSound=value;return c.fail?5:0;},
  nvs_commit:()=>{if(c.fail)return 5;c.saved={...c.pending};return 0;},nvs_close:()=>{},
  m3_audio_state:out=>out.playing=c.playing,m3_recorder_state:out=>out.busy=c.recording,
  m3_agent_state:out=>out.busy=c.agent,m3_tube_download_state:out=>out.busy=c.download,sd_media_ready:()=>true,
@@ -38,6 +39,7 @@ function setup(){
  ['m3_preferences_valid','p',body('m3_preferences_valid')],['m3_preferences_frame_ms','fps',body('m3_preferences_frame_ms')],
  ['m3_preferences_get','out',body('m3_preferences_get')],['m3_preferences_update','p',body('m3_preferences_update')],
  ['m3_preferences_volume','percent',body('m3_preferences_volume')],['write_preferences','p',body('write_preferences')],
+ ['m3_preferences_sound','',body('m3_preferences_sound')],['m3_preferences_set_sound','sound',body('m3_preferences_set_sound')],
  ['m3_preferences_save','p',body('m3_preferences_save')],['m3_preferences_poll','',body('m3_preferences_poll')],
  ['m3_preferences_boot_mode','force_setup',body('m3_preferences_boot_mode')],['m3_preferences_restart_with','p',mode]]){
   let translated=js(decl(code));if(name==='m3_preferences_frame_ms')translated=translated.replace('return (1000 + fps - 1) / fps','return Math.floor((1000 + fps - 1) / fps)');
@@ -46,7 +48,13 @@ function setup(){
  return c;
 }
 let c=setup();assert(c.m3_preferences_valid(defaults()));
-for(const patch of [{brightness:4},{brightness:101},{max_fps:4},{max_fps:61},{volume:151},{last_volume:0},{animations:2},{web_focus:2},{version:2},{reserved:1}])assert(!c.m3_preferences_valid({...defaults(),...patch}));
+assert(c.m3_preferences_valid({...defaults(),wake_mode:1}),'double tap choice is valid; old zero reserved byte remains hold');
+c.m3_preferences_update({...defaults(),wake_mode:1});c.m3_preferences_poll();
+assert.equal(c.saved.wake_mode,1,'wake choice persists without changing the eight-byte NVS layout');
+c=setup();
+assert(c.m3_preferences_set_sound(3));c.m3_preferences_poll();assert.equal(c.pendingSound,3);
+assert(!c.m3_preferences_set_sound(4));assert.equal(c.m3_preferences_sound(),3);c=setup();
+for(const patch of [{brightness:4},{brightness:101},{max_fps:4},{max_fps:61},{volume:151},{last_volume:0},{animations:2},{web_focus:2},{version:2},{wake_mode:2}])assert(!c.m3_preferences_valid({...defaults(),...patch}));
 for(let fps=5;fps<=60;fps++){const ms=c.m3_preferences_frame_ms(fps);assert(ms>0);assert(1000/ms<=fps);}
 assert.equal(c.m3_preferences_frame_ms(0),200);assert.equal(c.m3_preferences_frame_ms(100),17);
 c.m3_preferences_volume(80);c.m3_preferences_volume(0);assert.equal(c.current.volume,0);assert.equal(c.current.last_volume,80);

@@ -34,7 +34,7 @@ code=body(read('main/include/m3_web_address.h'),'m3_web_address_url').replaceAll
 vm.runInContext('function m3_web_address_url(s,kind){'+code+'}',c);
 const snapshot={web:true,mode:3,mdns_ready:true,cloud:true,domain_url:'https://m3-example.audreaming.com/',
  ipv6_url:'http://[2001:db8::1]/',url:'http://192.168.0.42/',mdns_url:'http://m3-example.local/',requests:42,
- cloud_status:'online',ipv6_status:'global_ready',wifi_busy:false};
+ cloud_status:'online',ipv6_status:'global_ready',wifi_busy:false,web_policy:0,web_control_busy:false,web_control_revision:0,web_control_result:0};
 for(const [kind,field] of [[0,'domain_url'],[1,'ipv6_url'],[2,'url'],[3,'mdns_url']])assert.equal(c.m3_web_address_url(snapshot,kind),snapshot[field]);
 assert.equal(c.m3_web_address_url(snapshot,99),'');
 assert.equal(c.m3_web_address_url({...snapshot,mode:1},1),'');
@@ -58,6 +58,8 @@ const ids=[...read('main/include/m3_i18n.h').matchAll(/\b(?:TITLE|TEXT)\((\w+)\)
 for(const id of ids)c[id]=id;
 Object.assign(c,{snapshot,web_address_kind:0,web_qr_dirty:true,web_qr_ok:false,seen_web_url:'',web_tabs:{},
  web_qr:{},web_frame:{},web_hint:{},web_retry:{},web_url:{},web_state:{},web_dot:{},web_requests:{},
+ web_controls:[{},{},{},{}],web_control_info:{},shade_note:{},seen_web_control:0,
+ M3_WEB_STOP_DOMAIN:0,M3_WEB_STOP_ALL:1,M3_WEB_START_DOMAIN:2,M3_WEB_START_ALL:3,
  LV_OBJ_FLAG_HIDDEN:1,LV_STATE_DISABLED:2,LV_RESULT_OK:0,GREEN:1,AMBER:2,qr_calls:[],qr_fail:false,
  tr:id=>id,strcmp:(a,b)=>a===b?0:1,strlen:s=>s.length,
  set_text:(obj,value)=>obj.text=value,set_bg:(obj,value)=>obj.bg=value,
@@ -69,6 +71,7 @@ code=body(ui,'update_web').replace('char text[96];','let text={};').replace('con
  .replace('bool ready','let ready').replace('snprintf(seen_web_url, sizeof(seen_web_url), "%s", url)','seen_web_url = url')
  .replace('snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests)','text.value = String(snapshot.requests)')
  .replace('set_text(web_requests, text)','set_text(web_requests, text.value)');
+code=code.replace('static unsigned seen_web_control;','').replace(/\b(?:unsigned|bool) (\w+)/g,'let $1');
 vm.runInContext('function web_explanation(){'+body(ui,'web_explanation')+'}\nfunction update_web(){'+code+'}',c);
 c.update_web();assert.equal(c.qr_calls.at(-1),snapshot.domain_url);assert(!c.web_frame.hidden);
 c.update_web();assert.equal(c.qr_calls.length,1,'unchanged QR does not reallocate every tick');
@@ -91,9 +94,14 @@ const count=c.qr_calls.length;c.update_web();assert.equal(c.qr_calls.length,coun
 c.qr_fail=false;select(0);assert(!c.web_frame.hidden);
 snapshot.domain_url='';c.update_web();assert(c.web_frame.hidden);assert.equal(c.web_url.text,'T_QR_WAIT');
 c.web_qr_dirty=true;c.update_web();assert.equal(c.web_url.text,'T_QR_WAIT','empty cache still reapplies translated pending text');
+snapshot.domain_url='https://m3-example.audreaming.com/';snapshot.web_policy=1;snapshot.cloud=false;select(0);
+assert.equal(c.web_hint.text,'T_WEB_STOPPED_DOMAIN');assert(c.web_controls[0].disabled);assert(!c.web_controls[2].disabled);
+snapshot.web_policy=2;snapshot.web=false;c.update_web();assert.equal(c.web_state.text,'T_WEB_STOPPED_ALL');
+assert(c.web_controls[1].disabled);assert(!c.web_controls[3].disabled);assert(c.web_controls[2].disabled);
 
-const apps=/static const app_id_t apps\[\] = \{([^}]+)\}/.exec(ui)[1].split(',').map(s=>s.trim());
-assert.equal(apps[0],'APP_MONITOR','server is on the first home tile');
+const apps=ui.slice(ui.indexOf('} app_icons[] = {'),ui.indexOf('static void draw_app_icon'));
+assert(apps.includes('{APP_MONITOR,'));
+assert.equal(/\{(APP_\w+),/.exec(apps)[1],'APP_MONITOR','server is on the first home tile');
 assert(ui.includes('{T_WEB_DOMAIN, T_WEB_IPV6, T_WEB_IPV4, T_WEB_MDNS}'));
 const build=body(ui,'build_monitor');assert(!build.includes('lv_obj_add_flag(web_tabs, LV_OBJ_FLAG_HIDDEN)'));
 assert(build.includes('lv_qrcode_set_size(web_qr, 216)'));assert(build.includes('lv_obj_set_size(web_frame, 280, 280)'));

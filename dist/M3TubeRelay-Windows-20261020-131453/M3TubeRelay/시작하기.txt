@@ -1,0 +1,14 @@
+M3 유튜브 중계서버 Windows 패키지
+
+1. ZIP을 쓰기 가능한 폴더에 모두 압축 해제하세요.
+2. Node.js 20 이상, Python + yt-dlp, FFmpeg, cloudflared를 설치하고 PATH에 등록하세요.
+3. 기존 보드와 연결할 때는 원래 tube-relay/config.json을 같은 폴더에 복사하세요.
+   이 파일이 없으면 새 토큰이 생성되어 기존 보드의 토큰과 일치하지 않습니다.
+4. 같은 PC에서 사용한다면 원래 cloudflared.yml도 복사하세요.
+   다른 PC에서는 cloudflared 로그인 후 터널 설정을 다시 진행하세요.
+5. M3TubeRelay.exe를 실행하세요. 시계 옆 트레이 아이콘을 오른쪽 클릭하여 관리합니다.
+
+EXE는 서버 파일과 같은 폴더에 두세요. 단일 실행 파일이나 의존성 포함 설치 프로그램이 아닙니다.
+새 토큰을 사용하는 경우 전체 프로젝트의 tube-relay 폴더에 config.json을 복사하고
+node setup.mjs를 실행하여 보드 헤더를 생성한 뒤 펌웨어를 다시 빌드·설치하세요.
+이 패키지에는 개인 토큰, Cloudflare 인증 정보, 캐시, 로그가 포함되지 않습니다.

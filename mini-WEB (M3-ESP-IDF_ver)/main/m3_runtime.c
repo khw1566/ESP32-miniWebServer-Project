@@ -30,36 +30,53 @@ typedef struct { char source[256], destination[256]; bool remove, sd; } mutation
 static QueueHandle_t mutation_queue;
 static atomic_bool mutation_pending;
 static atomic_bool wifi_pending;
+static atomic_bool web_pending;
+static atomic_int web_request = -1;
+static bool web_paused, domain_paused;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_runtime_state_t state;
+static void publish(const m3_runtime_state_t *next);
 static bool setup_requested;
 static bool clock_started;
 static int64_t next_wifi_retry;
-/* Logs each HP core's busy share every 30 s from the idle tasks' run-time
+/* Samples each HP core's busy share every 2 s from the idle tasks' run-time
  * counters (microseconds with the default esp_timer clock), so core placement
  * can be checked on the board with real apps running. IDF 5.5's kernel only
  * reads the calling core's idle counter, so each read runs on its own core. */
-#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS && CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
 static void read_idle_counter(void *out) { *(configRUN_TIME_COUNTER_TYPE *)out = ulTaskGetIdleRunTimeCounter(); }
+static unsigned core_busy_percent(uint64_t idle_delta, uint64_t elapsed) {
+    if (!elapsed) return 0;
+    uint64_t share = idle_delta * 100 / elapsed;
+    return share >= 100 ? 0 : 100 - (unsigned)share;
+}
 #endif
-static void log_core_load(void) {
-#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+static void log_core_load(m3_runtime_state_t *next) {
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS && CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
     static int64_t last_us;
     static configRUN_TIME_COUNTER_TYPE last_idle[2];
     int64_t now = esp_timer_get_time();
-    if (last_us && now - last_us < 30000000) return;
-    unsigned busy[2] = {0};
+    if (last_us && now - last_us < 2000000) return;
+    unsigned busy[2] = {0}; configRUN_TIME_COUNTER_TYPE idle[2];
     for (int core = 0; core < 2; ++core) {
-        configRUN_TIME_COUNTER_TYPE idle = 0;
-        if (esp_ipc_call_blocking(core, read_idle_counter, &idle) != ESP_OK) return;
+        if (esp_ipc_call_blocking(core, read_idle_counter, &idle[core]) != ESP_OK) { next->cpu_valid = false; return; }
         if (last_us && now > last_us) {
-            uint64_t share = (uint64_t)(idle - last_idle[core]) * 100 / (uint64_t)(now - last_us);
-            busy[core] = share >= 100 ? 0 : 100 - (unsigned)share;
+            busy[core] = core_busy_percent((configRUN_TIME_COUNTER_TYPE)(idle[core] - last_idle[core]), now - last_us);
         }
-        last_idle[core] = idle;
     }
-    if (last_us) ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]);
+    for (unsigned core = 0; core < 2; ++core) last_idle[core] = idle[core];
+    if (last_us) {
+        next->cpu_valid = true;
+        next->cpu_sample_ms = (uint32_t)(now / 1000);
+        for (unsigned core = 0; core < 2; ++core) next->cpu_busy[core] = busy[core];
+        static int64_t last_log;
+        if (now - last_log >= 30000000) {
+            ESP_LOGI("M3", "CPU load: core0 %u%%, core1 %u%%", busy[0], busy[1]); last_log = now;
+        }
+    }
     last_us = now;
+#else
+    next->cpu_valid = false;
 #endif
 }
 /* One service task owns SNTP, including when cloud access is unprovisioned. */
@@ -73,6 +90,45 @@ void m3_runtime_state(m3_runtime_state_t *out) {
     portENTER_CRITICAL(&state_lock); *out = state; portEXIT_CRITICAL(&state_lock);
     out->wifi_busy = atomic_load(&wifi_pending);
     out->mutation_busy = atomic_load(&mutation_pending);
+    out->web_control_busy = atomic_load(&web_pending);
+    if (out->cpu_valid && (uint32_t)((uint32_t)(esp_timer_get_time() / 1000) - out->cpu_sample_ms) > 6000) out->cpu_valid = false;
+}
+bool m3_runtime_web(m3_web_action_t action) {
+    if (action < M3_WEB_STOP_DOMAIN || action > M3_WEB_START_ALL || m3_preferences_restarting()) return false;
+    portENTER_CRITICAL(&state_lock); bool ready = state.initialized; portEXIT_CRITICAL(&state_lock);
+    bool expected = false;
+    if (!ready || !atomic_compare_exchange_strong(&web_pending, &expected, true)) return false;
+    atomic_store(&web_request, action); return true;
+}
+/* Only the service worker starts/stops HTTP. Never block the LVGL task on httpd_stop. */
+static void web_execute(m3_runtime_state_t *next, int action) {
+    esp_err_t result = ESP_OK;
+    if (action == M3_WEB_STOP_DOMAIN) {
+        domain_paused = true; cloud_relay_set_enabled(false);
+    } else if (action == M3_WEB_STOP_ALL) {
+        bool locked = !sd_media_ready() || sd_media_admin_lock();
+        if (!locked || atomic_load(&mutation_pending)) {
+            if (locked && sd_media_ready()) sd_media_admin_unlock();
+            result = ESP_ERR_INVALID_STATE;
+        } else {
+            web_paused = domain_paused = true;
+            cloud_relay_set_enabled(false); web_server_stop();
+            if (sd_media_ready()) sd_media_admin_unlock();
+        }
+    } else {
+        if (action == M3_WEB_START_ALL) {
+            result = network_get_mode() == NET_MODE_IDLE ? ESP_ERR_INVALID_STATE : web_server_start();
+            if (result == ESP_OK) web_paused = false;
+        } else if (!web_server_is_running()) result = ESP_ERR_INVALID_STATE;
+        if (result == ESP_OK) {
+            result = cloud_relay_start();
+            if (result == ESP_OK) { domain_paused = false; cloud_relay_set_enabled(true); }
+        }
+    }
+    next->web = web_server_is_running(); next->cloud = cloud_relay_is_online();
+    next->web_policy = web_paused ? 2 : domain_paused ? 1 : 0;
+    next->web_control_result = result; ++next->web_control_revision;
+    publish(next); atomic_store(&web_pending, false);
 }
 bool m3_runtime_file_action(bool sd, const char *source, const char *destination, bool remove) {
     if (!mutation_queue || !source || strlen(source) > 255 || (!remove && (!destination || strlen(destination) > 255))) return false;
@@ -160,9 +216,9 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
             snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
                 result == ESP_OK ? "Setup hotspot ready. Saved credentials retained." : "Setup hotspot failed. Inspect serial log.");
         }
-        if (!web_server_is_running() && network_get_mode() != NET_MODE_IDLE) {
+        if (!web_paused && !web_server_is_running() && network_get_mode() != NET_MODE_IDLE) {
             web_server_start();
-            cloud_relay_start();
+            if (!domain_paused) cloud_relay_start();
         }
     }
     memset(request, 0, sizeof(*request));
@@ -197,6 +253,9 @@ static bool ipv6_url(const char *address, char *out, size_t capacity) {
 static void services(void *unused) {
     (void)unused;
     m3_runtime_state_t next = {0};
+#if CONFIG_ULP_COPROC_ENABLED
+    next.lp_configured = true;
+#endif
     snprintf(next.message, sizeof(next.message), "Starting storage and C6 Wi-Fi"); publish(&next);
     m3_boot_splash_step(M3_BOOT_STORAGE);
     esp_err_t storage = web_server_storage_init();
@@ -252,7 +311,9 @@ static void services(void *unused) {
             atomic_store(&mutation_pending, false);
         }
         m3_preferences_poll();
-        log_core_load();
+        log_core_load(&next);
+        int web_action = atomic_exchange(&web_request, -1);
+        if (web_action >= 0) web_execute(&next, web_action);
         if (!m3_preferences_web_active()) { m3_music_poll(); m3_photos_poll(); m3_sd_apps_poll(); }
         wifi_request_t request;
         if (xQueueReceive(wifi_queue, &request, 0) == pdTRUE) wifi_execute(&next, &request);
@@ -282,6 +343,17 @@ static void services(void *unused) {
         next.sd = sd_media_ready();
         if (!m3_preferences_web_active() && (refresh || (++tick % 5 == 0))) {
             storage_capacity_read(false, &next.flash);
+            if (!next.sd) {
+                memset(&next.sd_capacity, 0, sizeof(next.sd_capacity)); next.sd_capacity.error = ESP_ERR_INVALID_STATE;
+                next.sd_capacity_stale = false;
+            } else if (sd_media_admin_lock()) {
+                storage_capacity_read(true, &next.sd_capacity);
+                next.sd_capacity_stale = false;
+                sd_media_admin_unlock();
+            } else {
+                next.sd_capacity_stale = true;
+                if (!next.sd_capacity.total) next.sd_capacity.error = ESP_ERR_INVALID_STATE;
+            }
             bool locked = !browse.sd || sd_media_admin_lock();
             if (locked) {
                 storage_view_read(browse.sd, browse.folder, browse.offset, &next.files);

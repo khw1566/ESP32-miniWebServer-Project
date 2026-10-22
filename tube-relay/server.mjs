@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, Interleaver, validVideoId, validChannelId, toItem, musicItem, videoProfile, videoFilter } from './lib.mjs';
 import { AudioCache } from './audio_cache.mjs';
+import { YouTubeMusic } from './ytmusic.mjs';
 import { VideoCache } from './video_cache.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -84,8 +85,16 @@ async function listing(key, source, page, convert = toItem) {
 }
 const search = (q, page) => listing(`s:${q}`, last => `ytsearch${last}:${q}`, page);
 const channel = (id, page) => listing(`c:${id}`, () => `https://www.youtube.com/channel/${id}/videos`, page);
-// Songs: the same search without live streams, mixes and long videos.
-const musicSearch = (q, page) => listing(`m:${q}`, last => `ytsearch${last}:${q}`, page, musicItem);
+// Songs come from music.youtube.com; if it fails, the YouTube search without live
+// streams, mixes and long videos keeps the app usable.
+const youtubeMusic = new YouTubeMusic({ ytdlp, log });
+async function musicSearch(q, page) {
+  try {
+    const value = await youtubeMusic.search(q, page);
+    if (value.items.length || page > 1) return value;
+  } catch (error) { log(`music.youtube.com search failed: ${error.message}`); }
+  return listing(`m:${q}`, last => `ytsearch${last}:${q}`, page, musicItem);
+}
 
 // ---- Thumbnails: raw little-endian RGB565, cropped to fill w x h ----
 let thumbJobs = 0; const thumbWaiters = [];
