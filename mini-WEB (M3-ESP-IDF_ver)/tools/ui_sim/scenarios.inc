@@ -112,6 +112,31 @@ static void run_scenarios(const char *dir) {
     scroll_page(APP_YTMUSIC, 700); SHOT("79_ytmusic_results");
     show_app(APP_HOME); settle(300);
     show_app(APP_SYSTEM); scroll_page(APP_SYSTEM, 0); SHOT("73_settings_display");
+    segment_select(wake_tabs, M3_WAKE_DOUBLE_TAP); wake_mode_changed(NULL);
+    update_metrics(NULL); SHOT("82_settings_double_tap");
+    lv_obj_t *restart_button = lv_obj_get_child(lv_obj_get_parent(restart_info), 2);
+    lv_obj_send_event(restart_button, LV_EVENT_CLICKED, NULL); settle(100); SHOT("83_restart_confirm");
+    lv_obj_send_event(lv_obj_get_child(lv_obj_get_child(restart_confirm, 1), 0), LV_EVENT_CLICKED, NULL);
+    if (sim_restart_count) { puts("Restart cancel failed"); exit(2); }
+    shade_set(true); settle(300); SHOT("84_shade_screen_off");
+    screen_off(NULL); settle(200); SHOT("85_screen_off_shield");
+    sim_touch_down = true; settle(90); sim_touch_down = false; settle(90);
+    sim_touch_down = true; settle(90); sim_touch_down = false; settle(300); SHOT("86_double_tap_wake");
+    if (screen_blanked || screen_waking || !sim_screen_on) { puts("Double tap wake failed"); exit(2); }
+    segment_select(wake_tabs, M3_WAKE_HOLD); wake_mode_changed(NULL); update_metrics(NULL);
+    screen_off(NULL); settle(200); sim_touch_down = true; settle(2200);
+    sim_touch_down = false; settle(300); SHOT("87_hold_wake");
+    if (screen_blanked || screen_waking || !sim_screen_on) { puts("Hold wake failed"); exit(2); }
+    shade_set(false); settle(300);
+    show_app(APP_SYSTEM); lv_obj_scroll_to_view(sound_tabs, LV_ANIM_OFF); settle(100);
+    SHOT("88_settings_sounds");
+    show_app(APP_MONITOR); scroll_page(APP_MONITOR, 0);
+    m3_runtime_web(M3_WEB_STOP_DOMAIN); update_metrics(NULL); settle(100); SHOT("89_web_domain_stopped");
+    m3_runtime_web(M3_WEB_STOP_ALL); update_metrics(NULL); settle(100); SHOT("90_web_all_stopped");
+    m3_runtime_web(M3_WEB_START_ALL); update_metrics(NULL);
+    shade_set(true); settle(300); SHOT("91_status_sd_cpu_controls");
+    sim_sd_ready = false; update_metrics(NULL); SHOT("92_status_no_sd");
+    sim_sd_ready = true; shade_set(false); settle(300);
     scroll_page(APP_SYSTEM, 280); SHOT("74_settings_sound");
     scroll_page(APP_SYSTEM, 560); SHOT("75_settings_performance");
     scroll_page(APP_SYSTEM, 850); SHOT("76_settings_operation");

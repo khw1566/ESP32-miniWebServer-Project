@@ -225,13 +225,24 @@ bool m3_feedback_update(const m3_feedback_settings_t *p) { sim_feedback = *p; re
 void m3_feedback_clear(void) {}
 void m3_feedback_emit(unsigned cue, unsigned language) { (void)cue; (void)language; }
 static m3_preferences_t sim_preferences = {1,100,30,1,0,40,40,0};
+static bool sim_screen_on = true, sim_touch_down;
+static unsigned sim_restart_count;
+static void sim_touch_read(lv_indev_t *input, lv_indev_data_t *data) {
+    (void)input;
+    data->point.x = 240; data->point.y = 400;
+    data->state = sim_touch_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
 bool m3_preferences_restarting(void) { return false; }
 void m3_preferences_get(m3_preferences_t *out) { *out = sim_preferences; }
 bool m3_preferences_update(const m3_preferences_t *p) { sim_preferences = *p; return true; }
 void m3_preferences_volume(unsigned value) { sim_preferences.volume=value; if(value)sim_preferences.last_volume=value; }
 unsigned m3_preferences_frame_ms(unsigned fps) { return (1000+fps-1)/fps; }
 m3_mode_result_t m3_preferences_request_mode(bool focus) { sim_preferences.web_focus=focus; return M3_MODE_OK; }
+m3_mode_result_t m3_preferences_restart_with(const m3_preferences_t *p) {
+    sim_preferences = *p; ++sim_restart_count; return M3_MODE_OK;
+}
 esp_err_t m3_board_set_brightness(unsigned value) { (void)value; return ESP_OK; }
+esp_err_t m3_board_set_screen_on(bool on) { sim_screen_on = on; return ESP_OK; }
 lv_display_t *m3_board_display(void) { return display; }
 bool m3_board_touch_ready(void) { return true; }
 bool lvgl_port_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
@@ -262,6 +273,14 @@ static m3_recorder_state_t sim_recorder;
 static bool sim_sd_ready = true;
 static bool sim_ipv6_ready = true;
 static m3_power_state_t sim_power;
+static unsigned sim_web_policy, sim_web_revision;
+static bool sim_web_running = true;
+bool m3_runtime_web(m3_web_action_t action) {
+    if (action == M3_WEB_STOP_DOMAIN) sim_web_policy = 1;
+    else if (action == M3_WEB_STOP_ALL) { sim_web_policy = 2; sim_web_running = false; }
+    else { sim_web_policy = 0; sim_web_running = true; }
+    ++sim_web_revision; return true;
+}
 void m3_runtime_state(m3_runtime_state_t *out) {
     memset(out, 0, sizeof(*out));
     out->initialized = out->web = out->wifi_ready = true;
@@ -269,7 +288,11 @@ void m3_runtime_state(m3_runtime_state_t *out) {
     out->cpu_percent[0] = 28 + out->cpu_revision % 30; out->cpu_percent[1] = 42 + out->cpu_revision % 40;
     out->sd = sim_sd_ready;
     out->power = sim_power;
-    out->cloud = sim_online;
+    out->web = sim_web_running; out->web_policy = sim_web_policy;
+    out->web_control_revision = sim_web_revision;
+    out->cloud = sim_online && sim_web_running && sim_web_policy == 0;
+    out->sd_capacity.total = 31914704896ull; out->sd_capacity.used = 1288490188ull;
+    out->sd_capacity.error = sim_sd_ready ? ESP_OK : ESP_ERR_INVALID_STATE;
     out->mode = sim_online ? NET_MODE_STA_CONNECTED : NET_MODE_AP_CAPTIVE;
     out->rssi = -58; out->requests = 42;
     snprintf(out->ip, sizeof(out->ip), "%s", sim_online ? "192.168.0.42" : "192.168.4.1");
@@ -279,6 +302,7 @@ void m3_runtime_state(m3_runtime_state_t *out) {
     snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
     snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
     snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
+    if (sim_web_policy) snprintf(out->cloud_status, sizeof(out->cloud_status), "stopped");
     out->mdns_ready = true;
     snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
     snprintf(out->message, sizeof(out->message), "Services ready");
@@ -404,12 +428,18 @@ int main(int argc, char **argv) {
     static uint16_t buffer[480 * 800];
     lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
+    lv_indev_t *input = lv_indev_create();
+    lv_indev_set_type(input, LV_INDEV_TYPE_POINTER); lv_indev_set_display(input, display);
+    lv_indev_set_read_cb(input, sim_touch_read);
     if (m3_ui_start() != ESP_OK) { puts("UI start failed"); return 1; }
     settle(600);
     lv_mem_monitor_t memory; lv_mem_monitor(&memory);
     printf("LVGL heap used after UI start: %u bytes\n", (unsigned)(memory.total_size - memory.free_size));
     printf("text bindings %u/%u, segments %u/%u\n", binding_count, (unsigned)(sizeof(bindings) / sizeof(bindings[0])),
         segment_count, (unsigned)(sizeof(segments) / sizeof(segments[0])));
+    if (binding_count >= sizeof(bindings) / sizeof(bindings[0]) || segment_count >= sizeof(segments) / sizeof(segments[0])) {
+        puts("UI binding capacity reached; review before adding controls"); return 2;
+    }
     run_scenarios(dir);
     return 0;
 }

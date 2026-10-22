@@ -1350,10 +1350,10 @@ esp_err_t web_server_start(void) {
 
 void web_server_stop(void) {
   atomic_store(&s_server_running, false);
-  ai_sessions_clear();
   network_mdns_stop();
   if (s_server) {
     httpd_stop(s_server);
     s_server = NULL;
   }
+  ai_sessions_clear();
 }

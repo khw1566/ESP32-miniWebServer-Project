@@ -36,8 +36,12 @@ typedef struct { char source[256], destination[256]; bool remove, sd; } mutation
 static QueueHandle_t mutation_queue;
 static atomic_bool mutation_pending;
 static atomic_bool wifi_pending;
+static atomic_bool web_pending;
+static atomic_int web_request = -1;
+static bool web_paused, domain_paused;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_runtime_state_t state;
+static void publish(const m3_runtime_state_t *next);
 static bool setup_requested;
 static bool clock_started;
 static int64_t next_wifi_retry;
@@ -95,6 +99,44 @@ void m3_runtime_state(m3_runtime_state_t *out) {
     portENTER_CRITICAL(&state_lock); *out = state; portEXIT_CRITICAL(&state_lock);
     out->wifi_busy = atomic_load(&wifi_pending);
     out->mutation_busy = atomic_load(&mutation_pending);
+    out->web_control_busy = atomic_load(&web_pending);
+}
+bool m3_runtime_web(m3_web_action_t action) {
+    if (action < M3_WEB_STOP_DOMAIN || action > M3_WEB_START_ALL || m3_preferences_restarting()) return false;
+    portENTER_CRITICAL(&state_lock); bool ready = state.initialized; portEXIT_CRITICAL(&state_lock);
+    bool expected = false;
+    if (!ready || !atomic_compare_exchange_strong(&web_pending, &expected, true)) return false;
+    atomic_store(&web_request, action); return true;
+}
+/* Only the service worker starts/stops HTTP. Never block the LVGL task on httpd_stop. */
+static void web_execute(m3_runtime_state_t *next, int action) {
+    esp_err_t result = ESP_OK;
+    if (action == M3_WEB_STOP_DOMAIN) {
+        domain_paused = true; cloud_relay_set_enabled(false);
+    } else if (action == M3_WEB_STOP_ALL) {
+        bool locked = !sd_media_ready() || sd_media_admin_lock();
+        if (!locked || atomic_load(&mutation_pending)) {
+            if (locked && sd_media_ready()) sd_media_admin_unlock();
+            result = ESP_ERR_INVALID_STATE;
+        } else {
+            web_paused = domain_paused = true;
+            cloud_relay_set_enabled(false); web_server_stop();
+            if (sd_media_ready()) sd_media_admin_unlock();
+        }
+    } else {
+        if (action == M3_WEB_START_ALL) {
+            result = network_get_mode() == NET_MODE_IDLE ? ESP_ERR_INVALID_STATE : web_server_start();
+            if (result == ESP_OK) web_paused = false;
+        } else if (!web_server_is_running()) result = ESP_ERR_INVALID_STATE;
+        if (result == ESP_OK) {
+            result = cloud_relay_start();
+            if (result == ESP_OK) { domain_paused = false; cloud_relay_set_enabled(true); }
+        }
+    }
+    next->web = web_server_is_running(); next->cloud = cloud_relay_is_online();
+    next->web_policy = web_paused ? 2 : domain_paused ? 1 : 0;
+    next->web_control_result = result; ++next->web_control_revision;
+    publish(next); atomic_store(&web_pending, false);
 }
 bool m3_runtime_file_action(bool sd, const char *source, const char *destination, bool remove) {
     if (!mutation_queue || !source || strlen(source) > 255 || (!remove && (!destination || strlen(destination) > 255))) return false;
@@ -183,9 +225,9 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
             snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
                 result == ESP_OK ? "Setup hotspot ready. Saved credentials retained." : "Setup hotspot failed. Inspect serial log.");
         }
-        if (!web_server_is_running() && network_get_mode() != NET_MODE_IDLE) {
+        if (!web_paused && !web_server_is_running() && network_get_mode() != NET_MODE_IDLE) {
             web_server_start();
-            cloud_relay_start();
+            if (!domain_paused) cloud_relay_start();
         }
     }
     if (request->action != M3_WIFI_SCAN && request->action != M3_WIFI_IPV6)
@@ -222,6 +264,9 @@ static bool ipv6_url(const char *address, char *out, size_t capacity) {
 static void services(void *unused) {
     (void)unused;
     m3_runtime_state_t next = {0};
+#if CONFIG_ULP_COPROC_ENABLED
+    next.lp_configured = true;
+#endif
     snprintf(next.message, sizeof(next.message), "Starting storage and C6 Wi-Fi"); publish(&next);
     m3_boot_splash_step(M3_BOOT_STORAGE);
     next.sd = sd_media_init() == ESP_OK;
@@ -286,6 +331,8 @@ static void services(void *unused) {
         m3_power_poll(&next.power);
         m3_feedback_poll();
         log_core_load(&next);
+        int web_action = atomic_exchange(&web_request, -1);
+        if (web_action >= 0) web_execute(&next, web_action);
         if (!m3_preferences_web_active()) { m3_music_poll(); m3_photos_poll(); m3_sd_apps_poll(); }
         wifi_request_t request;
         if (xQueueReceive(wifi_queue, &request, 0) == pdTRUE) wifi_execute(&next, &request);
@@ -315,6 +362,17 @@ static void services(void *unused) {
         next.sd = sd_media_ready();
         if (!m3_preferences_web_active() && (refresh || (++tick % 5 == 0))) {
             storage_capacity_read(false, &next.flash);
+            if (!next.sd) {
+                memset(&next.sd_capacity, 0, sizeof(next.sd_capacity)); next.sd_capacity.error = ESP_ERR_INVALID_STATE;
+                next.sd_capacity_stale = false;
+            } else if (sd_media_admin_lock()) {
+                storage_capacity_read(true, &next.sd_capacity);
+                next.sd_capacity_stale = false;
+                sd_media_admin_unlock();
+            } else {
+                next.sd_capacity_stale = true;
+                if (!next.sd_capacity.total) next.sd_capacity.error = ESP_ERR_INVALID_STATE;
+            }
             bool locked = !browse.sd || sd_media_admin_lock();
             if (locked) {
                 storage_view_read(browse.sd, browse.folder, browse.offset, &next.files);

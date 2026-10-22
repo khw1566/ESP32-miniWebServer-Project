@@ -30,12 +30,13 @@ assert(audio.includes('m3_wav_parse_limit(file, &wav, recording ? M3_RECORDER_MA
 assert(audio.includes('percent > 150 ? 150 : percent'));assert(audio.includes('esp_codec_dev_close(codec)'));
 function body(name){const re=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\{'),match=re.exec(audio);assert(match);let depth=1,end=match.index+match[0].length,start=end;for(;depth;end++){if(audio[end]==='{')depth++;if(audio[end]==='}')depth--;}return audio.slice(start,end-1);}
 // Execute the actual small cancellation policy bodies with a queue mock.
-const policy='function cancelled(){'+body('cancelled').replace('atomic_load(&cancel_epoch)','cancel_epoch')+'}\nfunction stop(){'+body('m3_audio_stop').replace('atomic_fetch_add(&cancel_epoch, 1)','cancel_epoch++')+'}';
-const queue={pending:true},ctx={cancel_epoch:0,active_epoch:0,recorder_stops:0,requests:queue,xQueueReset:q=>q.pending=false,
+const policy='function cancelled(){'+body('cancelled').replace('atomic_load(&cancel_epoch)','cancel_epoch')+'}\nfunction stop(){'+body('m3_audio_stop').replace('atomic_fetch_add(&cancel_epoch, 1)','cancel_epoch++').replace('atomic_store(&pending_effect, 0)','pending_effect=0')+'}';
+const queue={pending:true},ctx={cancel_epoch:0,active_epoch:0,pending_effect:3,recorder_stops:0,requests:queue,xQueueReset:q=>q.pending=false,
  m3_voice_cancel:()=>{},m3_recorder_cancel:()=>ctx.recorder_stops++,gallery_stops:0,m3_gallery_audio_cancel:()=>ctx.gallery_stops++};
 vm.createContext(ctx);vm.runInContext(policy,ctx);assert(!ctx.cancelled());ctx.stop();assert(ctx.cancelled());assert(!queue.pending);
 assert.equal(ctx.recorder_stops,1,'global stop also releases a queued recorder request');
 assert.equal(ctx.gallery_stops,1,'global stop also invalidates MP4 playback');
+assert.equal(ctx.pending_effect,0,'stop also removes pending button sounds');
 ctx.active_epoch=0;assert(ctx.cancelled(),'dequeued old command stays cancelled');ctx.active_epoch=1;assert(!ctx.cancelled(),'fresh command is accepted');ctx.stop();assert(ctx.cancelled());
 assert(/active_epoch = request\.epoch;\s+if \(cancelled\(\)\) continue;/.test(audio));
 assert(read('main/idf_component.yml').includes('"2.7.2"'));

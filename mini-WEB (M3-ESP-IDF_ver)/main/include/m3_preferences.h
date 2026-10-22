@@ -4,7 +4,8 @@
 #include "esp_err.h"
 
 typedef struct {
-    uint8_t version, brightness, max_fps, animations, web_focus, volume, last_volume, reserved;
+    /* Reuse the former zero reserved byte: existing settings default to hold. */
+    uint8_t version, brightness, max_fps, animations, web_focus, volume, last_volume, wake_mode;
 } m3_preferences_t;
 typedef enum { M3_MODE_OK, M3_MODE_BUSY, M3_MODE_SAVE_FAILED, M3_MODE_RESTART_FAILED } m3_mode_result_t;
 esp_err_t m3_preferences_init(void);

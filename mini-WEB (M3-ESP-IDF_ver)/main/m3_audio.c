@@ -42,6 +42,7 @@ static const audio_codec_if_t *codec_chip;
 enum { AUDIO_DMA_DESCS = 6, AUDIO_DMA_FRAMES = 240 };
 static uint32_t playback_rate;
 static unsigned applied_volume = UINT_MAX;
+static bool output_active;
 static atomic_uint cancel_epoch;
 /* Only the audio worker writes active_epoch. A stop cannot be lost while dequeuing. */
 static unsigned active_epoch;
@@ -231,7 +232,8 @@ static esp_err_t codec_init(void) {
     if (!data || !control || !gpio) return ESP_ERR_NO_MEM;
     es8311_codec_cfg_t es8311 = {
         .ctrl_if = control, .gpio_if = gpio, .codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH,
-        .pa_pin = M3_AMP_ENABLE, .pa_reverted = false, .use_mclk = true, .mclk_div = 256,
+        /* Own PA sequencing: the codec driver otherwise enables it during init/open. */
+        .pa_pin = -1, .pa_reverted = false, .use_mclk = true, .mclk_div = 256,
         .hw_gain = {.pa_voltage = 5.0, .codec_dac_voltage = 3.3}
     };
     codec_chip = es8311_codec_new(&es8311);
@@ -248,12 +250,17 @@ static bool codec_result(const char *operation, int result) {
 static bool apply_volume(void) {
     unsigned requested = output_volume();
     if (requested == applied_volume) return true;
+    if (!requested) gpio_set_level(M3_AMP_ENABLE, 0);
     if (!codec_result("set volume", esp_codec_dev_set_out_vol(codec, requested > 100 ? 100 : requested))) return false;
     if (!codec_result("set mute", esp_codec_dev_set_out_mute(codec, requested == 0))) return false;
     applied_volume = requested;
+    if (output_active && requested) gpio_set_level(M3_AMP_ENABLE, 1);
     return true;
 }
 static bool open_rate(uint32_t rate) {
+    output_active = false;
+    gpio_set_level(M3_AMP_ENABLE, 0);
+    if (!codec_result("mute before open", esp_codec_dev_set_out_mute(codec, true))) return false;
     /* Codec 1.2.0 stops TX before reconfiguring it. Start the initialized TX
      * first, as in its reference setup, so this stop has a valid state.
      * The codec data interface owns subsequent disable/reconfigure/enable. */
@@ -265,10 +272,16 @@ static bool open_rate(uint32_t rate) {
     if (i2s_channel_enable(rx) != ESP_OK) { i2s_channel_disable(tx); return false; }
     esp_codec_dev_sample_info_t format = {.sample_rate = rate, .channel = 2, .bits_per_sample = 16};
     if (!codec_result("open", esp_codec_dev_open(codec, &format))) return false;
-    if (!codec_result("unmute", esp_codec_dev_set_out_mute(codec, false))) return false;
     playback_rate = rate;
+    /* Replace any stale DMA samples with silence while PA is disabled. */
+    int16_t silence[AUDIO_DMA_FRAMES * 2] = {0};
+    for (unsigned i = 0; i < AUDIO_DMA_DESCS; ++i)
+        if (!codec_result("prime silence", esp_codec_dev_write(codec, silence, sizeof(silence)))) return false;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    output_active = true;
     applied_volume = UINT_MAX;
     if (!apply_volume()) return false;
+    gpio_set_level(M3_AMP_ENABLE, atomic_load(&volume) != 0);
     ESP_LOGI(TAG, "Output: %lu Hz, PCM16 stereo, MCLK=%lu Hz, volume=%u, PA GPIO%d=%d",
              (unsigned long)rate, (unsigned long)(rate * 256), applied_volume,
              M3_AMP_ENABLE, gpio_get_level(M3_AMP_ENABLE));
@@ -280,6 +293,12 @@ static bool open_rate(uint32_t rate) {
         ESP_LOGI(TAG, "ES8311 reg 0x%02x = 0x%02x", registers[i], value);
     }
     return true;
+}
+static void close_codec(void) {
+    /* Remove speaker drive before resetting clocks or analogue codec state. */
+    output_active = false; gpio_set_level(M3_AMP_ENABLE, 0);
+    esp_codec_dev_set_out_mute(codec, true);
+    esp_codec_dev_close(codec);
 }
 static bool write_pcm(void *samples, unsigned bytes) {
     if (cancelled()) return false;
@@ -298,6 +317,8 @@ static bool write_pcm(void *samples, unsigned bytes) {
     return !remaining;
 }
 static bool capture_begin(void) {
+    output_active = false;
+    gpio_set_level(M3_AMP_ENABLE, 0);
     if (i2s_channel_enable(tx) != ESP_OK) return false;
     if (i2s_channel_enable(rx) != ESP_OK) { i2s_channel_disable(tx); return false; }
     esp_codec_dev_sample_info_t format = {.sample_rate = 16000, .channel = 2, .bits_per_sample = 16};
@@ -320,7 +341,7 @@ static bool capture_read(int16_t *mono, unsigned samples) {
     for (unsigned i = 0; i < samples; ++i) mono[i] = stereo[i * 2 + slot];
     return !cancelled();
 }
-static void capture_end(void) { esp_codec_dev_close(codec); }
+static void capture_end(void) { close_codec(); }
 static bool drain_output(void) {
     /* write() queues DMA; immediate close would cut off the queued tail.
      * Queue silence, then allow at most one whole DMA ring to drain. */
@@ -359,7 +380,7 @@ static void play_file(const char *name, bool recording) {
     message(!remaining && ok ? "Playback complete" : "Playback stopped / read error", false, !remaining && ok ? 100 : 0);
 done:
     /* Close even after a partial open failure, ensuring PA is disabled. */
-    esp_codec_dev_close(codec);
+    close_codec();
     if (file) fclose(file);
     sd_media_admin_unlock();
 }
@@ -379,7 +400,7 @@ static void audio_worker(void *unused) {
         active_epoch = atomic_load(&cancel_epoch);
         feedback_volume = cue.volume; atomic_store(&feedback_active, true);
         if (!uxQueueMessagesWaiting(requests) && !cancelled()) m3_feedback_run(&cue, &output);
-        esp_codec_dev_close(codec);
+        close_codec();
         feedback_volume = UINT_MAX; atomic_store(&feedback_active, false);
     }
     for (;;) {
@@ -393,15 +414,15 @@ static void audio_worker(void *unused) {
                 message("Voice input finished", false, 0);
             }
             else if (request.kind == PLAY_FILE) play_file(request.name, false);
-            else if (request.kind == PLAY_MUSIC) { m3_music_run(request.name, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_RADIO) { m3_radio_run(request.name, request.aac, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_TUBE) { m3_tube_run(request.name, request.speed, request.aac, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_AZURE_TTS) { m3_azure_tts_run(request.name, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_OPENAI_TTS) { m3_openai_tts_run(request.name, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_CLOUD_TTS) { m3_google_tts_run(request.name, &output); esp_codec_dev_close(codec); }
-            else if (request.kind == PLAY_TTS) { m3_tts_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
+            else if (request.kind == PLAY_MUSIC) { m3_music_run(request.name, &output); close_codec(); }
+            else if (request.kind == PLAY_RADIO) { m3_radio_run(request.name, request.aac, &output); close_codec(); }
+            else if (request.kind == PLAY_TUBE) { m3_tube_run(request.name, request.speed, request.aac, &output); close_codec(); }
+            else if (request.kind == PLAY_AZURE_TTS) { m3_azure_tts_run(request.name, &output); close_codec(); }
+            else if (request.kind == PLAY_OPENAI_TTS) { m3_openai_tts_run(request.name, &output); close_codec(); }
+            else if (request.kind == PLAY_CLOUD_TTS) { m3_google_tts_run(request.name, &output); close_codec(); }
+            else if (request.kind == PLAY_TTS) { m3_tts_run(request.name, request.speed, &output); close_codec(); }
             else if (request.kind == PLAY_RECORDING) play_file(request.name, true);
-            else if (request.kind == PLAY_MP4) { m3_gallery_mp4_run(request.name, request.speed, &output); esp_codec_dev_close(codec); }
+            else if (request.kind == PLAY_MP4) { m3_gallery_mp4_run(request.name, request.speed, &output); close_codec(); }
             else if (request.kind == PLAY_RECORD) {
                 message("SD recording active", true, 0);
                 m3_recorder_run(request.speed, &capture);
@@ -412,7 +433,7 @@ static void audio_worker(void *unused) {
             active_epoch = atomic_load(&cancel_epoch);
             feedback_volume = cue.volume; atomic_store(&feedback_active, true);
             if (!uxQueueMessagesWaiting(requests) && !cancelled()) m3_feedback_run(&cue, &output);
-            esp_codec_dev_close(codec);
+            close_codec();
             feedback_volume = UINT_MAX; atomic_store(&feedback_active, false);
         }
         unsigned current = atomic_load(&volume);

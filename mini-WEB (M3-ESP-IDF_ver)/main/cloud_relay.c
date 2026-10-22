@@ -30,6 +30,13 @@ static atomic_int state = WAIT_WIFI;
 static atomic_uint last_ok_seconds;
 static char public_url[96], device_id[32];
 static TaskHandle_t relay_task_handle;
+static atomic_bool relay_enabled = true;
+bool cloud_relay_enabled(void) { return atomic_load(&relay_enabled); }
+void cloud_relay_set_enabled(bool enabled) {
+    atomic_store(&relay_enabled, enabled);
+    atomic_store(&last_ok_seconds, 0);
+    atomic_store(&state, WAIT_WIFI);
+}
 
 bool cloud_relay_public_path(const char *path) {
     if (!path || path[0] != '/' || strlen(path) > 180) return false;
@@ -53,11 +60,12 @@ bool cloud_relay_public_path(const char *path) {
     return false;
 }
 bool cloud_relay_is_online(void) {
-    return !https_memory_exclusive_pending() && atomic_load(&state) == ONLINE && web_server_is_running() &&
+    return cloud_relay_enabled() && !https_memory_exclusive_pending() && atomic_load(&state) == ONLINE && web_server_is_running() &&
         network_get_mode() == NET_MODE_STA_CONNECTED &&
         (uint32_t)(esp_timer_get_time()/1000000) - atomic_load(&last_ok_seconds) < 45;
 }
 const char *cloud_relay_status(void) {
+    if (!cloud_relay_enabled()) return "stopped";
     if (atomic_load(&state) == FACTORY_MISSING) return "factory_missing";
     if (!web_server_is_running() || network_get_mode() != NET_MODE_STA_CONNECTED) return "waiting_wifi";
     if (https_memory_exclusive_pending()) return "paused_ai";
@@ -93,7 +101,7 @@ static esp_err_t cloud_event(esp_http_client_event_t *event) {
  * API returns EAGAIN on short header/body reads without discarding partial
  * replies. Keep all client calls and cancellation on the relay's own task. */
 static bool exchange_alive(esp_http_client_handle_t client, int64_t deadline) {
-    if (!https_memory_exclusive_pending() && esp_timer_get_time() < deadline) return true;
+    if (cloud_relay_enabled() && !https_memory_exclusive_pending() && esp_timer_get_time() < deadline) return true;
     esp_http_client_cancel_request(client);
     return false;
 }
@@ -135,6 +143,7 @@ static int exchange(esp_http_client_handle_t client, reply_t *reply, const char 
     /* Short long-poll read timeouts are normal; SDK WARN would print four
      * messages/second. Retain SDK errors and the relay's own failure logs. */
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_ERROR);
+    if (!cloud_relay_enabled() || !web_server_is_running()) return -1;
     char url[256];
     int n = snprintf(url, sizeof(url), "%s/v1/devices/%s/%s", CONFIG_MINI_WEB_RELAY_URL, device_id, suffix);
     if (n < 0 || (size_t)n >= sizeof(url)) return -1;
@@ -155,6 +164,7 @@ static bool result_post(esp_http_client_handle_t cloud, reply_t *reply, const ch
 }
 #include "cloud_relay_stream.inc"
 static bool serve_job(esp_http_client_handle_t cloud, reply_t *reply) {
+    if (!cloud_relay_enabled() || !web_server_is_running()) return false;
     cJSON *job = cJSON_Parse(reply->body);
     const cJSON *j_id = cJSON_GetObjectItemCaseSensitive(job, "id");
     const cJSON *kind = cJSON_GetObjectItemCaseSensitive(job, "kind");
@@ -209,7 +219,7 @@ static bool serve_job(esp_http_client_handle_t cloud, reply_t *reply) {
     free(json); if (!started) goto done;
     char buffer[2048]; size_t count;
     while ((count = web_server_public_read(&stream, buffer, sizeof(buffer))) > 0) {
-        if (https_memory_exclusive_pending() || network_get_mode() != NET_MODE_STA_CONNECTED || !web_server_is_running() ||
+        if (!cloud_relay_enabled() || https_memory_exclusive_pending() || network_get_mode() != NET_MODE_STA_CONNECTED || !web_server_is_running() ||
             bytes + count > 8 * 1024 * 1024 || !result_post(cloud, reply, id, "chunk", buffer, count, chunks)) goto done;
         bytes += count; chunks++;
         atomic_store(&last_ok_seconds, (uint32_t)(esp_timer_get_time()/1000000));
@@ -253,6 +263,12 @@ static void relay_task(void *arg) {
     esp_http_client_handle_t cloud = NULL; unsigned retry = 1;
     bool memory_warning = false;
     while (1) {
+        if (!cloud_relay_enabled()) {
+            if (cloud) { esp_http_client_cleanup(cloud); cloud = NULL; }
+            free(reply); reply = NULL; https_memory_relay_leave();
+            atomic_store(&state, WAIT_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(100)); continue;
+        }
         if (https_memory_exclusive_pending()) {
             if (cloud) { esp_http_client_cleanup(cloud); cloud = NULL; }
             free(reply); reply = NULL;
@@ -304,7 +320,7 @@ static void relay_task(void *arg) {
         if (!cloud_relay_is_online()) atomic_store(&state, CONNECTING);
         int code = exchange(cloud, reply, "poll", NULL, 0, -1);
         if (https_memory_exclusive_pending()) continue; /* Cleanup/yield at loop top, no retry backoff. */
-        if (code == 200 || code == 204) {
+        if (cloud_relay_enabled() && web_server_is_running() && (code == 200 || code == 204)) {
             atomic_store(&last_ok_seconds, (uint32_t)(esp_timer_get_time()/1000000)); atomic_store(&state, ONLINE); retry = 1;
             if (code == 204 || serve_job(cloud, reply)) continue;
         }
@@ -316,7 +332,9 @@ static void relay_task(void *arg) {
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         unsigned delay = retry * 1000 + esp_random()%1000;
-        vTaskDelay(pdMS_TO_TICKS(delay)); if (retry < 30) retry *= 2;
+        for (unsigned waited = 0; waited < delay && cloud_relay_enabled(); waited += 100)
+            vTaskDelay(pdMS_TO_TICKS(100));
+        if (retry < 30) retry *= 2;
     }
 }
 esp_err_t cloud_relay_provision(const char *token) {

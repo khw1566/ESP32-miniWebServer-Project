@@ -25,3 +25,5 @@ bool m3_audio_voice(void);
 void m3_audio_stop(void);
 void m3_audio_volume(unsigned percent);
 void m3_audio_state(m3_audio_state_t *out);
+/* Best-effort UI feedback; never interrupts media, recording, or queued requests. */
+bool m3_audio_click(void);

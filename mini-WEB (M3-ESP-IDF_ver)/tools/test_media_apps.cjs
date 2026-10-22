@@ -74,7 +74,7 @@ assert.equal(phondata.readUInt32LE(0),0x014801);assert.equal(phondata.readUInt32
 assert(read('tts_data/espeak-ng-data/lang/ko').includes('language ko'));
 const tts=read('main/m3_tts.c');assert(tts.includes('espeak_SetVoiceByName("ko")'));assert(tts.includes('ENOUTPUT_MODE_SYNCHRONOUS'));
 assert(!/esp_http|network_|fopen\(/.test(tts),'TTS must synthesize without network/SD');
-const validator=/bool m3_tts_text_valid\([^)]*\) \{([\s\S]*?)\n\}/.exec(tts);assert(validator);
+const validator=/bool m3_speech_text_valid\([^)]*\) \{([\s\S]*?)\n\}/.exec(tts);assert(validator);
 source=validator[1].replace('!*text','!text[0]')
  .replace('const unsigned char *p = (const unsigned char *)text;','const bytes = text; let p = 0;')
  .replace(/\*p\+\+/g,'bytes[p++]').replace(/\*p/g,'bytes[p]')

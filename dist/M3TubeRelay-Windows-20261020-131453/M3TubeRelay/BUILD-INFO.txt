@@ -1,0 +1,3 @@
+Source commit: 1bc77403dc7f20deec28659b321e95d1e84dd55b
+Package change: standalone setup supports missing firmware folder.
+Built: 2026-10-20T13:14:54.1394157+09:00

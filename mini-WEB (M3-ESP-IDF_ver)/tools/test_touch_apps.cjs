@@ -184,7 +184,7 @@ let worker=removeCall(body('wifi_execute',runtime),'snprintf','record_message()'
  .replace('atomic_store(&wifi_pending, false)','pending = false');
 worker=worker.replaceAll('60000000LL','60000000').replace('request.settings.pass[0] != 0','request.settings.pass.length > 0');
 const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPTIVE:1,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,M3_WIFI_RESULTS:8,
- setup_requested:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
+ setup_requested:false,web_paused:false,domain_paused:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
  restore_wifi_password:()=>false,
  NET_MODE_STA_CONNECTED:2,M3_CUE_WIFI_CONNECTED:3,M3_CUE_WIFI_SETUP:4,M3_CUE_WIFI_FAILED:5,
  m3_i18n_language:()=>0,m3_feedback_emit:()=>{},

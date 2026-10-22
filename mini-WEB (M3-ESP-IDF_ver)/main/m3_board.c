@@ -36,6 +36,22 @@ esp_err_t m3_board_set_brightness(unsigned percent) {
     return err;
 }
 
+esp_err_t m3_board_set_screen_on(bool on) {
+    if (!backlight_pwm_ready) return gpio_set_level(M3_LCD_BACKLIGHT, on ? 1 : 0);
+    if (on) {
+        m3_preferences_t p; m3_preferences_get(&p);
+        return m3_board_set_brightness(p.brightness);
+    }
+    esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
+    if (err == ESP_OK) err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    if (err != ESP_OK) {
+        /* Keep the screen usable if dimming fails. */
+        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 1);
+        backlight_pwm_ready = false;
+    }
+    return err;
+}
+
 static esp_err_t touch_start(void) {
     if (CONFIG_M3_TOUCH_RESET >= 0) {
         ESP_RETURN_ON_ERROR(gpio_set_direction(CONFIG_M3_TOUCH_RESET, GPIO_MODE_OUTPUT), TAG, "touch reset");

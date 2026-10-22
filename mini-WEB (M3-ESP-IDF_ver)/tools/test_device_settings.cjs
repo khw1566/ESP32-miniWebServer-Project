@@ -16,7 +16,7 @@ const post=body('device_settings_post').replace('char input[513]; size_t used = 
  .replace(/\b(?:int|bool|m3_mode_result_t) (\w+)/g,'let $1').replaceAll('->','.');
 function call(payload,options={}){
  const bytes=Buffer.from(typeof payload==='string'?payload:JSON.stringify(payload));
- const initial={version:1,brightness:100,max_fps:30,volume:40,last_volume:40,animations:1,web_focus:0,reserved:0,...options.settings};
+ const initial={version:1,brightness:100,max_fps:30,volume:40,last_volume:40,animations:1,web_focus:0,wake_mode:0,...options.settings};
  const c={ESP_OK:0,M3_MODE_OK:0,M3_MODE_BUSY:1,M3_MODE_SAVE_FAILED:2,M3_MODE_RESTART_FAILED:3,
  writes:0,modes:0,volumes:[],position:0,settings:initial,
  httpd_req_recv:(_req,out,n)=>{const count=Math.min(n,17,bytes.length-c.position);out.set(bytes.subarray(c.position,c.position+count));c.position+=count;return count;},

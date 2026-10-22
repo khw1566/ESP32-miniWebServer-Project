@@ -1,0 +1,9 @@
+tunnel: 257b5195-6a52-4076-a4b9-5605616da61d
+credentials-file: C:\Users\khw\.cloudflared\257b5195-6a52-4076-a4b9-5605616da61d.json
+ingress:
+  - hostname: tube.audreaming.com
+    service: http://127.0.0.1:8790
+    originRequest:
+      disableChunkedEncoding: false
+      connectTimeout: 10s
+  - service: http_status:404

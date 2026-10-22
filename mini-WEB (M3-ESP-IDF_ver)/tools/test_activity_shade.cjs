@@ -30,8 +30,10 @@ touch(1,200,40);touch(2,200,0);touch(4,200,0);assert.equal(gesture.settled,true,
 touch(1,200,80);touch(2,200,20);touch(3,200,20);assert.equal(gesture.settled,false,'top handle swipe closes');
 touch(1,200,250);touch(2,200,400);assert.equal(gesture.shade_y,-756,'app scrolling must not open shade');
 assert(ui.includes('lv_arc_set_range(usage_arcs[i], 0, 100)'));
-assert(ui.includes('snapshot.flash.total - snapshot.flash.reserved'));
+assert(ui.includes('usage_update(2, snapshot.sd_capacity.used'));
+assert(ui.includes('snapshot.sd && snapshot.sd_capacity.error == ESP_OK'));
+assert(ui.includes('{T_SHADE_RAM, T_SHADE_PSRAM, T_SHADE_SD}'));
 assert(ui.includes('heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)'));
 assert(ui.includes('job_update(2, tr(T_JOB_VOICE)'));assert(ui.includes('job_update(4, tr(T_JOB_WEB)'));
 assert(!ui.includes('"Wi-Fi  %d dBm'),'status header uses icon rather than numeric quality');
-console.log('PASS: Wi-Fi icon thresholds, bounded memory percentages, top-only pull/release/cancel/close, live jobs and independent Flash file capacity.');
+console.log('PASS: Wi-Fi icon thresholds, bounded memory percentages, top-only pull/release/cancel/close, live jobs and independent SD capacity.');

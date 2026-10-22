@@ -5,7 +5,7 @@ function body(name){const m=new RegExp('\\b'+name+'\\([^;]*?\\)\\s*\\{').exec(so
 function setup({pendingAt=Infinity,headersAt=20000,bodyAt=0,overflow=false,openError=false,status=204,writeChunk=2}={}){
  const s={ms:0,cancelled:0,writes:[],reads:0,timeouts:[],complete:false,reply:{overflow:false},owner:'relay'};
  const c={ESP_OK:0,ESP_ERR_HTTP_EAGAIN:11,
-  esp_timer_get_time:()=>s.ms*1000,https_memory_exclusive_pending:()=>s.ms>=pendingAt,
+  cloud_relay_enabled:()=>true,esp_timer_get_time:()=>s.ms*1000,https_memory_exclusive_pending:()=>s.ms>=pendingAt,
   esp_http_client_cancel_request:client=>{assert.equal(client,'relay');s.cancelled++;},
   esp_http_client_set_timeout_ms:(client,n)=>s.timeouts.push(n),
   esp_http_client_open:()=>openError?-1:0,

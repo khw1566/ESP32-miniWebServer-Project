@@ -17,6 +17,7 @@
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t storage_lock;
 static m3_preferences_t current = {1, 100, 30, 1, 0, 40, 40, 0};
+_Static_assert(sizeof(m3_preferences_t) == 8, "Preserve the existing NVS settings layout");
 static unsigned revision;
 static bool dirty, web_active;
 static atomic_int restart_phase;
@@ -25,7 +26,7 @@ static int64_t next_save;
 bool m3_preferences_valid(const m3_preferences_t *p) {
     return p && p->version == 1 && p->brightness >= 5 && p->brightness <= 100 &&
         p->max_fps >= 5 && p->max_fps <= 60 && p->animations <= 1 && p->web_focus <= 1 &&
-        p->volume <= 150 && p->last_volume >= 1 && p->last_volume <= 150 && p->reserved == 0;
+        p->volume <= 150 && p->last_volume >= 1 && p->last_volume <= 150 && p->wake_mode <= 1;
 }
 unsigned m3_preferences_frame_ms(unsigned fps) {
     if (fps < 5) fps = 5;
