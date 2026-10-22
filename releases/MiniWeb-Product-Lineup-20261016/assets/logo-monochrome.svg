@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="685" height="681" viewBox="-30 -30 685 681" role="img" aria-labelledby="title desc">
+  <title id="title">miniweb M arrow logo</title>
+  <desc id="desc">Bold uppercase M with its rising diagonal extended into an upward arrow. Transparent cuts separate the four geometric shapes.</desc>
+  <g fill="#000000">
+    <path d="M0 250L117 450V621H0Z" />
+    <path d="M0 198H117L265 452L203 570L0 228Z" />
+    <path d="M207 578L470 76L415 51L566 0L625 147L576 124L314 621H231Z" />
+    <path d="M408 469L524 249V621H408Z" />
+  </g>
+</svg>

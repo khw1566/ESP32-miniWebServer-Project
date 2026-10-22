@@ -22,16 +22,27 @@ try {
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', source], { windowsHide: true });
   const data = fs.readFileSync(source);
   origin = http.createServer((req, res) => {
+    if(req.url==='/broken.mp4'){res.writeHead(200,{'Content-Length':128});res.end(Buffer.alloc(128));return;}
     const match = /bytes=(\d+)-(\d+)/.exec(req.headers.range || '');
     const start = match ? Number(match[1]) : 0, end = match ? Math.min(Number(match[2]), data.length - 1) : data.length - 1;
     res.writeHead(match ? 206 : 200, { 'Content-Length': end - start + 1, 'Content-Type': 'video/mp4',
       ...(match ? { 'Content-Range': `bytes ${start}-${end}/${data.length}` } : {}) }); res.end(data.subarray(start, end + 1));
   });
   await new Promise(r => origin.listen(0, '127.0.0.1', r));
-  const info = { id: 'aaaaaaaaaaa', title: 'Synthetic video', channel: 'Fixture', duration: 3,
+  const info = { id: 'aaaaaaaaaaa', title: '夜に駆ける 合成テスト', channel: '日本語Fixture', duration: 3,
     url: `http://127.0.0.1:${origin.address().port}/source.mp4`, filesize: data.length, vcodec: 'avc1', acodec: 'aac' };
   const stub = path.join(root, 'yt fixture.cjs');
-  fs.writeFileSync(stub, `console.log(process.argv.includes('--version') ? 'fixture' : JSON.stringify(${JSON.stringify(info)}));`);
+  const queryFile = path.join(root, 'query.txt');
+  fs.writeFileSync(stub, `const fs=require('fs');const info=${JSON.stringify(info)};const search=process.argv.find(a=>a.startsWith('ytsearch'));
+    if(search)fs.writeFileSync(${JSON.stringify(queryFile)},search.split(':').slice(1).join(':'),'utf8');
+    const entry={...info,ie_key:'Youtube',url:'https://www.youtube.com/watch?v='+info.id};
+    const out=process.argv.indexOf('-o'),watch=process.argv.find(a=>a.startsWith('https://www.youtube.com/watch?v='))||'';
+    if(out>=0){
+      if(process.argv[process.argv.indexOf('-f')+1]!=='ba/b'){console.error('fixture primary audio HTTP 403');process.exit(1);}
+      if(watch.endsWith('zzzzzzzzzzz'))fs.writeFileSync(process.argv[out+1],Buffer.alloc(128));
+      else fs.copyFileSync(${JSON.stringify(source)},process.argv[out+1]);
+    } else console.log(process.argv.includes('--version')?'fixture':JSON.stringify(search?{entries:[entry],title:'日本語検索'}:
+      watch.endsWith('yyyyyyyyyyy')?{...info,url:info.url.replace('/source.mp4','/broken.mp4'),filesize:128}:info));`);
   const configFile = path.join(root, 'config.json'), port = await freePort(), mediaPort = await freePort();
   fs.writeFileSync(configFile, JSON.stringify({ host: '127.0.0.1', port, mediaPort, token, ffmpeg, ytdlp: [process.execPath, stub] }));
   child = spawn(process.execPath, [fileURLToPath(new URL('./server.mjs', import.meta.url))], {
@@ -41,12 +52,51 @@ try {
   let logs = ''; child.stdout.on('data', d => { logs += d; }); child.stderr.on('data', d => { logs += d; });
   const base = `http://127.0.0.1:${port}`;
   const request = (url, options = {}) => fetch(base + url, { ...options, headers: { 'x-m3-token': token, ...options.headers }, signal: AbortSignal.timeout(15000) });
-  let ready = false;
+  let ready = false, readiness;
   for (let i = 0; i < 100; ++i) {
-    try { ready = (await (await request('/api/status')).json()).ok; } catch { }
+    try { readiness = await (await request('/api/status')).json(); ready = readiness.ok; } catch (error) { readiness = `${error.message}: ${error.cause?.code}`; }
     if (ready) break; if (child.exitCode !== null) throw Error(logs); await delay(100);
   }
-  assert(ready, logs);
+  assert(ready, logs+JSON.stringify(readiness));
+  assert.equal((await request('/api/radio?station=not-a-station&profile=economy')).status,400);
+  assert.equal((await request('/api/radio?station=kbs-classic&profile=constructor')).status,400);
+  assert.equal((await request('/api/radio?station=kbs-classic&profile=economy',{headers:{'x-m3-token':'invalid-fixture-token'}})).status,401);
+  const query='日本語の歌 YOASOBI';
+  for(const music of [false,true]) {
+    const response=await request('/api/search?q='+encodeURIComponent(query)+(music?'&music=1':''));
+    assert.equal(response.status,200);const list=await response.json();assert.equal(list.items.length,1);
+    assert.equal(list.items[0].title,info.title);assert.equal(list.items[0].channel,info.channel);
+    assert.equal(fs.readFileSync(queryFile,'utf8'),query,'Japanese reaches yt-dlp unchanged');
+  }
+  const thumbDir=path.join(root,'cache','thumb');fs.mkdirSync(thumbDir,{recursive:true});
+  const fixtureThumb=Buffer.alloc(160*90*2,0x57);fs.writeFileSync(path.join(thumbDir,'aaaaaaaaaaa_160x90.rgb565'),fixtureThumb);
+  const thumb=await request('/api/thumb?id=aaaaaaaaaaa&w=160&h=90');assert.equal(thumb.status,200);
+  assert.deepEqual(Buffer.from(await thumb.arrayBuffer()),fixtureThumb);
+  const musicRequest=await request('/api/music?id=aaaaaaaaaaa',{method:'POST'});assert.equal(musicRequest.status,202);
+  const musicJob=(await musicRequest.json()).job;assert(musicJob);
+  let musicStatus;
+  for(let i=0;i<100;++i){musicStatus=await (await request('/api/music/status?job='+musicJob)).json();if(musicStatus.state!=='preparing')break;await delay(100);}
+  assert.equal(musicStatus.state,'ready',JSON.stringify(musicStatus)+logs);
+  assert.equal(musicStatus.bitrate,64000);assert.equal(musicStatus.channels,2);assert.equal(musicStatus.rate,32000);
+  const mp3=Buffer.from(await (await request('/api/music/file?job='+musicJob)).arrayBuffer());assert.equal(mp3.length,musicStatus.bytes);
+  const musicFile=path.join(root,'song.mp3');fs.writeFileSync(musicFile,mp3);
+  const musicProbe=JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-of','json',musicFile],{windowsHide:true})).streams[0];
+  assert.equal(musicProbe.codec_name,'mp3');assert.equal(musicProbe.sample_rate,'32000');assert.equal(musicProbe.channels,2);
+  assert.equal((await fetch(base+'/api/music?id=aaaaaaaaaaa',{method:'POST'})).status,401);
+  assert.equal((await request('/api/music?id=../bad',{method:'POST'})).status,400);
+  assert.equal((await request('/api/music/file?job=../bad')).status,400);
+  assert.equal((await request('/api/music?id=aaaaaaaaaaa')).status,405);
+  const failedMusic=(await (await request('/api/music?id=zzzzzzzzzzz',{method:'POST'})).json()).job;
+  let failedStatus;
+  for(let i=0;i<100;++i){failedStatus=await (await request('/api/music/status?job='+failedMusic)).json();if(failedStatus.state!=='preparing')break;await delay(50);}
+  assert.equal(failedStatus.state,'error','invalid source audio is never published as a ready MP3');
+  assert.equal((await request('/api/music/file?job='+failedMusic)).status,409);
+  const song=await request('/api/play?id=aaaaaaaaaaa&audio=1');assert.equal(song.status,200);
+  const songWire=parsePackets(Buffer.from(await song.arrayBuffer()));assert.equal(songWire.rest.length,0);
+  const songMeta=JSON.parse(songWire.packets.find(p=>p.type===PACKET.INFO).payload);
+  assert.equal(songMeta.video,false);assert.equal(songMeta.audio,true);assert.equal(songMeta.rate,32000);assert.equal(songMeta.ch,1);
+  assert(!songWire.packets.some(p=>p.type===PACKET.VIDEO));assert(songWire.packets.some(p=>p.type===PACKET.AUDIO));
+  assert.equal(JSON.parse(songWire.packets.find(p=>p.type===PACKET.END).payload).reason,'eof');
   assert.equal((await fetch(base + '/api/status')).status, 401);
   assert.equal((await request('/api/play?id=aaaaaaaaaaa&quality=invalid')).status, 400);
   const cancelled = await (await request('/api/download?id=bbbbbbbbbbb&quality=low', { method: 'POST' })).json();
@@ -83,7 +133,10 @@ try {
     assert.equal(a.codec_name, 'aac'); assert.equal(a.profile, 'LC'); assert.equal(a.sample_rate, '44100');
   }
   assert(sizes.low < sizes.standard && sizes.standard < sizes.high, JSON.stringify(sizes));
-  console.log(`PASS: real FFmpeg stream and MP4 download at all qualities, authenticated status, invalid profile rejection. Synthetic stream bytes: ${JSON.stringify(sizes)}.`);
+  const brokenWire=parsePackets(Buffer.from(await (await request('/api/play?id=yyyyyyyyyyy')).arrayBuffer()));
+  assert(!brokenWire.packets.some(p=>p.type===PACKET.AUDIO||p.type===PACKET.VIDEO));
+  assert.equal(JSON.parse(brokenWire.packets.find(p=>p.type===PACKET.END).payload).reason,'ffmpeg error','zero-output converter failure must not be EOF');
+  console.log(`PASS: Japanese search/thumbnail, authenticated MP3 preparation/download and alternative-format retry, invalid-audio rejection, 32kHz PCM playback, real FFmpeg video/MP4 qualities and nonzero-exit/zero-output error vs EOF. Synthetic bytes: ${JSON.stringify(sizes)}.`);
 } finally {
   if (child && child.exitCode === null) { child.kill(); await new Promise(r => child.once('exit', r)); }
   if (origin) await new Promise(r => origin.close(r));

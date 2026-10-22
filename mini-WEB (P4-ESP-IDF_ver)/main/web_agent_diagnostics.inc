@@ -95,7 +95,8 @@ static esp_err_t agent_diagnostics(httpd_req_t *req) {
         cJSON_AddNumberToObject(memory, "psram_free_bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
     size_t total = 0, used = 0;
-    esp_err_t disk = esp_spiffs_info("littlefs", &total, &used);
+    storage_capacity_t capacity; storage_capacity_read(true,&capacity);
+    esp_err_t disk = capacity.error; total = (size_t)capacity.total; used = (size_t)capacity.used;
     cJSON *storage = cJSON_AddObjectToObject(out, "storage");
     if (storage) {
         cJSON_AddStringToObject(storage, "status", esp_err_to_name(disk));

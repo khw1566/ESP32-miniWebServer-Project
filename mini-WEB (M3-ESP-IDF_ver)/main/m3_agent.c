@@ -2,6 +2,7 @@
 #include "m3_agent.h"
 #include "m3_preferences.h"
 #include "m3_gemini_config.h"
+#include "m3_sd_settings.h"
 #include "m3_audio.h"
 #include "m3_audio_apps.h"
 #include "m3_runtime.h"
@@ -48,6 +49,7 @@ static bool key_valid(const char *key) {
 }
 void m3_agent_state(m3_agent_state_t *out) {
     portENTER_CRITICAL(&lock); *out = state; portEXIT_CRITICAL(&lock);
+    out->key_ready = key_valid(m3_sd_gemini_key());
 }
 static bool active(unsigned token) { return atomic_load(&generation) == token; }
 static void update(unsigned token, const char *message, const char *answer, const char *tools) {
@@ -63,7 +65,7 @@ static void update(unsigned token, const char *message, const char *answer, cons
 bool m3_agent_submit(const char *prompt, unsigned model) {
     if (m3_preferences_restarting()) return false;
     if (!requests || !m3_agent_model(model) || !m3_tts_text_valid(prompt) ||
-        !key_valid(M3_GEMINI_API_KEY) || network_get_mode() != NET_MODE_STA_CONNECTED) return false;
+        !key_valid(m3_sd_gemini_key()) || network_get_mode() != NET_MODE_STA_CONNECTED) return false;
     bool expected = false;
     if (!atomic_compare_exchange_strong(&pending, &expected, true)) return false;
     request_t request = {.model = model, .generation = atomic_load(&generation), .conversation = atomic_load(&conversation)};
@@ -159,7 +161,7 @@ static cJSON *post(cJSON *body, unsigned model, unsigned token, int64_t deadline
     esp_http_client_config_t config = {.url = url, .method = HTTP_METHOD_POST, .timeout_ms = 3000,
         .buffer_size = 1024, .crt_bundle_attach = esp_crt_bundle_attach, .disable_auto_redirect = true};
     http = esp_http_client_init(&config); if (!http) goto done;
-    esp_http_client_set_header(http, "x-goog-api-key", M3_GEMINI_API_KEY);
+    esp_http_client_set_header(http, "x-goog-api-key", m3_sd_gemini_key());
     esp_http_client_set_header(http, "Content-Type", "application/json");
     if (!active(token) || esp_http_client_open(http, strlen(payload)) != ESP_OK) { *error = "Gemini HTTPS connection failed"; goto done; }
     size_t sent = 0, length = strlen(payload);
@@ -326,7 +328,7 @@ esp_err_t m3_agent_start(void) {
         vQueueDelete(requests); requests = NULL; return ESP_ERR_NO_MEM;
     }
     portENTER_CRITICAL(&lock);
-    state.ready = true; state.key_ready = key_valid(M3_GEMINI_API_KEY);
+    state.ready = true; state.key_ready = key_valid(m3_sd_gemini_key());
     snprintf(state.message, sizeof(state.message), "%s", state.key_ready ? "Gemini ready" : "Actual API key missing; configure private header");
     ++state.revision; portEXIT_CRITICAL(&lock); return ESP_OK;
 }

@@ -1,6 +1,9 @@
 #include "m3_mp4_demux.h"
 #include "sd_media.h"
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +15,8 @@ enum { MOOV_LIMIT = 4 * 1024 * 1024, INDEX_BUDGET = 4 * 1024 * 1024, SAMPLE_LIMI
 typedef union allocation allocation_t;
 typedef struct { allocation_t *head; size_t used; bool failed; } pool_t;
 union allocation { max_align_t alignment; struct { allocation_t *next, *previous; pool_t *pool; size_t bytes; } item; };
-static pool_t *allocating; /* Only the sole audio worker opens/closes the demuxer. */
+static pool_t *allocating; /* Protected while minimp4 builds either playback or thumbnail indexes. */
+static atomic_flag indexing = ATOMIC_FLAG_INIT;
 static void *mp4_alloc(size_t bytes) {
     if (!allocating || !bytes || bytes > INDEX_BUDGET || allocating->used > INDEX_BUDGET - bytes) {
         if (allocating) allocating->failed = true;
@@ -208,7 +212,8 @@ const uint8_t *m3_mp4_demux_parameter(m3_mp4_demux_t *d, bool pps, unsigned inde
 }
 void m3_mp4_demux_close(m3_mp4_demux_t *d) {
     if (!d) return;
-    allocating = &d->pool; MP4D_close(&d->index); allocating = NULL;
+    /* Every allocation carries its own pool; close only frees and never selects an allocator. */
+    MP4D_close(&d->index);
     while (d->pool.head) mp4_free(d->pool.head + 1);
     if (d->file) fclose(d->file);
     free(d->moov); free(d);
@@ -259,9 +264,14 @@ m3_mp4_result_t m3_mp4_demux_open(const char *relative, unsigned job, bool (*cur
         at += bytes;
     }
     if (!ftyp || !d->moov || !d->tracks || !d->media_count) goto done;
+    while (atomic_flag_test_and_set(&indexing)) {
+        if (!current(job)) { result = M3_MP4_STOPPED; goto done; }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     allocating = &d->pool;
     bool indexed = MP4D_open(&d->index, index_read, d, d->size) != 0;
     allocating = NULL;
+    atomic_flag_clear(&indexing);
     if (!indexed) { if (d->pool.failed) result = M3_MP4_MEMORY; goto done; }
     if (d->index.track_count != d->tracks) goto done;
     for (unsigned i = 0; i < d->tracks; ++i) {

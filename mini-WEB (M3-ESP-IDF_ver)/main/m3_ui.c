@@ -1,4 +1,5 @@
 #include "m3_music.h"
+#include "m3_reader.h"
 #include "m3_sd_apps.h"
 #include "m3_photos.h"
 #include "m3_calendar.h"
@@ -16,6 +17,7 @@
 #include "m3_calculator.h"
 #include "m3_gallery.h"
 #include "m3_preferences.h"
+#include "m3_feedback.h"
 #include "m3_hangul.h"
 #include "m3_voice.h"
 #include "m3_agent.h"
@@ -34,6 +36,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <limits.h>
 
 /* Palette. CYAN/MAGENTA remain the product accents; everything else is neutral. */
 #define CYAN 0x00e5ef
@@ -53,11 +56,12 @@ extern const lv_font_t m3_font_korean, m3_font_title, m3_font_clock;
 #define FONT_TITLE (&m3_font_title)
 #define FONT_ICON (&lv_font_montserrat_28)
 
-typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_RECORDER, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_COUNT } app_id_t;
+typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_RECORDER, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_READER, APP_COUNT } app_id_t;
 _Static_assert(APP_AGENT == 9, "Agent app dispatch IDs must match the UI enum");
+_Static_assert(M3_CUE_APP_READER - M3_CUE_APP_HOME + 1 == APP_COUNT, "Spoken app IDs must match navigation");
 enum { CONTENT_TOP = 100, HOME_TOP = 756, KEYBOARD_HEIGHT = 270 };
 static const m3_text_t app_names[] = {T_APP_HOME, T_APP_WIFI, T_APP_FILES, T_APP_RECORDER, T_APP_MONITOR,
-    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC, T_APP_GALLERY, T_APP_CALCULATOR, T_APP_YTMUSIC};
+    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC, T_APP_GALLERY, T_APP_CALCULATOR, T_APP_YTMUSIC, T_APP_READER};
 
 static lv_obj_t *pages[APP_COUNT], *viewport, *app_title, *back_button, *keyboard;
 static lv_obj_t *home_strip, *home_pill, *home_hint;
@@ -69,8 +73,10 @@ static M3_PSRAM_BSS m3_runtime_state_t snapshot;
 
 /* Status bar, home and activity shade. */
 static lv_obj_t *status, *status_clock, *status_audio, *status_strip, *wifi_levels[4];
+static lv_obj_t *power_plug, *power_battery, *power_fill, *power_charge, *power_percent;
 static lv_obj_t *home_clock, *home_date, *home_net_icon, *home_net, *home_detail;
-enum { HOME_APPS_PER_PAGE = 6, HOME_APP_PAGE_COUNT = (APP_COUNT - 2) / HOME_APPS_PER_PAGE + 1,
+enum { HOME_PRIMARY_APPS = 6, HOME_APPS_PER_PAGE = 9,
+    HOME_APP_PAGE_COUNT = 1 + (APP_COUNT - 1 - HOME_PRIMARY_APPS + HOME_APPS_PER_PAGE - 1) / HOME_APPS_PER_PAGE,
     HOME_PHOTOS = HOME_APP_PAGE_COUNT + 1, HOME_PAGE_COUNT = HOME_PHOTOS + 1 };
 static lv_obj_t *home_tiles, *home_sheets[HOME_PAGE_COUNT], *home_dots[HOME_PAGE_COUNT], *home_page_name;
 static unsigned home_index = 1;
@@ -84,6 +90,9 @@ static void home_page_update(void);
 static void update_calendar(void);
 static void update_photos(void);
 static lv_obj_t *shade, *shade_scrim, *usage_arcs[3], *usage_values[3], *usage_details[3], *job_cards[6], *job_labels[6];
+static lv_obj_t *job_icons[6], *cpu_chart, *cpu_values[2];
+static lv_chart_series_t *cpu_series[2];
+static unsigned seen_cpu;
 static int32_t shade_y = -HOME_TOP, shade_start_y;
 static bool shade_drag;
 static lv_point_t shade_origin;
@@ -109,7 +118,7 @@ static lv_obj_t *memory, *heap_bar, *chart, *monitor_info, *system_info;
 static lv_chart_series_t *heap_series, *psram_series;
 static unsigned chart_tick;
 static char seen_url[96], seen_audio[96];
-static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[12], *radio_region;
+static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[24], *radio_region, *radio_transport;
 static int radio_selected = -1;
 static bool radio_pending;
 static int64_t radio_pending_until;
@@ -119,6 +128,8 @@ static unsigned seen_agent;
 static lv_obj_t *voice_provider, *voice_panel, *voice_info, *voice_text, *voice_target, *voice_key, *voice_key_info, *voice_dot;
 static unsigned seen_voice;
 static lv_obj_t *language_tabs;
+static lv_obj_t *sound_switches[3], *sound_sliders[3], *sound_values[3];
+static lv_obj_t *sound_card, *accessibility_panel, *guidance_mode;
 static lv_obj_t *agent_thinking, *agent_voice, *voice_think, *tts_wait, *tts_talk, *tube_wait;
 enum { METER_BARS = 11, METER_MIN = 4, METER_MAX = 44 };
 static lv_obj_t *voice_meter, *voice_meter_bars[METER_BARS], *voice_db;
@@ -132,6 +143,11 @@ static void voice_input(lv_event_t *event);
 static void apply_language(void);
 static void update_metrics(lv_timer_t *timer);
 static void tube_leave(void);
+static void reader_leave(void);
+static void reader_enter(void);
+static void reader_tick(void);
+static void power_visible(lv_obj_t *obj, bool visible);
+static void reader_open_path(const char *folder, const char *name);
 static void sd_apps_close(lv_event_t *event);
 static void sd_apps_tick(lv_timer_t *timer);
 static lv_obj_t *builtin_games, *sd_launcher, *sd_panel, *sd_list, *sd_stage, *sd_canvas, *sd_status;
@@ -142,20 +158,7 @@ static lv_obj_t *sd_frame_holder;
 static lv_obj_t *sd_restart;
 static bool sd_launch_failed;
 
-/* World presets retained; KR/JP direct MP3 endpoints checked on 2026-10-15. */
-static const struct { const char *name, *url; bool aac; unsigned region; } radio_stations[] = {
-    {"SomaFM Groove Salad / MP3 128k", "https://ice5.somafm.com/groovesalad-128-mp3", false, 0},
-    {"SomaFM Groove Salad / AAC 64k", "https://ice5.somafm.com/groovesalad-64-aac", true, 0},
-    {"SomaFM Drone Zone / MP3 128k", "https://ice5.somafm.com/dronezone-128-mp3", false, 0},
-    {"SomaFM Secret Agent / MP3 128k", "https://ice5.somafm.com/secretagent-128-mp3", false, 0},
-    {"Radio Swiss Jazz / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128", false, 0},
-    {"Radio Swiss Classic / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128", false, 0},
-    {"Radio Swiss Pop / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128", false, 0},
-    {"Korea Big B K-pop / MP3", "https://antares.dribbcast.com/proxy/kpop?mp=/s", false, 1},
-    {"Japan FM Setagaya / MP3", "https://fmsetagaya834.out.airtime.pro/fmsetagaya834_a", false, 2},
-    {"Japan Big B J-pop / MP3", "https://antares.dribbcast.com/proxy/jpop?mp=/s", false, 2}
-};
-_Static_assert(sizeof(radio_stations) / sizeof(radio_stations[0]) <= 12, "station buttons");
+#include "m3_radio_stations.inc"
 static lv_obj_t *game_board, *game_tiles[16], *game_info, *game_arrows[4], *game_tabs, *game_undo;
 static lv_obj_t *cross_scene, *cross_lanes[M3_CROSS_ROWS], *cross_objects[M3_CROSS_ROWS][3];
 static lv_obj_t *cross_windows[M3_CROSS_ROWS][3], *cross_player, *cross_body;
@@ -273,7 +276,7 @@ static void styles_init(void) {
 /* ---------- Language binding: every static string remembers its text ID. ---------- */
 typedef enum { BIND_TEXT, BIND_PLACEHOLDER } bind_kind_t;
 typedef struct { lv_obj_t *obj; const char *prefix; uint16_t id; uint8_t kind; } binding_t;
-static M3_PSRAM_BSS binding_t bindings[256];
+static M3_PSRAM_BSS binding_t bindings[320];
 static unsigned binding_count;
 static void bind_apply(unsigned index) {
     /* Help texts exceed any small buffer in Korean (3 bytes per syllable); only
@@ -346,6 +349,7 @@ static lv_obj_t *card(lv_obj_t *parent, m3_text_t title) {
     }
     return obj;
 }
+static void sound_tap(lv_event_t *event) { (void)event; m3_feedback_emit(M3_CUE_TAP, m3_i18n_language()); }
 typedef enum { BTN_SECONDARY, BTN_PRIMARY, BTN_DANGER } button_kind_t;
 static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, button_kind_t kind, lv_event_cb_t callback, void *data) {
     lv_obj_t *obj = lv_button_create(parent);
@@ -359,6 +363,7 @@ static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, butt
     lv_label_set_long_mode(text_obj, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(text_obj, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(text_obj);
     bind_text(text_obj, id, symbol, BIND_TEXT);
+    lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
     return obj;
 }
@@ -366,6 +371,12 @@ static lv_obj_t *grow(lv_obj_t *obj) { lv_obj_set_flex_grow(obj, 1); lv_obj_set_
 static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol, lv_event_cb_t callback, void *data) {
     lv_obj_t *obj = button(parent, symbol, T_NONE, BTN_SECONDARY, callback, data);
     lv_obj_set_size(obj, 52, 52); lv_obj_set_style_pad_all(obj, 0, 0);
+    return obj;
+}
+static lv_obj_t *refresh_button(lv_obj_t *parent,m3_text_t action,lv_event_cb_t callback,void *data) {
+    lv_obj_t *obj=icon_button(parent,LV_SYMBOL_REFRESH,callback,data);
+    /* Keep each app's action description separate from its icon-only face. */
+    lv_obj_set_user_data(obj,(void *)(uintptr_t)action);
     return obj;
 }
 static void style_slider(lv_obj_t *slider) {
@@ -451,10 +462,10 @@ static void activity_set(lv_obj_t *box, bool on) {
 }
 /* Speech phase from the audio worker's status: 1 preparing (download or engine start), 2 speaking. */
 static unsigned tts_phase(const m3_audio_state_t *audio) {
-    static const char *const preparing[] = {"Korean TTS initializing", "Google Korean TTS / downloading", "OpenAI TTS / downloading"};
-    static const char *const speaking[] = {"Speaking Korean", "Google Korean TTS / speaking", "OpenAI TTS / AI-generated"};
+    static const char *const preparing[] = {"Korean TTS initializing", "Google Korean TTS / downloading", "OpenAI TTS / downloading", "Azure TTS / preparing"};
+    static const char *const speaking[] = {"Speaking Korean", "Google Korean TTS / speaking", "OpenAI TTS / AI-generated", "Azure TTS / speaking"};
     if (!audio->playing) return 0;
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < sizeof(preparing) / sizeof(preparing[0]); ++i) {
         if (!strncmp(audio->message, preparing[i], strlen(preparing[i]))) return 1;
         if (!strncmp(audio->message, speaking[i], strlen(speaking[i]))) return 2;
     }
@@ -463,7 +474,7 @@ static unsigned tts_phase(const m3_audio_state_t *audio) {
 
 /* Segmented control on a button matrix: translated labels, exactly one choice. */
 typedef struct { lv_obj_t *obj; const char *const *fixed; const char *map[5]; m3_text_t ids[4]; uint8_t count, selected; } segment_t;
-static segment_t segments[16];
+static segment_t segments[20];
 static unsigned segment_count;
 static segment_t *segment_of(lv_obj_t *obj) {
     for (unsigned i = 0; i < segment_count; ++i) if (segments[i].obj == obj) return &segments[i];
@@ -647,6 +658,7 @@ static void phone_enter(app_id_t app);
 static void show_app(app_id_t app) {
     if (app >= APP_COUNT) return;
     if (current_app == APP_TUBE && app != APP_TUBE) tube_leave();
+    if (current_app == APP_READER && app != APP_READER) reader_leave();
     if (current_app == APP_GAMES && app != APP_GAMES && sd_panel) sd_apps_close(NULL);
     if (voice_target) { m3_audio_stop(); voice_target = NULL; }
     if (voice_panel) lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
@@ -661,8 +673,11 @@ static void show_app(app_id_t app) {
         else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
     }
     if (current_app == APP_GALLERY && app != APP_GALLERY) m3_gallery_close();
+    bool changed_app = current_app != app;
     current_app = app;
+    if (changed_app) m3_feedback_emit(M3_CUE_APP_HOME + app, m3_i18n_language());
     phone_enter(app);
+    if (app == APP_READER) reader_enter();
     if (app == APP_HOME && home_tiles) {
         home_index = 1;
         lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
@@ -918,7 +933,7 @@ static void voice_input(lv_event_t *event) {
     hide_keyboard();
     voice_target = lv_event_get_user_data(event);
     lv_label_set_text(voice_text, "");
-    lv_label_set_text(voice_info, tr(voice.provider ? T_VOICE_GEMINI : T_VOICE_OPENAI));
+    lv_label_set_text(voice_info, tr(voice.provider == 3 ? T_VOICE_AZURE : voice.provider ? T_VOICE_GEMINI : T_VOICE_OPENAI));
     lv_obj_remove_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_to_index(voice_panel, -1); lv_obj_move_to_index(home_strip, -1);
     voice_retry(NULL);
@@ -973,7 +988,10 @@ static void voice_provider_changed(lv_event_t *event) {
 static void language_changed(lv_event_t *event) {
     (void)event;
     m3_lang_t language = (m3_lang_t)segment_value(language_tabs);
-    if (language != m3_i18n_language() && m3_i18n_set_language(language)) apply_language();
+    if (language != m3_i18n_language() && m3_i18n_set_language(language)) {
+        apply_language();
+        m3_feedback_clear(); m3_feedback_emit(M3_CUE_LANGUAGE, language);
+    }
 }
 
 /* ---------- AI agent. ---------- */
@@ -1016,8 +1034,16 @@ static void select_network(lv_event_t *event) {
     wifi_open_selected = snapshot.networks[index].authmode == WIFI_AUTH_OPEN;
     snprintf(wifi_selected_ssid, sizeof(wifi_selected_ssid), "%s", snapshot.networks[index].ssid);
     form_dirty = true;
-    /* Move straight to the password so one tap selects and continues. */
-    if (!wifi_open_selected) lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
+    if (wifi_open_selected) {
+        /* Public networks always use an empty password and automatic addressing. */
+        network_settings_t settings = {.version = 1};
+        snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.networks[index].ssid);
+        lv_obj_remove_state(static_switch, LV_STATE_CHECKED); static_changed(NULL);
+        bool accepted = m3_runtime_wifi(M3_WIFI_CONNECT, &settings);
+        memset(&settings, 0, sizeof(settings));
+        set_text(wifi_info, tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY));
+        set_ink(wifi_info, accepted ? CYAN : AMBER);
+    } else lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
 }
 static void wifi_feedback(const char *message, uint32_t color) {
     lv_label_set_text(wifi_info, message);
@@ -1177,7 +1203,12 @@ static void radio_mark(int index) {
 }
 static void start_radio(lv_event_t *event) {
     (void)event; hide_keyboard();
-    if (!m3_audio_radio(lv_textarea_get_text(radio_url), segment_value(radio_codec) == 1))
+    unsigned mode = segment_value(radio_transport);
+    bool preset = radio_selected >= 0 && (unsigned)radio_selected < sizeof(radio_stations) / sizeof(radio_stations[0]);
+    bool accepted = preset && (mode || radio_stations[radio_selected].relay)
+        ? m3_audio_radio_preset(radio_stations[radio_selected].id, mode ? mode - 1 : 1)
+        : m3_audio_radio(lv_textarea_get_text(radio_url), segment_value(radio_codec) == 1);
+    if (!accepted)
         lv_label_set_text(radio_info, tr(T_RADIO_FAIL));
     else lv_label_set_text(radio_info, tr(T_RADIO_QUEUED));
 }
@@ -1506,6 +1537,8 @@ static void open_file(lv_event_t *event) {
         if (length <= 0 || (size_t)length >= sizeof(folder)) return;
         snprintf(selected_folder, sizeof(selected_folder), "%s", folder);
         selected_sd = true; selected_offset = 0; browse_refresh();
+    } else if (snapshot.browse_sd && m3_reader_supported(entry->name)) {
+        reader_open_path(snapshot.folder, entry->name);
     } else if (snapshot.browse_sd && m3_gallery_supported(entry->name)) {
         show_app(APP_GALLERY); gallery_load(row_index);
     } else if (snapshot.browse_sd && !strcmp(snapshot.folder, "/media")) {
@@ -1624,8 +1657,9 @@ static void usage_update(unsigned index, uint64_t occupied, uint64_t total) {
     set_text(usage_details[index], text);
 }
 static void job_update(unsigned index, const char *title, const char *detail, bool running) {
-    char text[192]; snprintf(text, sizeof(text), "%s  " LV_SYMBOL_BULLET "  %s\n%s", title, tr(running ? T_SHADE_ACTIVE : T_SHADE_IDLE), detail);
+    char text[192]; snprintf(text, sizeof(text), "%s\n%s", title, detail);
     set_text(job_labels[index], text);
+    set_ink(job_icons[index], running ? CYAN : MUTED);
     if (!lv_color_eq(lv_obj_get_style_border_color(job_cards[index], 0), lv_color_hex(running ? CYAN : LINE)))
         lv_obj_set_style_border_color(job_cards[index], lv_color_hex(running ? CYAN : LINE), 0);
 }
@@ -1645,7 +1679,7 @@ static uint16_t seen_tube_thumbs;
 static int seen_tube_set = -1;
 static bool tube_in_player, tube_pending;
 static int64_t tube_pending_until;
-static char tube_id[12], tube_channel_id[25], tube_last_query[128];
+static char tube_id[12], tube_channel_id[25], tube_last_query[M3_TUBE_QUERY_BYTES];
 static unsigned tube_start_s, tube_duration_s;
 static bool tube_live;
 
@@ -1710,6 +1744,7 @@ static void tube_leave(void) { if (tube_in_player || tube_pending) tube_stop(); 
 static void tube_submit(void) {
     const char *query = lv_textarea_get_text(tube_query);
     if (!query[0]) return;
+    if (strlen(query) >= M3_TUBE_QUERY_BYTES || !m3_utf8_valid(query)) { set_text(tube_status, tr(T_TUBE_QUERY_LONG)); return; }
     hide_keyboard();
     snprintf(tube_last_query, sizeof(tube_last_query), "%s", query);
     if (!m3_tube_search(query, 1)) lv_label_set_text(tube_status, tr(T_TUBE_NOT_CONFIGURED));
@@ -1825,7 +1860,7 @@ static void update_tube(const m3_audio_state_t *audio) {
     m3_tube_list(&tube_list);
     if (tube_list.revision != seen_tube_list) {
         seen_tube_list = tube_list.revision;
-        char text[128];
+        char text[512];
         if (tube_list.thumb_set != seen_tube_set) {
             seen_tube_set = tube_list.thumb_set; seen_tube_thumbs = 0;
             for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) lv_obj_add_flag(tube_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
@@ -2038,6 +2073,29 @@ static void update_home(const m3_audio_state_t *audio) {
     else snprintf(text, sizeof(text), "%s", tr(snapshot.mode == NET_MODE_AP_CAPTIVE ? T_HOME_SETUP : T_HOME_WAITING));
     set_text(home_detail, text);
 }
+static void power_visible(lv_obj_t *obj, bool visible) {
+    if (visible) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+static void update_power(const m3_power_state_t *p) {
+    bool battery = !p->battery_known || p->battery_present;
+    bool measured = p->battery_known && p->battery_present && p->percent_known;
+    unsigned percent = p->percent > 100 ? 100 : p->percent;
+    bool charging = p->battery_known && p->battery_present && p->charge_known && p->charging &&
+        (!p->wired_known || p->wired);
+    power_visible(power_plug, p->wired_known && p->wired);
+    power_visible(power_battery, battery);
+    power_visible(power_percent, battery);
+    power_visible(power_fill, measured && percent > 0);
+    power_visible(power_charge, charging);
+    lv_obj_set_width(power_fill, percent ? (int)((22u * percent + 99u) / 100u) : 1);
+    uint32_t color = charging ? CYAN : measured && percent <= 20 ? RED : TEXT;
+    set_bg(power_fill, color); set_ink(power_percent, measured ? color : MUTED);
+    char text[8];
+    if (measured) snprintf(text, sizeof(text), "%u%%", percent);
+    else snprintf(text, sizeof(text), "--");
+    set_text(power_percent, text);
+}
 static void update_metrics(lv_timer_t *timer) {
     update_preferences();
     (void)timer;
@@ -2056,6 +2114,10 @@ static void update_metrics(lv_timer_t *timer) {
     }
     set_bg(agent_dot, agent.busy ? AMBER : agent.key_ready ? GREEN : RED);
     static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    segment_t *voice_segment = segment_of(voice_provider), *tts_segment = segment_of(tts_provider);
+    if (voice_segment && voice_segment->selected != voice.provider) segment_select(voice_provider, voice.provider);
+    unsigned selected_tts = m3_audio_tts_selected();
+    if (tts_segment && tts_segment->selected != selected_tts) segment_select(tts_provider, selected_tts);
     if (voice.revision != seen_voice) {
         seen_voice = voice.revision;
         if (voice_target) {
@@ -2078,6 +2140,8 @@ static void update_metrics(lv_timer_t *timer) {
     unsigned used = psram_total ? (unsigned)((psram_total - psram) * 100 / psram_total) : 0;
     static char text[768]; /* UI task only; keeps this 250 ms path off the 16 KiB stack */
     set_text(status, mode_text());
+    update_power(&snapshot.power);
+    reader_tick();
     unsigned levels = snapshot.mode == NET_MODE_STA_CONNECTED ? wifi_bars(snapshot.rssi) : 0;
     bool ap = snapshot.mode == NET_MODE_AP_CAPTIVE;
     for (unsigned i = 0; i < 4; ++i)
@@ -2089,12 +2153,24 @@ static void update_metrics(lv_timer_t *timer) {
     uint64_t flash_files = snapshot.flash.total > snapshot.flash.reserved ? snapshot.flash.total - snapshot.flash.reserved : 0;
     usage_update(2, snapshot.flash.used, snapshot.flash.error == ESP_OK ? flash_files : 0);
     job_update(0, tr(T_JOB_APP), tr(app_names[current_app]), current_app != APP_HOME);
+    static const char *const app_glyphs[APP_COUNT] = {LV_SYMBOL_HOME, LV_SYMBOL_WIFI, LV_SYMBOL_DIRECTORY,
+        LV_SYMBOL_CALL, LV_SYMBOL_CHARGE, LV_SYMBOL_SETTINGS, LV_SYMBOL_AUDIO, LV_SYMBOL_LIST,
+        LV_SYMBOL_VOLUME_MAX, "AI", LV_SYMBOL_VIDEO, LV_SYMBOL_AUDIO, LV_SYMBOL_IMAGE, "=", LV_SYMBOL_PLAY, LV_SYMBOL_FILE};
+    set_text(job_icons[0], app_glyphs[current_app]);
     job_update(1, tr(T_JOB_AUDIO), status_text(audio.message), audio.playing && !voice.busy);
     job_update(2, tr(T_JOB_VOICE), voice.busy ? status_text(voice.message) : tr(voice.text[0] ? T_JOB_REVIEW : T_JOB_WAITING), voice.busy);
-    job_update(3, tr(T_JOB_WIFI), snapshot.wifi_busy ? status_text(snapshot.wifi_message) : mode_text(), snapshot.wifi_busy);
+    job_update(3, tr(T_JOB_WIFI), snapshot.wifi_busy ? status_text(snapshot.wifi_message) : mode_text(),
+        snapshot.wifi_busy || snapshot.mode == NET_MODE_STA_CONNECTED || snapshot.mode == NET_MODE_AP_CAPTIVE);
     snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests);
     job_update(4, tr(T_JOB_WEB), snapshot.web ? text : tr(T_JOB_NOT_STARTED), snapshot.web);
     job_update(5, tr(T_JOB_AGENT), status_text(agent.message), agent.busy);
+    if (snapshot.cpu_valid && snapshot.cpu_revision != seen_cpu) {
+        seen_cpu = snapshot.cpu_revision;
+        for (unsigned i = 0; i < 2; ++i) {
+            snprintf(text, sizeof(text), "HP%u  %u%%", i, snapshot.cpu_percent[i]); set_text(cpu_values[i], text);
+            lv_chart_set_next_value(cpu_chart, cpu_series[i], snapshot.cpu_percent[i]);
+        }
+    }
     update_clock(text, sizeof(text));
     update_home(&audio);
     update_calendar();
@@ -2173,15 +2249,26 @@ static const struct { app_id_t app; uint32_t top, bottom; const char *glyph; } a
     {APP_TTS, 0x818cf8, 0x4338ca, "가"},
     {APP_SYSTEM, 0x94a3b8, 0x475569, LV_SYMBOL_SETTINGS},
     {APP_TUBE, 0xf87171, 0xb91c1c, LV_SYMBOL_PLAY},
-    {APP_YTMUSIC, 0xfb7185, 0x9f1239, LV_SYMBOL_AUDIO},
+    {APP_YTMUSIC, 0xff0033, 0xff0033, LV_SYMBOL_PLAY},
     {APP_MUSIC, 0x22d3ee, 0x0369a1, LV_SYMBOL_AUDIO},
     {APP_GALLERY, 0x38bdf8, 0x7c3aed, LV_SYMBOL_IMAGE},
     {APP_CALCULATOR, 0x34d399, 0x047857, "="},
+    {APP_READER, 0xd6b98d, 0x785e3e, LV_SYMBOL_FILE},
 };
 static void draw_app_icon(lv_obj_t *icon, unsigned index) {
     lv_obj_set_style_bg_color(icon, lv_color_hex(app_icons[index].top), 0);
     lv_obj_set_style_bg_grad_color(icon, lv_color_hex(app_icons[index].bottom), 0);
     lv_obj_set_style_bg_grad_dir(icon, LV_GRAD_DIR_VER, 0);
+    if (app_icons[index].app == APP_YTMUSIC) {
+        lv_obj_set_style_radius(icon, LV_RADIUS_CIRCLE, 0);
+        lv_obj_t *ring = bare(icon); lv_obj_set_pos(ring, 14, 14); lv_obj_set_size(ring, 48, 48);
+        lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(ring, 3, 0); lv_obj_set_style_border_opa(ring, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(ring, lv_color_hex(0xffffff), 0);
+        lv_obj_t *play = label(icon, LV_SYMBOL_PLAY, 0xffffff); lv_obj_set_width(play, LV_SIZE_CONTENT);
+        lv_obj_set_style_text_font(play, FONT_ICON, 0); lv_obj_align(play, LV_ALIGN_CENTER, 2, 0);
+        return;
+    }
     if (app_icons[index].app == APP_RADIO) {
         icon_part(icon, 17, 28, 42, 30, 6);
         icon_part(icon, 24, 18, 33, 3, 1);
@@ -2260,17 +2347,34 @@ static void create_shade(lv_obj_t *screen) {
         usage_details[i] = label(panel, "", MUTED); lv_obj_set_pos(usage_details[i], 4, 152);
         lv_obj_set_width(usage_details[i], 136); lv_obj_set_style_text_align(usage_details[i], LV_TEXT_ALIGN_CENTER, 0);
     }
-    title = text(shade, T_SHADE_RUNNING, CYAN); lv_obj_set_pos(title, 20, 298);
+    cpu_chart = lv_chart_create(shade); lv_obj_set_pos(cpu_chart, 24, 310); lv_obj_set_size(cpu_chart, 432, 80);
+    lv_chart_set_type(cpu_chart, LV_CHART_TYPE_LINE); lv_chart_set_point_count(cpu_chart, 60);
+    lv_chart_set_range(cpu_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+    lv_chart_set_div_line_count(cpu_chart, 3, 5);
+    lv_obj_set_style_bg_opa(cpu_chart, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_size(cpu_chart, 0, 0, LV_PART_INDICATOR);
+    lv_obj_remove_flag(cpu_chart, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    for (unsigned i = 0; i < 2; ++i) {
+        cpu_values[i] = label(shade, i ? "HP1  --" : "HP0  --", i ? MAGENTA : CYAN);
+        lv_obj_set_pos(cpu_values[i], 24 + i * 224, 284); lv_obj_set_width(cpu_values[i], 200);
+        cpu_series[i] = lv_chart_add_series(cpu_chart, lv_color_hex(i ? MAGENTA : CYAN), LV_CHART_AXIS_PRIMARY_Y);
+    }
+    title = text(shade, T_SHADE_RUNNING, CYAN); lv_obj_set_pos(title, 20, 400);
+    static const char *const job_glyphs[] = {LV_SYMBOL_HOME, LV_SYMBOL_AUDIO, LV_SYMBOL_CALL, LV_SYMBOL_WIFI, LV_SYMBOL_UPLOAD, LV_SYMBOL_SETTINGS};
     for (unsigned i = 0; i < 6; ++i) {
-        job_cards[i] = bare(shade); lv_obj_set_pos(job_cards[i], 16 + (i % 2) * 228, 328 + (i / 2) * 98);
-        lv_obj_set_size(job_cards[i], 220, 88); lv_obj_set_style_radius(job_cards[i], 14, 0);
-        lv_obj_set_style_pad_all(job_cards[i], 12, 0); lv_obj_set_style_border_width(job_cards[i], 1, 0);
+        job_cards[i] = bare(shade); lv_obj_set_pos(job_cards[i], 16 + (i % 2) * 228, 426 + (i / 2) * 78);
+        lv_obj_set_size(job_cards[i], 220, 70); lv_obj_set_style_radius(job_cards[i], 14, 0);
+        lv_obj_set_style_border_width(job_cards[i], 1, 0);
         lv_obj_set_style_bg_opa(job_cards[i], LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(job_cards[i], lv_color_hex(SURFACE), 0);
-        job_labels[i] = label(job_cards[i], "", TEXT);
-        lv_obj_set_height(job_labels[i], 64); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        job_icons[i] = label(job_cards[i], job_glyphs[i], MUTED);
+        lv_obj_set_pos(job_icons[i], 8, 17); lv_obj_set_size(job_icons[i], 36, 36);
+        lv_obj_set_style_text_font(job_icons[i], FONT_ICON, 0);
+        job_labels[i] = label(job_cards[i], "", TEXT); lv_obj_set_pos(job_labels[i], 48, 8);
+        lv_obj_set_size(job_labels[i], 162, 54); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
     }
-    title = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(title, 20, 628); lv_obj_set_width(title, 440);
+    title = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(title, 20, 660); lv_obj_set_size(title, 440, 24);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_t *close = button(shade, LV_SYMBOL_UP, T_SHADE_CLOSE, BTN_SECONDARY, shade_close, NULL);
     lv_obj_set_pos(close, 16, 684); lv_obj_set_width(close, 448);
     shade_motion(shade, -HOME_TOP);
@@ -2294,15 +2398,16 @@ static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data) 
     lv_obj_t *name = lv_label_create(obj); grow(name); lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_t *meta = lv_label_create(obj); lv_obj_add_style(meta, &st_caption, 0);
     (void)icon;
+    lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
     return obj;
 }
-static void home_apps(lv_obj_t *home, unsigned first, int top) {
+static void home_apps(lv_obj_t *home, unsigned first, unsigned count, int top) {
     _Static_assert(sizeof(app_icons) / sizeof(app_icons[0]) == APP_COUNT - 1, "one icon per app");
-    unsigned end = first + HOME_APPS_PER_PAGE;
+    unsigned end = first + count;
     if (end > sizeof(app_icons) / sizeof(app_icons[0])) end = sizeof(app_icons) / sizeof(app_icons[0]);
     for (unsigned i = first; i < end; ++i) {
-        int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * 148;
+        int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * (first ? 180 : 148);
         lv_obj_t *icon = lv_button_create(home); lv_obj_remove_style_all(icon);
         lv_obj_set_pos(icon, x, y); lv_obj_set_size(icon, 76, 76);
         lv_obj_set_style_radius(icon, 22, 0); lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
@@ -2326,17 +2431,6 @@ static void build_home_main(lv_obj_t *home) {
     lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0);
     lv_obj_set_style_pad_all(home, 0, 0);
     lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(home, lv_color_hex(0x0b1424), 0);
-    lv_obj_set_style_bg_grad_color(home, lv_color_hex(0x1d0f2c), 0);
-    lv_obj_set_style_bg_grad_dir(home, LV_GRAD_DIR_VER, 0);
-    /* Clip decorative circles in a dedicated back layer. Content is a later
-     * sibling, so neither wallpaper geometry nor child order can cover widgets. */
-    lv_obj_t *wallpaper = bare(home); lv_obj_set_size(wallpaper, 480, 660);
-    lv_obj_set_pos(wallpaper, 0, 0);
-    lv_obj_t *orb = icon_part(wallpaper, -140, 300, 460, 460, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(0x0891b2), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_20, 0);
-    orb = icon_part(wallpaper, 250, -120, 340, 340, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(MAGENTA), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_10, 0);
     lv_obj_t *foreground = bare(home); lv_obj_set_size(foreground, 480, 660);
     lv_obj_set_pos(foreground, 0, 0); lv_obj_add_flag(foreground, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
     home = foreground;
@@ -2365,7 +2459,7 @@ static void build_home_main(lv_obj_t *home) {
     lv_label_set_long_mode(home_detail, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, 0xaab6c6); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -16, 0);
-    home_apps(home, 0, 296);
+    home_apps(home, 0, HOME_PRIMARY_APPS, 296);
 }
 static m3_text_t home_page_title(unsigned index) {
     return index == 0 ? T_CAL_TITLE : index == 1 ? T_APP_HOME : index == HOME_PHOTOS ? T_PHOTO_TITLE : T_HOME_MORE;
@@ -2378,7 +2472,7 @@ static void home_page_update(void) {
         lv_obj_set_style_bg_color(mark, lv_color_hex(i == home_index ? CYAN : 0x526175), 0);
         lv_obj_center(mark);
     }
-    set_text(home_page_name, tr(home_page_title(home_index)));
+    set_text(home_page_name, home_index >= 2 && home_index < HOME_PHOTOS ? "" : tr(home_page_title(home_index)));
     m3_photos_activate(current_app == APP_HOME && home_index == HOME_PHOTOS);
 }
 static void home_tile_changed(lv_event_t *event) {
@@ -2504,12 +2598,23 @@ static void build_home_photos(lv_obj_t *tile) {
     lv_obj_set_pos(photo_pause, 100, 614); lv_obj_set_size(photo_pause, 150, 40);
     lv_obj_t *next = button(tile, LV_SYMBOL_NEXT, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)1);
     lv_obj_set_pos(next, 262, 614); lv_obj_set_size(next, 64, 40);
-    lv_obj_t *refresh = button(tile, NULL, T_MUSIC_REFRESH, BTN_SECONDARY, photo_refresh, NULL);
-    lv_obj_set_pos(refresh, 338, 614); lv_obj_set_size(refresh, 118, 40);
+    lv_obj_t *refresh = refresh_button(tile,T_PHOTO_REFRESH,photo_refresh,NULL);
+    lv_obj_set_pos(refresh,408,610); lv_obj_set_size(refresh,48,44);
 }
 static void build_home(lv_obj_t *home) {
     lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0); lv_obj_set_style_pad_all(home, 0, 0);
     lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
+    /* One fixed wallpaper below all transparent tiles keeps swipes continuous. */
+    lv_obj_t *wallpaper = bare(home); lv_obj_set_size(wallpaper, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(wallpaper, 0, 0);
+    lv_obj_set_style_bg_opa(wallpaper, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(wallpaper, lv_color_hex(0x0b1424), 0);
+    lv_obj_set_style_bg_grad_color(wallpaper, lv_color_hex(0x1d0f2c), 0);
+    lv_obj_set_style_bg_grad_dir(wallpaper, LV_GRAD_DIR_VER, 0);
+    lv_obj_t *orb = icon_part(wallpaper, -140, 300, 460, 460, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_color(orb, lv_color_hex(0x0891b2), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_20, 0);
+    orb = icon_part(wallpaper, 250, -120, 340, 340, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_color(orb, lv_color_hex(MAGENTA), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_10, 0);
     home_tiles = lv_tileview_create(home); lv_obj_remove_style_all(home_tiles);
     lv_obj_set_pos(home_tiles, 0, 0); lv_obj_set_size(home_tiles, 480, 660);
     lv_obj_set_scrollbar_mode(home_tiles, LV_SCROLLBAR_MODE_OFF);
@@ -2524,16 +2629,11 @@ static void build_home(lv_obj_t *home) {
         lv_obj_remove_flag(home_sheets[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(home_sheets[i], LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
         lv_obj_set_style_bg_color(home_sheets[i], lv_color_hex(0x0b1424), 0);
-        lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_TRANSP, 0);
     }
     build_home_calendar(home_sheets[0]); build_home_main(home_sheets[1]);
     for (unsigned i = 2; i < HOME_PHOTOS; ++i) {
-        lv_obj_t *heading = text(home_sheets[i], T_HOME_MORE, TEXT); lv_obj_set_pos(heading, 24, 30);
-        lv_obj_set_width(heading, 432);
-        lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
-        home_apps(home_sheets[i], (i - 1) * HOME_APPS_PER_PAGE, 116);
-        lv_obj_t *hint = text(home_sheets[i], T_HOME_SLIDE, MUTED); lv_obj_set_pos(hint, 24, 600);
+        home_apps(home_sheets[i], HOME_PRIMARY_APPS + (i - 2) * HOME_APPS_PER_PAGE, HOME_APPS_PER_PAGE, 76);
     }
     build_home_photos(home_sheets[HOME_PHOTOS]);
     for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) {
@@ -2642,6 +2742,8 @@ static void build_files(lv_obj_t *files) {
     caption(files, T_FILES_HINT);
     build_file_actions(files);
 }
+#include "m3_reader_ui.inc"
+
 static void build_recorder(lv_obj_t *audio, unsigned volume) {
     lv_obj_t *box = card(audio, T_APP_RECORDER);
     recorder_time = label(box, "00:00 / 30:00", TEXT);
@@ -2677,6 +2779,10 @@ static void build_radio(lv_obj_t *radio, unsigned volume) {
     grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
     box = card(radio, T_SEC_VOLUME);
     volume_row(box, 1, volume);
+    box = card(radio, T_RADIO_TRANSPORT);
+    static const m3_text_t transport[] = {T_RADIO_DIRECT, T_RADIO_ECO, T_RADIO_BALANCED, T_RADIO_HIGH};
+    radio_transport = segmented(box, transport, NULL, 4, 0, NULL);
+    caption(box, T_RADIO_RELAY_HINT);
     static const m3_text_t countries[] = {T_RADIO_WORLD, T_RADIO_KR, T_RADIO_JP};
     radio_region = segmented(radio, countries, NULL, 3, 1, radio_filter);
     box = card(radio, T_SEC_STATIONS);
@@ -2791,8 +2897,8 @@ static void build_games(lv_obj_t *games) {
 }
 static void build_tts(lv_obj_t *tts, unsigned volume) {
     lv_obj_t *box = card(tts, T_SEC_ENGINE);
-    static const m3_text_t engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE};
-    tts_provider = segmented(box, engines, NULL, 3, 0, tts_provider_changed);
+    static const m3_text_t engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE, T_TTS_AZURE};
+    tts_provider = segmented(box, engines, NULL, 4, m3_audio_tts_selected(), tts_provider_changed);
     caption(box, T_TTS_ENGINE_HINT);
     box = card(tts, T_SEC_TEXT);
     tts_text = input_field(box, T_NONE, 128, INPUT_KOREAN, true);
@@ -2907,7 +3013,7 @@ static void build_music(lv_obj_t *music, unsigned volume) {
     box = card(music, T_SEC_MEDIA); music_library = box;
     static const m3_text_t sources[] = {T_STORAGE_SD, T_STORAGE_FLASH};
     music_source = segmented(box, sources, NULL, 2, 0, music_refresh_event);
-    button(box, LV_SYMBOL_REFRESH, T_MUSIC_REFRESH, BTN_SECONDARY, music_refresh_event, NULL);
+    refresh_button(box,T_MUSIC_REFRESH,music_refresh_event,NULL);
 
     music_empty = label(box, tr(T_MUSIC_EMPTY), MUTED);
     for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
@@ -3081,6 +3187,50 @@ static void build_monitor(lv_obj_t *monitor) {
     box = card(monitor, T_SEC_SERVICES);
     monitor_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(monitor_info, 4, 0);
 }
+static void sound_changed(lv_event_t *event) {
+    unsigned channel = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (channel >= 3) return;
+    m3_feedback_settings_t p; m3_feedback_get(&p);
+    bool enabled = lv_obj_has_state(sound_switches[channel], LV_STATE_CHECKED);
+    unsigned volume = lv_slider_get_value(sound_sliders[channel]);
+    if (channel == 0) { p.boot_enabled = enabled; p.boot_volume = volume; }
+    else if (channel == 1) { p.effects_enabled = enabled; p.effects_volume = volume; }
+    else { p.guidance_enabled = enabled; p.guidance_volume = volume; }
+    m3_feedback_update(&p);
+    char value[16]; snprintf(value, sizeof(value), "%u%%", volume); set_text(sound_values[channel], value);
+}
+static void sound_preview(lv_event_t *event) {
+    unsigned channel = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    m3_feedback_clear();
+    m3_feedback_emit(channel == 0 ? M3_CUE_BOOT : channel == 1 ? M3_CUE_TAP : M3_CUE_READY, m3_i18n_language());
+}
+static void guidance_changed(lv_event_t *event) {
+    (void)event; m3_feedback_settings_t p; m3_feedback_get(&p);
+    p.guidance_mode = segment_value(guidance_mode); m3_feedback_update(&p);
+    m3_feedback_clear(); m3_feedback_emit(M3_CUE_ACCESSIBILITY, m3_i18n_language());
+}
+static void accessibility_open(lv_event_t *event) {
+    (void)event;
+    bool hidden = lv_obj_has_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+    if (hidden) {
+        lv_obj_remove_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_view(accessibility_panel, ui_animation());
+        m3_feedback_emit(M3_CUE_ACCESSIBILITY, m3_i18n_language());
+    } else lv_obj_add_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void sound_control(lv_obj_t *box, m3_text_t name, unsigned channel, bool enabled, unsigned volume) {
+    lv_obj_t *line = row(box); grow(text(line, name, TEXT));
+    sound_switches[channel] = lv_switch_create(line); lv_obj_set_size(sound_switches[channel], 60, 32);
+    if (enabled) lv_obj_add_state(sound_switches[channel], LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sound_switches[channel], sound_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)channel);
+    sound_values[channel] = label(box, "", CYAN);
+    char value[16]; snprintf(value, sizeof(value), "%u%%", volume); set_text(sound_values[channel], value);
+    sound_sliders[channel] = lv_slider_create(box); style_slider(sound_sliders[channel]);
+    lv_slider_set_range(sound_sliders[channel], 0, 100);
+    lv_slider_set_value(sound_sliders[channel], volume, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sound_sliders[channel], sound_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)channel);
+    button(box, LV_SYMBOL_PLAY, T_SOUND_PREVIEW, BTN_SECONDARY, sound_preview, (void *)(uintptr_t)channel);
+}
 static void settings_changed(lv_event_t *event) {
     unsigned kind = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     m3_preferences_t p; m3_preferences_get(&p);
@@ -3148,6 +3298,19 @@ static void build_settings(lv_obj_t *system) {
     box = card(system, T_SET_SOUND);
     volume_row(box, 5, p.volume);
     mute_switch = settings_switch(box, T_SET_MUTE, p.volume == 0, 3);
+    sound_card = box;
+    m3_feedback_settings_t sound; m3_feedback_get(&sound);
+    caption(box, T_SOUND_HINT);
+    sound_control(box, T_SOUND_BOOT, 0, sound.boot_enabled, sound.boot_volume);
+    sound_control(box, T_SOUND_EFFECTS, 1, sound.effects_enabled, sound.effects_volume);
+    sound_control(box, T_SOUND_GUIDANCE, 2, sound.guidance_enabled, sound.guidance_volume);
+    button(box, LV_SYMBOL_SETTINGS, T_ACCESSIBILITY, BTN_SECONDARY, accessibility_open, NULL);
+    accessibility_panel = card(system, T_ACCESSIBILITY);
+    static const m3_text_t guidance_options[] = {T_GUIDANCE_VOICE, T_GUIDANCE_TONES};
+    guidance_mode = segmented(accessibility_panel, guidance_options, NULL, 2, sound.guidance_mode, guidance_changed);
+    caption(accessibility_panel, T_GUIDANCE_HINT);
+    button(accessibility_panel, LV_SYMBOL_PLAY, T_SOUND_PREVIEW, BTN_SECONDARY, sound_preview, (void *)2);
+    lv_obj_add_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
     box = card(system, T_SET_PERFORMANCE);
     text(box, T_SET_FPS, TEXT); fps_value = label(box, "", CYAN);
     fps_slider = lv_slider_create(box); style_slider(fps_slider);
@@ -3166,9 +3329,9 @@ static void build_settings(lv_obj_t *system) {
     language_tabs = segmented(box, languages, NULL, M3_LANG_COUNT, m3_i18n_language(), language_changed);
     box = card(system, T_SEC_VOICE);
     m3_voice_state_t initial_voice; m3_voice_state(&initial_voice);
-    /* Index order matches m3_voice_set_provider(): 0 OpenAI mini-transcribe, 1 Gemini 3.1, 2 Gemini 3.5. */
-    static const char *const recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5"};
-    voice_provider = segmented(box, NULL, recognizers, 3, initial_voice.provider, voice_provider_changed);
+    /* Index order matches m3_voice_set_provider(): 0 OpenAI mini-transcribe, 1 Gemini 3.1, 2 Gemini 3.5, 3 Azure. */
+    static const char *const recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5", "Azure"};
+    voice_provider = segmented(box, NULL, recognizers, 4, initial_voice.provider, voice_provider_changed);
     caption(box, T_STT_HINT);
     voice_key = input_field(box, T_STT_KEY, 255, INPUT_TEXT, false);
     lv_textarea_set_password_mode(voice_key, true);
@@ -3262,12 +3425,33 @@ esp_err_t m3_ui_start(void) {
     lv_obj_add_flag(status_strip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(status_strip, shade_touch, LV_EVENT_ALL, NULL);
     status_clock = label(status_strip, "--:--", TEXT); lv_obj_set_pos(status_clock, 22, 13); lv_obj_set_width(status_clock, 80);
-    status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 150, 13); lv_obj_set_width(status, 230);
+    status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 108, 13); lv_obj_set_width(status, 150);
+    lv_label_set_long_mode(status, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
-    status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 392, 13);
+    status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 270, 13);
     lv_obj_set_width(status_audio, 20); lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 420, 8); lv_obj_set_size(signal, 44, 28);
+    lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 294, 8); lv_obj_set_size(signal, 44, 28);
     for (unsigned i = 0; i < 4; ++i) wifi_levels[i] = icon_part(signal, 8 + i * 8, 22 - (i + 1) * 5, 5, (i + 1) * 5, 2);
+    /* Vector plug and battery work with all language fonts; no emoji glyphs. */
+    power_plug = bare(status_strip); lv_obj_set_pos(power_plug, 342, 10); lv_obj_set_size(power_plug, 20, 26);
+    icon_part(power_plug, 4, 1, 3, 7, 1); icon_part(power_plug, 12, 1, 3, 7, 1);
+    icon_part(power_plug, 2, 8, 15, 9, 3); icon_part(power_plug, 8, 17, 3, 7, 1);
+    power_battery = bare(status_strip); lv_obj_set_pos(power_battery, 366, 13); lv_obj_set_size(power_battery, 33, 18);
+    lv_obj_t *outline = bare(power_battery); lv_obj_set_size(outline, 28, 18);
+    lv_obj_set_style_border_width(outline, 2, 0); lv_obj_set_style_border_color(outline, lv_color_hex(TEXT), 0);
+    lv_obj_set_style_border_opa(outline, LV_OPA_COVER, 0); lv_obj_set_style_radius(outline, 3, 0);
+    icon_part(power_battery, 29, 5, 3, 8, 1);
+    power_fill = icon_part(power_battery, 3, 3, 22, 12, 1);
+    power_charge = label(power_battery, LV_SYMBOL_CHARGE, CYAN);
+    lv_obj_set_style_text_font(power_charge, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(power_charge, 9, 1);
+    lv_obj_set_style_text_color(power_charge, lv_color_hex(0x08202b), 0);
+    lv_obj_set_style_bg_color(power_charge, lv_color_hex(CYAN), 0);
+    lv_obj_set_style_bg_opa(power_charge, LV_OPA_COVER, 0);
+    power_percent = label(status_strip, "--", MUTED); lv_obj_set_pos(power_percent, 404, 13);
+    lv_obj_set_style_text_font(power_percent, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(power_percent, 62); lv_obj_set_style_text_align(power_percent, LV_TEXT_ALIGN_RIGHT, 0);
+    update_power(&snapshot.power);
     /* App header: back control and title. */
     back_button = button(screen, LV_SYMBOL_LEFT, T_NONE, BTN_SECONDARY, go_home, NULL);
     lv_obj_set_pos(back_button, 16, 48); lv_obj_set_size(back_button, 44, 44);
@@ -3317,6 +3501,7 @@ esp_err_t m3_ui_start(void) {
     build_music(pages[APP_MUSIC], initial_audio.volume);
     build_gallery(pages[APP_GALLERY], initial_audio.volume);
     build_calculator(pages[APP_CALCULATOR]);
+    build_reader(pages[APP_READER]);
     radio_select(7);
     create_shade(screen);
     show_app(APP_HOME);

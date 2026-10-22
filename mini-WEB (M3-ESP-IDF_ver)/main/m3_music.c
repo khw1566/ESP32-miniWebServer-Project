@@ -36,7 +36,7 @@ static bool supported(const char *path) {
 }
 bool m3_music_path_valid(const char *path) {
     if (!path || !m3_utf8_valid(path) || strlen(path) >= sizeof(catalogs[0][0].path) || strstr(path, "..") || strstr(path, "//")) return false;
-    if (strncmp(path, SD_MEDIA_ROOT "/media/", strlen(SD_MEDIA_ROOT "/media/")) && strncmp(path, "/spiffs/", 8)) return false;
+    if (strncmp(path, SD_MEDIA_ROOT "/media/", strlen(SD_MEDIA_ROOT "/media/"))) return false;
     for (const char *p = path; *p; ++p) if ((unsigned char)*p < 32 || *p == 127 || *p == '\\') return false;
     return supported(path);
 }
@@ -83,9 +83,10 @@ void m3_music_poll(void) {
     const char *message = "Music catalog ready";
     portENTER_CRITICAL(&lock); state.scanning = true; ++state.revision; portEXIT_CRITICAL(&lock);
     if (audio.playing) { message = "Stop audio before changing the music catalog"; goto done; }
-    if (sd && !(locked = sd_media_admin_lock())) { message = "SD unavailable or busy"; goto done; }
+    if (!sd) { message = "File storage is SD only; select SD"; goto done; }
+    if (!(locked = sd_media_admin_lock())) { message = "SD unavailable or busy"; goto done; }
     unsigned count = 0, visited = 0, next = catalog_set ^ 1;
-    scan(sd ? SD_MEDIA_ROOT "/media" : "/spiffs", catalogs[next], &count, &visited, 0);
+    scan(SD_MEDIA_ROOT "/media", catalogs[next], &count, &visited, 0);
     qsort(catalogs[next], count, sizeof(track_t), compare_tracks);
     portENTER_CRITICAL(&lock);
     catalog_set = next; state.sd = sd; state.count = count; state.page = state.selected = 0;
@@ -226,7 +227,8 @@ void m3_music_run(const char *path, const m3_audio_output_t *out) {
     }
     portEXIT_CRITICAL(&lock);
     status("Loading music into PSRAM", true, 0, 0, 0); out->message("Loading local music...", true, 0);
-    if (sd && !(locked = sd_media_admin_lock())) { error = "SD unavailable or busy"; goto done; }
+    if (!sd) { error = "File storage is SD only; select SD"; goto done; }
+    if (!(locked = sd_media_admin_lock())) { error = "SD unavailable or busy"; goto done; }
     file = fopen(path, "rb");
     if (!file) goto done;
     file_buffer = heap_caps_malloc(64 * 1024, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

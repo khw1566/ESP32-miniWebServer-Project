@@ -1,0 +1,416 @@
+{
+  "ko/2.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "b65397d43d8d0dca697a5e5e356d21db6eeb3d0181a308502686485f3e74d10a",
+    "audio_sha256": "f648c99e13160c1e906eb330fb14c878615bfbd5b1c927bc7c75b3df3fe62bf1",
+    "text": "미니 웹서버가 준비되었습니다."
+  },
+  "ko/3.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "e348cd24bafafbc7ce0a3ec6accd351f2981eaa785b882f58650cd25dfbf64d1",
+    "audio_sha256": "de5f02ed3b79a3e36f4845727491196c0846f4737f71b2895d1000d58ca6ed01",
+    "text": "와이파이에 연결되었습니다."
+  },
+  "ko/4.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "25ba3fd14cdf46dc6f52082eb5e61c8ab4c85c68c7bbee9bfc74b8282ab58145",
+    "audio_sha256": "cddf4e3f9a92c5919d046bbb058284a6697d6b476a5cd20837d85598848da5b4",
+    "text": "와이파이 설정에서 연결해 주세요."
+  },
+  "ko/5.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "a0e5ad8b356e752fc371d90469bf40f89b3735496ccb84c7e7b5a67ccd62a1bf",
+    "audio_sha256": "65489f35c43c0aa29f19d1b8cc608c67f76a2297545b77ebc2c248e0631a77c5",
+    "text": "와이파이 연결에 실패했습니다. 설정을 확인해 주세요."
+  },
+  "ko/6.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "db89e8d81e16ca0e6840af39e2ab01be44148ceddb71514a335ac7ec51582d0a",
+    "audio_sha256": "faa06119baeaec176f7c4cc09ea8b413bfe76c7db9fdffffc318595b2be6fe6c",
+    "text": "설정을 저장했습니다."
+  },
+  "ko/7.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "7d7e5a966c97e704dd0ce63dc212b9da53dc5de76eae2db0c87a3ff3a15ccfcb",
+    "audio_sha256": "ce3c194c3b67bbcda3a7d2591d3892729f0bfb85c9e8a32a97c28d423852af0a",
+    "text": "확인한 뒤 다시 시도해 주세요."
+  },
+  "ko/8.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "5e0e7257a1290b61f72c331f8a712ab789ffc1698073c3bdddf1c3144a5809d5",
+    "audio_sha256": "f361d17f2c46bdc4a404a14a003de6ffcf3808a810502c21ed90cc131bfb4649",
+    "text": "접근성 설정입니다. 안내음성이나 효과음을 선택해 주세요."
+  },
+  "ko/9.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "99c7e3fdc5c8000a8befaab896d6c1ba5897b5a424c2a22dbf0e2726f2b67ad6",
+    "audio_sha256": "3cb5d44bf5140a3ebc1aa1a0169144f3aee05f0028ed6466ca08f1f361add9e4",
+    "text": "한국어 안내음성을 선택했습니다."
+  },
+  "ko/10.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "58c6ae3caf47f5199d27ef2234e870c451566ed09c768cf451520e83d52d9347",
+    "audio_sha256": "31b04a9b4afc050b664c23771b10388e7c9166e2198684fca6622bac6cf04997",
+    "text": "홈 화면입니다."
+  },
+  "ko/11.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "0f84912255b7f590a53d95377687a50e7ef48992bb0f2975556adf1b4c86fb87",
+    "audio_sha256": "da6a19ea5185ea7b5bedbe6ac91b59ddb00f0a1e98b9d17c9abae0c2b67cf4ee",
+    "text": "와이파이 설정입니다."
+  },
+  "ko/12.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "cf6abd5bb3cd2b65ba57c1c597bd66ef8ed394f9157933297559e17b0de01407",
+    "audio_sha256": "4c1008413b6296269e906efafff1326ad986c3453b77182932cf64509f06ab5f",
+    "text": "파일 목록입니다."
+  },
+  "ko/13.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "ab524b49df5208fed76cc2d2b2c839ce08b7d11a9eb79acddffea1412f4a73b8",
+    "audio_sha256": "84c155417aace817505d8738b0464701d108193360b64e2cd56889d4e735c758",
+    "text": "녹음기입니다."
+  },
+  "ko/14.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "22cceef3fee455afcaec1c0b5bf78f3a962acee4d92fb85da67e012489c75fc3",
+    "audio_sha256": "908bc834009042bf5ce162df462e743f4bd7a17b4ce7d361db08df2fee388c4a",
+    "text": "시스템 상태입니다."
+  },
+  "ko/15.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "8dd6616a81d80543aeafdb93d6162ecdca5919fcfe0b392ab901471e48fedf4c",
+    "audio_sha256": "c86d89c0c25663ffc5c318fee5c5d951d4fc48d3c38d7f39c6524353ca530f52",
+    "text": "설정입니다."
+  },
+  "ko/16.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "c1a44834e8c4beff61bbd50f0350597efd4cbe17e2e4ea7f264c680fafa4c07b",
+    "audio_sha256": "c5aea8e682638d136c0cab9c562d9522dc66e90f343b9174df48411b96c66a10",
+    "text": "라디오입니다."
+  },
+  "ko/17.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "ff8b592cb6416f67f0eb0ccee16fba07db5d5451049342e103f491302e8c65b0",
+    "audio_sha256": "5a41cbefc5ec3ff0926e54a9dc0275adbd0ce07aaaa159472b31779ecb06ddd9",
+    "text": "게임입니다."
+  },
+  "ko/18.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "6effc12728e1475bda6f6cc0b9eb606e9385a524ac98e48775ca6a7a34cd8cde",
+    "audio_sha256": "5ff04e279e581ade39a96357b9c531f7bfd982f6f954d77584765c3ef4ed3c7e",
+    "text": "음성합성입니다."
+  },
+  "ko/19.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "1209d97d2815d6b843dc68fe7ebf11f17679ec4ab376aae16ce16541f385308f",
+    "audio_sha256": "a82f65bb0197e1e74183bf11511f92512737f52dd88217c369e35505d392a6e2",
+    "text": "인공지능 도우미입니다."
+  },
+  "ko/20.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "fd95cec085e9cef080b074261e3b003dec76711b6f6294eb3c775abca51e22f3",
+    "audio_sha256": "0a4850a17699097adcdc389ef8b07b4116ffbe4a01a9c706663173e28966d852",
+    "text": "유튜브입니다."
+  },
+  "ko/21.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "3f6a221d614f3dc97686f3590a41382414368f4e62ebb97f2d58f76cc4d9cbc3",
+    "audio_sha256": "f61ff3c1ddc875cc26638ba145d595f9b066b9509565481d14fd3511fefc8eb7",
+    "text": "음악 재생기입니다."
+  },
+  "ko/22.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "1c8bf97cc4b47769853b01f37f80b81509424e0ee364b6471de5b01e83ab85d8",
+    "audio_sha256": "d195e8ad1b14d857d0ef588bba7b6a296018536efc3a152f2e7912a045ef0621",
+    "text": "갤러리입니다."
+  },
+  "ko/23.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "9c7a0a7973567a2cb31453bcf53daae8083086cb1e2705b42d85ab85f20427cd",
+    "audio_sha256": "e1143e2a65ff55ce1dcae0813d239aa74ed3268cbf85fff33c89a3cf7b083a2a",
+    "text": "계산기입니다."
+  },
+  "ko/24.wav": {
+    "voice": "ko-KR-Chirp3-HD-Aoede",
+    "request_sha256": "7aa8da807352dd64d6c9fa57d2962998337bf85c100adc32971fde4942a96fdd",
+    "audio_sha256": "d60a8fffa2cc97ed45e64222fa265748395b2fc22bffc21a2eee8749d5c23405",
+    "text": "유튜브 뮤직입니다."
+  },
+  "en/2.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "ac213a00804378cc00a3b1e432f550307228d24b9fad0703de91179c2679271e",
+    "audio_sha256": "b1242c21e965ebc7cdfeac36ead8fe487fdd27d7c678c575cb2497bacfbe5c25",
+    "text": "Mini WebServer is ready."
+  },
+  "en/3.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "cd29786ccd57adb99f321f7c02cd959393665670938116d8f4be43f73d42da20",
+    "audio_sha256": "618d82557d5d8caacabf9258023e2b3df2e8bcf0bbda7c53af9daacec8bab30b",
+    "text": "Wi-Fi connected."
+  },
+  "en/4.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "1aa1635721fc0cced3e4f7e75fb5dd678c602be37e04e0271667bce753748401",
+    "audio_sha256": "f2360b323a9c7c6d65cfe2c9203b2ecc414de97e0ddc13e3eb8bb7bf02752d9e",
+    "text": "Open Wi-Fi settings to connect."
+  },
+  "en/5.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "5672b68029d4d9ae961afd2fab62dd42bd0d747ef27ce3571f9846831a13433b",
+    "audio_sha256": "c0b12fc6e962ed6bff75ad6cec11a75fd94f27d5bf4fce6c77344a84c21cce8a",
+    "text": "Wi-Fi connection failed. Please check your settings."
+  },
+  "en/6.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "b604aaca0d3240a037964cd36219eb42d3d0adb3715f9726940b0d3fb333a0d5",
+    "audio_sha256": "dd285404f07384284fa7192be573ff3fa3a5e9be91ef122062b55fa67d7d2117",
+    "text": "Settings saved."
+  },
+  "en/7.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "81a4dafd00aa4af2a7e26adc9ed6fa3d00d0a209b1ceadbcc755ecce2a2cd040",
+    "audio_sha256": "d57c6efc5fff1ec7f91878dd591b8a3e14072b8bf74caae54de702721a88da35",
+    "text": "Please check and try again."
+  },
+  "en/8.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "20f521cb28d2d8309df9337923d6e6fa4c355cd471295161f712f24b5aaae3f9",
+    "audio_sha256": "18faa44063eeabc91097ca91f206d828e512ab7d45b393aa71887db116efcd97",
+    "text": "Accessibility. Choose voice guidance or sound cues."
+  },
+  "en/9.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "4bf0fff1992d7a823119131bd69f57d1635a9d5b97b6a0810e7e70fc18180830",
+    "audio_sha256": "f147dbfaf9fe88a5a048c25d3e8199d028aa035c7248fed17bf21439ab427aeb",
+    "text": "English voice guidance selected."
+  },
+  "en/10.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "eeb0f6386d5ea7e1c48ca0dc9abcf232f6c892c302ce55eee26634e84a5ede4f",
+    "audio_sha256": "c7926c34f4474fc535949c3487d73784d348f75753e6401942c7146df895fbea",
+    "text": "Home."
+  },
+  "en/11.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "2d51438a8f1ce2c97c75bd95344fec5161db5758f2732adc22186f8fc0ae7fb3",
+    "audio_sha256": "c7da82ba42c231d706d67f19455dc1c29c94daaa67c2c2d1e92b853b5074de59",
+    "text": "Wi-Fi settings."
+  },
+  "en/12.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "74a90462ac91edf3c832e0226f00138b45cc9f22c63f2c46aeaf0230c8ffc514",
+    "audio_sha256": "7928a89626380afcf49621d70b9e3b5e6a716a2e9657f3873dc76f0ad2e3b47e",
+    "text": "Files."
+  },
+  "en/13.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "81147d4b5493b637e8b7e43a4695049f7ca4c4fb53ba683a363f0c3efa4245ac",
+    "audio_sha256": "b47eebf935834147a27e931485c9a5e876270f0d36892b0a23078b6ad412feec",
+    "text": "Voice recorder."
+  },
+  "en/14.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "2544cd3c46661884224c1e49af77836621aafcded8e4d0a8902f6e0cda203580",
+    "audio_sha256": "a029b559fadaa46b02ba7e0df2a7fc310d5afe6301174055ade73ecafb6460c1",
+    "text": "System monitor."
+  },
+  "en/15.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "ee7708aea677ec800c1ec5d95e46bf4af2375ef73fa09ffa7b063bc7258ea9df",
+    "audio_sha256": "30fc895d5acae5a983d40f83aa5a7c10292b071936ca8d8a2910dc341671221b",
+    "text": "Settings."
+  },
+  "en/16.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "12148ab9a2f5c1bf2a9a8f68bde7ffdd41abd560c51ae51118ae7330d7762b90",
+    "audio_sha256": "a0398701018bf70c48ca197cb413294da5df17876bdb840855286cd01fb3c95e",
+    "text": "Radio."
+  },
+  "en/17.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "03db4ed550c568a804d3521cb2433428e33c0dca070aa2646d066832b574bb45",
+    "audio_sha256": "f1819e2be786579f05e20bd702c231994a5ad8adc72dc91b4539c8f3e4bec425",
+    "text": "Games."
+  },
+  "en/18.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "66483ffcf8547d764c915655faeeaf0c1cb3f13816ca0d693ee893300100c50c",
+    "audio_sha256": "31623e16134b512fac02aafcdc489b3f773a69e157594d38e5c9560611f40e6e",
+    "text": "Text to speech."
+  },
+  "en/19.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "6ef35215449a9fb7dfac0f409ff2919dab4448b557fac1040668bec617554798",
+    "audio_sha256": "453366632da488ed108474ef4eaa35baac07d12e9cc1001a3784d8039ee160f8",
+    "text": "AI assistant."
+  },
+  "en/20.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "d2c7b4da6210271bb6f370d275028e19f196c6bd64d9ce0f47475493e0b3acba",
+    "audio_sha256": "842486cda9480c3737098bae55b77cdb9f50e83063c2a03a81942a56d9b8c255",
+    "text": "YouTube."
+  },
+  "en/21.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "9e084fe00afc26b69e05e37e09c9ab4738c9e67ffb80c052ac03226dced9c6b5",
+    "audio_sha256": "f8b9bef9432ef1e14b774aba7979b467ad042dc6f5e62a1f4f5015c4e00226f6",
+    "text": "Music player."
+  },
+  "en/22.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "d56903b5a856c8e91aad290d033d01e0dcae032aef3d05ea4af6c4ba487ed53b",
+    "audio_sha256": "aec58849c4d7b487e2bada27ae2c6d7c6f4a503f377a06ccee3fb7898ec7ca02",
+    "text": "Gallery."
+  },
+  "en/23.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "1ef552e48a155e0db0499afac27b72c782fb4c9b5f9e955297272f051a5f6b63",
+    "audio_sha256": "875e0a6c9bd5e0386a15b73d29b180b5c5b1c83d1efdba2464be51c16ec16dfe",
+    "text": "Calculator."
+  },
+  "en/24.wav": {
+    "voice": "en-US-Chirp3-HD-Aoede",
+    "request_sha256": "1ba2c3f0b988516ffab4ae639791a39f7c897ebcfc828ed74ceed2c03e6f4909",
+    "audio_sha256": "84cc9316bf290f85d6092a6c86daf223d706da3903da6d99c1c23d55fbc3cefa",
+    "text": "YouTube Music."
+  },
+  "ja/2.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "98f0b066a02f3e766cbe48c00edf46cc9fed182d77a7c16230968a6d1f94b414",
+    "audio_sha256": "5fce7d42f6d6fa464704160c11ab0ed8c3265c2fab66dcadff83711b73ddc6b5",
+    "text": "ミニウェブサーバーの準備ができました。"
+  },
+  "ja/3.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "3ba5a8e6a5d08790a4ce50abda2ac138cd668dcb7d25f90157d21ccfa5d54e29",
+    "audio_sha256": "947317ba68b88f06e70635283a056f9d51927306b4a0c517df9dc7b26e3bea7d",
+    "text": "ワイファイに接続しました。"
+  },
+  "ja/4.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "cf3263708a0379b7ca84e6f20c42141d46f15859d54abe68f73fc30c4a9187a1",
+    "audio_sha256": "5a79828c27f1c3983a487545be305e75888ebd4190d1f4972c2e206506c80da4",
+    "text": "ワイファイ設定から接続してください。"
+  },
+  "ja/5.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "4e000287b54b34c7d717172eb70eb84780036acf52b9006299833dd409a52122",
+    "audio_sha256": "3d62d850eaa4b8885f5db8d584e28e4c02525789ea128b4d93a087335faf6510",
+    "text": "ワイファイに接続できませんでした。設定を確認してください。"
+  },
+  "ja/6.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "4d357917bf4bcec068fcc0e8183aa407380b058de8ed8d00a37267b6ca08c3c1",
+    "audio_sha256": "407c05b9b5dd06dcb12ce82a3d2e37e8af345f63228e4c876bc265db55bc5273",
+    "text": "設定を保存しました。"
+  },
+  "ja/7.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "805a9aaa6967252c21f00f5d039387b6131dea7df7fa7358ce44ef4bc1fa954a",
+    "audio_sha256": "bc58e1cd83b3063ab1da20813a640b84e9209e40f02aa38ccaa939fdceb281df",
+    "text": "確認して、もう一度お試しください。"
+  },
+  "ja/8.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "6fe17e1d7e2c8db9d86c72100ea2ad49862b4b7fc4e3afc764bdeb97f24262d8",
+    "audio_sha256": "707565638b52f5baa6f7acbefb43ad48392aa5154960f76d4de5d88185e58821",
+    "text": "アクセシビリティ設定です。音声案内か効果音を選んでください。"
+  },
+  "ja/9.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "50eabb34857fe9c32283ee21ce966c3e7da791c589bc514bfc2d2d621d27ac3e",
+    "audio_sha256": "369d4050c5bf1e19848a7afa8e7d47fb2653bc3ed98e68132b8143eb96779977",
+    "text": "日本語の音声案内を選択しました。"
+  },
+  "ja/10.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "bd95227a067873cb2be3fa792ac82ababced91cb65171d05c66c2ace2886fd14",
+    "audio_sha256": "98ba3c8b24a5fe7915e4b5817e8fcad700d711d331306ce5324a8c36aaab24f2",
+    "text": "ホーム画面です。"
+  },
+  "ja/11.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "4262cb21370d9716531223eedd2678b589469ca134e5e0266e74455973c1b036",
+    "audio_sha256": "cc551d5b4be2eff98b15d40a25d7d8f09a766154e3acd89201d0803f0cf27a80",
+    "text": "ワイファイ設定です。"
+  },
+  "ja/12.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "d38a8475720b4acc2a2baeb41966af1989b2b40854dd5488e214e761b7df0fd4",
+    "audio_sha256": "adf2d914400525faaaacfe43c8caef3cba6c1d089231c84c47e4b9784837cd7c",
+    "text": "ファイル一覧です。"
+  },
+  "ja/13.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "9d588ca8b6db1fce26c216805952a16771aeb52e905b098780591c42aa1fc9be",
+    "audio_sha256": "0bbc82277033ca4e3bd23af4dacf1e539445acb30fb09687c8fc1ce269daf5ee",
+    "text": "ボイスレコーダーです。"
+  },
+  "ja/14.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "e3ac8a10ed01ff240701406086b341ae2886be93c1e5a5f28f331aa3ad3031ae",
+    "audio_sha256": "f19ce612b6e60e4cce93e43fa2c982081febbb6e4df9064bb0e4d61266f3c358",
+    "text": "システムの状態です。"
+  },
+  "ja/15.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "a0ca88ef8eae7e1679c98bdccaac2e9152d6dd38816212e679af4bcbca8d3cf1",
+    "audio_sha256": "9852f9e54ab4e1f3e423d7855be0513d32b375121ad0d71e0133e2daae88b695",
+    "text": "設定です。"
+  },
+  "ja/16.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "31051bdfe8b54beb27505a3ecf89005a30dcb8d48007d434b209aa5bcb70f305",
+    "audio_sha256": "4f7208c3f5f2082dec72e07e2f3f517ff07eed3d6b2c7c06eb6f043ad5715974",
+    "text": "ラジオです。"
+  },
+  "ja/17.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "4cc4c15c2df572a520a20710e83bee939e3ff38100fd55d6ceb9fb0bea45f65f",
+    "audio_sha256": "1224ece3c4d585e3e46284fe5716fd2d3546787d2a4fd9b3873f84a95396e725",
+    "text": "ゲームです。"
+  },
+  "ja/18.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "94136611993d3a3f300d8d4805a83384aa45fef9aa28a2d1f36b0952f73cc657",
+    "audio_sha256": "4419fb8e7a939743207978da4b619ad94d1a9ba7cbcb467f98138f9b7bab620d",
+    "text": "音声合成です。"
+  },
+  "ja/19.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "1f573a00ec1f490f4f7b42f0097bf568440806c40689ef44f2899eb2f84dee0a",
+    "audio_sha256": "d996b9e6308d6f17ffa8684e043ce279be88dca23edf7feb3baf0a19da174a22",
+    "text": "人工知能アシスタントです。"
+  },
+  "ja/20.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "86ef3db203e8409f2de734aa3184a8233e80b2b2e5405867f198689a6bc7cb8f",
+    "audio_sha256": "50f68c33af26bf4432dc832c1f2de5fb7e0761c14ed43b361ba9c767832a0d71",
+    "text": "ユーチューブです。"
+  },
+  "ja/21.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "2b8c3b5a5f8806caa728ede365b0c04086ea68effc25bc5501f396b42348b0e2",
+    "audio_sha256": "63cebebf05915ae37c810b3e41e395f73fec97ced410a9ec1a360618f9ffacf2",
+    "text": "音楽プレーヤーです。"
+  },
+  "ja/22.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "e0cefb79c08e687c44a60380b43ebd81207dad077d3928ab8808bfef0e5b7a5c",
+    "audio_sha256": "54dad066f982d0dafa9ac706b866e80f182326b27473934e697954110cc8f581",
+    "text": "ギャラリーです。"
+  },
+  "ja/23.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "1a30e7638c83ab6b5f17a601f4b5bfe9f972eac830ed0af965f916b3fed45da3",
+    "audio_sha256": "e7629c15aa30c9e2dc9f16c565f16d8db1fd7e73c0564a74ecf5804efe6f74da",
+    "text": "電卓です。"
+  },
+  "ja/24.wav": {
+    "voice": "ja-JP-Chirp3-HD-Aoede",
+    "request_sha256": "f1e568e02c223b4a8e0800ab52f0d5218203308f4d4d3662ee0817d447f69b5e",
+    "audio_sha256": "d77171b2e2e668bf770078cb22672835f4493eb161bb1570c8aecf7087828e27",
+    "text": "ユーチューブミュージックです。"
+  }
+}

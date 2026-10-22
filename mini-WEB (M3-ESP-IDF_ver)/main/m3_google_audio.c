@@ -1,5 +1,6 @@
 #include "m3_google_audio.h"
 #include "m3_gemini_config.h"
+#include "m3_sd_settings.h"
 #include "m3_agent.h"
 #include "https_memory.h"
 #include "network_manager.h"
@@ -18,9 +19,9 @@
 #include <string.h>
 
 enum { TTS_RESPONSE_LIMIT = 2 * 1024 * 1024, STT_RESPONSE_LIMIT = 16384 };
-bool m3_openai_audio_ready(void) { return strlen(M3_OPENAI_API_KEY) >= 20; }
-bool m3_google_tts_ready(void) { return strlen(M3_GOOGLE_TTS_API_KEY) >= 20; }
-bool m3_google_stt_ready(void) { return strlen(M3_GEMINI_API_KEY) >= 20; }
+bool m3_openai_audio_ready(void) { return strlen(m3_sd_openai_key()) >= 20; }
+bool m3_google_tts_ready(void) { return strlen(m3_sd_google_tts_key()) >= 20; }
+bool m3_google_stt_ready(void) { return strlen(m3_sd_gemini_key()) >= 20; }
 /* Each call owns the TLS lease, and returns only after releasing it. No redirects
  * or response body logging: provider errors can contain request details. */
 static cJSON *request(const char *url, const char *key, cJSON *body, size_t limit,
@@ -135,7 +136,7 @@ void m3_google_tts_run(const char *text, const m3_audio_output_t *output) {
     cJSON_AddStringToObject(voice, "name", "ko-KR-Chirp3-HD-Aoede");
     cJSON_AddStringToObject(audio, "audioEncoding", "LINEAR16");
     cJSON_AddNumberToObject(audio, "sampleRateHertz", 24000);
-    reply = request("https://texttospeech.googleapis.com/v1/text:synthesize", M3_GOOGLE_TTS_API_KEY,
+    reply = request("https://texttospeech.googleapis.com/v1/text:synthesize", m3_sd_google_tts_key(),
                     body, TTS_RESPONSE_LIMIT, output_cancelled, (void *)output, &error, NULL, NULL);
     cJSON_Delete(body); body = NULL;
     cJSON *content = cJSON_GetObjectItemCaseSensitive(reply, "audioContent");
@@ -197,7 +198,7 @@ bool m3_google_transcribe(const unsigned char *wav, size_t bytes, unsigned model
     cJSON *generation = cJSON_AddObjectToObject(body, "generationConfig");
     cJSON_AddNumberToObject(generation, "temperature", 0); cJSON_AddNumberToObject(generation, "maxOutputTokens", 512);
     char url[160]; snprintf(url, sizeof(url), "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", m3_agent_model(model));
-    reply = request(url, M3_GEMINI_API_KEY, body, STT_RESPONSE_LIMIT, cancelled, context, error, NULL, NULL);
+    reply = request(url, m3_sd_gemini_key(), body, STT_RESPONSE_LIMIT, cancelled, context, error, NULL, NULL);
     if (!reply) goto done;
     cJSON *candidate = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(reply, "candidates"), 0);
     cJSON *content = cJSON_GetObjectItemCaseSensitive(candidate, "content");
@@ -233,7 +234,7 @@ void m3_openai_tts_run(const char *text, const m3_audio_output_t *output) {
     cJSON_AddStringToObject(body, "input", text);
     cJSON_AddStringToObject(body, "instructions", "Speak naturally and clearly in Korean. Read only the supplied text.");
     cJSON_AddStringToObject(body, "response_format", "pcm");
-    request("https://api.openai.com/v1/audio/speech", M3_OPENAI_API_KEY, body,
+    request("https://api.openai.com/v1/audio/speech", m3_sd_openai_key(), body,
             TTS_RESPONSE_LIMIT, output_cancelled, (void *)output, &error, &pcm, &bytes);
     if (!pcm) goto done;
     if (!bytes || bytes % 2) { error = "OpenAI returned invalid PCM16 audio"; goto done; }

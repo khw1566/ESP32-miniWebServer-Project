@@ -12,3 +12,17 @@ config MINI_WEB_PUBLIC_HOST
         Empty uses m1-<board MAC>.PUBLIC_DOMAIN. Configure the matching Worker
         domain before shipment. Device token comes from factory NVS, never Wi-Fi UI.
 endmenu
+
+menu "M1 speaker notifications"
+config M1_SYSTEM_SOUNDS
+    bool "Enable GPIO26 speaker notification melodies"
+    default y
+    help
+        ESP32-2432S028R onboard amplifier speaker connector (DAC GPIO26).
+        No SD card, audio files or network downloads are required.
+config M1_SOUND_ATTENUATION
+    int "DAC attenuation (0=loud, 1=-6dB, 2=-12dB, 3=-18dB)"
+    range 0 3
+    default 3
+    depends on M1_SYSTEM_SOUNDS
+endmenu

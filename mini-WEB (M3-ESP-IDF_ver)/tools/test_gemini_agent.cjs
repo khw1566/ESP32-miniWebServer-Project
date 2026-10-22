@@ -69,7 +69,7 @@ for(let capacity=1;capacity<15;capacity++){
 assert(source.includes('AGENT_MAX_ROUNDS = 3'));assert(source.includes('AGENT_MAX_TOOLS = 6'));
 assert(source.includes('cJSON_Duplicate(content, true)'),'preserve opaque Gemini thought signatures');
 assert(source.includes('cJSON_AddStringToObject(response, "id", id->valuestring)'));
-assert(source.includes('"functionResponse"'));assert(source.includes('"x-goog-api-key", M3_GEMINI_API_KEY'));
+assert(source.includes('"functionResponse"'));assert(source.includes('"x-goog-api-key", m3_sd_gemini_key()'));
 assert(source.includes('.disable_auto_redirect = true'));assert(source.includes('https_memory_exclusive_end()'));
 assert(source.includes('request.conversation != history_generation || request.model != history_model'));
 assert(ui.includes('models[] = {"Gemini 3.1 Flash-Lite", "Gemini 3.5 Flash-Lite"}'));assert(ui.includes('segment_value(agent_model)'));

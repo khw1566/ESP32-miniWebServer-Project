@@ -1,4 +1,5 @@
 #include "network_manager.h"
+#include "m1_sound.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -122,11 +123,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        bool was_connected = s_net_mode == NET_MODE_STA_CONNECTED;
         atomic_fetch_add(&s_diagnostic_disconnects, 1);
         if (event_data) atomic_store(&s_diagnostic_last_reason, ((wifi_event_sta_disconnected_t *)event_data)->reason);
         s_sta_link_up = false;
         /* Deliberate STA stop during SoftAP handover is not a connection failure. */
         if (!s_sta_connect_requested) return;
+        if (was_connected) m1_sound_play(M1_SOUND_WIFI_LOST);
         snprintf(s_current_ip, sizeof(s_current_ip), "0.0.0.0");
         s_net_mode = NET_MODE_STA_CONNECTING;
         wifi_event_sta_disconnected_t *dc = (wifi_event_sta_disconnected_t *)event_data;
@@ -139,6 +142,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             esp_wifi_connect();
         } else {
             if (!s_auto_retry) s_sta_connect_requested = false;
+            if (!s_auto_retry) m1_sound_play(M1_SOUND_WIFI_FAILED);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             ESP_LOGE(TAG, "연결 최종 실패. FAIL_BIT 설정.");
         }
@@ -149,7 +153,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         esp_ip4addr_ntoa(&event->ip_info.ip, s_current_ip, sizeof(s_current_ip));
         ESP_LOGI(TAG, "[EVT] IP 할당 완료: %s", s_current_ip);
         s_retry_num = 0;
+        bool newly_connected = s_net_mode != NET_MODE_STA_CONNECTED;
         s_net_mode = NET_MODE_STA_CONNECTED;
+        if (newly_connected) m1_sound_play(M1_SOUND_WIFI_CONNECTED);
         s_auto_retry = true;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
 
@@ -257,6 +263,7 @@ esp_err_t network_start_softap(void) {
 
     strncpy(s_current_ip, "192.168.4.1", sizeof(s_current_ip));
     s_net_mode = NET_MODE_AP_CAPTIVE;
+    m1_sound_play(M1_SOUND_AP_READY);
     ESP_LOGI(TAG, "SoftAP 시작. SSID: %s, IP: %s", SOFTAP_SSID_DEFAULT, s_current_ip);
     return ESP_OK;
 }

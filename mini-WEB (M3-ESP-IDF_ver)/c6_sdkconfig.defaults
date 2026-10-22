@@ -2,7 +2,10 @@
 CONFIG_IDF_TARGET="esp32c6"
 CONFIG_ESP_SDIO_HOST_INTERFACE=y
 CONFIG_ESP_SDIO_GPIO_RESET=-1
-CONFIG_ESP_SDIO_DEFAULT_SPEED=y
+# HIGH_SPEED also supports the current P4 20 MHz link. Install this C6 image
+# before opting into the P4 40 MHz performance profile.
+CONFIG_ESP_SDIO_HIGH_SPEED=y
+# CONFIG_ESP_SDIO_DEFAULT_SPEED is not set
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 # The BLE controller stays enabled (slave default) so the P4 can use BLE over
 # the same SDIO link; it is idle until the host enables it.

@@ -1,0 +1,30 @@
+[
+  {
+    "file": "c3.webp",
+    "original": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/_images/esp32-c3-devkitm-1-v1-isometric.png",
+    "credit": "Espressif / ESP32-C3-DevKitM-1",
+    "source": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitm-1/user_guide.html",
+    "sha256": "6dc23015fe18aeca817d2c8217c05aedfaa578469909012235e2b3d3536560c0"
+  },
+  {
+    "file": "s3.webp",
+    "original": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/_images/esp32-s3-devkitc-1-v1.1-isometric.png",
+    "credit": "Espressif / ESP32-S3-DevKitC-1",
+    "source": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/user_guide_v1.1.html",
+    "sha256": "fcfcb65ce2a05ce6b5c7ebe19a135bed99888b1245f0b737ae78655ec8f215ae"
+  },
+  {
+    "file": "m1.webp",
+    "original": "https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/assets/1562562/76c3d481-2523-4b6f-881c-2e29f9368cd0",
+    "credit": "Brian Lough / ESP32 Cheap Yellow Display (MIT)",
+    "source": "https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display",
+    "sha256": "da74b75eaff6fde5fcb57c3de187a3589dd0076df41c415720b859cf3a328481"
+  },
+  {
+    "file": "m3.webp",
+    "original": "https://www.guition.com/icms/upload/fb081940d6fc11f09850077a33e1404f/ckftpdata/images/202627/1770446376235/upload_8fd8d6a4acc3ab7389685041ada1cd61.webp",
+    "credit": "GUITION / JC4880P443C_I_W",
+    "source": "https://www.guition.com/model-selection",
+    "sha256": "23d7c841aedc109ca52e87a8fb8140e8a6ddc391e931786d11eaf89d90cfa00b"
+  }
+]

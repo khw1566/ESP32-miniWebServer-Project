@@ -26,7 +26,7 @@ async function run(){
  const first=c.saveAiKey(),second=c.saveAiKey();assert.equal(posts,1);assert(el('apiKeyInput').disabled);
  save.resolve(response({ok:true,configured:true}));assert(await first);assert(await second);
  oldStatus.resolve(response({ok:true,configured:false}));await refresh;
- assert(c.g_keyConfigured);assert.equal(el('apiKeyInput').value,'');assert(el('apiKeyStatus').textContent.includes('암호화'));assert(!el('apiKeyInput').disabled);
+ assert(c.g_keyConfigured);assert.equal(el('apiKeyInput').value,'');assert(el('apiKeyStatus').textContent.includes('SD JSON'));assert(!el('apiKeyInput').disabled);
  const failure=setup(async()=>response({ok:false,error:'NVS 기록 실패'},false));
  failure.el('apiKeyInput').value='example-key-123456';assert.equal(await failure.c.saveAiKey(),false);
  assert.equal(failure.el('apiKeyInput').value,'example-key-123456');assert.equal(failure.el('apiKeyStatus').textContent,'NVS 기록 실패');assert(!failure.el('saveKeyButton').disabled);

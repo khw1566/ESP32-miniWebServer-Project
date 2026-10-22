@@ -11,7 +11,7 @@ assert(engine.includes('bss -> extern_ram'));assert(engine.includes('common -> e
 assert(engine.includes('* (m3_espeak_psram)'));assert(!engine.includes('data -> extern_ram'),'initialized data is not blindly relocated');
 assert(read('components/espeak_ng/CMakeLists.txt').includes('LDFRAGMENTS "linker.lf"'));
 const ui=read('main/m3_ui.c'),agent=read('main/m3_agent.c'),tube=read('main/m3_tube.c'),radio=read('main/m3_radio.c');
-for(const item of ['m3_runtime_state_t snapshot','binding_t bindings[256]','lv_buttonmatrix_ctrl_t key_controls[8][64]',
+for(const item of ['m3_runtime_state_t snapshot','binding_t bindings[320]','lv_buttonmatrix_ctrl_t key_controls[8][64]',
  'm3_tube_list_t tube_list','m3_agent_state_t agent','m3_voice_state_t voice'])assert(ui.includes('static M3_PSRAM_BSS '+item),item);
 assert(agent.includes('static M3_PSRAM_BSS char history_user[2][385], history_answer[2][1537]'));
 assert(tube.includes('static M3_PSRAM_BSS m3_tube_list_t list'));

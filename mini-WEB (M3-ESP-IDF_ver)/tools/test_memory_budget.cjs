@@ -60,7 +60,7 @@ for(const ch of payload){if(quoted){if(escaped)escaped=false;else if(ch==='\\')e
 assert(nodes<=384,`complete AI tool schema needs ${nodes} structural slots`);
 for(const config of ['../sdkconfig.defaults']){
  const content=fs.readFileSync(path.resolve(__dirname,config),'utf8');
- assert(content.includes('CONFIG_SPIRAM_MODE_HEX=y'));assert(content.includes('CONFIG_SPIRAM_USE_MALLOC=y'));assert(content.includes('CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048'));
+ assert(content.includes('CONFIG_SPIRAM_MODE_HEX=y'));assert(content.includes('CONFIG_SPIRAM_USE_MALLOC=y'));assert(content.includes('CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=8192'));
  assert(content.includes('CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384'));
 }
 console.log('Memory policy: exclusive admission, relay yield, timeout/retry and tick wrap passed.');

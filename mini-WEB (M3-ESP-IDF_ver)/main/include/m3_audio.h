@@ -15,9 +15,11 @@ bool m3_audio_record(void);
 bool m3_audio_recording_play(const char *filename);
 bool m3_audio_mp4(const char *relative, unsigned gallery_job);
 bool m3_audio_radio(const char *url, bool aac);
+bool m3_audio_radio_preset(const char *station, unsigned profile); /* 0:32k mono, 1:64k mono, 2:128k stereo. */
 bool m3_audio_tts(const char *text, unsigned speed);
 bool m3_audio_cloud_tts(const char *text);
 void m3_audio_tts_provider(unsigned provider);
+unsigned m3_audio_tts_selected(void);
 bool m3_audio_speak(const char *text, unsigned speed);
 bool m3_audio_voice(void);
 void m3_audio_stop(void);

@@ -17,6 +17,8 @@
 *.elf
 *.map
 .env
+**/.private/
+/.local-pull-backups/
 **/m3_gemini_private.h
 .env.*
 !.env.example
@@ -46,3 +48,8 @@
 /mini-WEB (M3-ESP-IDF_ver)/results/
 /mini-WEB (M3-ESP-IDF_ver)/sdkconfig
 /mini-WEB (M3-ESP-IDF_ver)/tools/ui_sim/*_preview.png
+
+**/m3_azure_private.h
+
+# Publish the supplied CAD archive; private SD settings remain excluded.
+!/CAD Models/M3_v3-20261018T132920Z-1-001.zip
