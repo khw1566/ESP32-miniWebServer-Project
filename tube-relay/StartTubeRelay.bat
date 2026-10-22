@@ -1,4 +1,8 @@
 @echo off
+if exist "%~dp0M3TubeRelay.exe" (
+    start "" "%~dp0M3TubeRelay.exe"
+    exit /b 0
+)
 rem M3 YouTube relay launcher: relay server (server.mjs) + Cloudflare Tunnel (start.ps1).
 rem Close this window or press Ctrl+C to stop both.
 chcp 65001 >nul

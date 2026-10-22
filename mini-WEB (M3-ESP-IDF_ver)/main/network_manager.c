@@ -1,5 +1,6 @@
 #include "network_manager.h"
 #include "m3_c6_update.h"
+#include "m3_wifi_performance.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -172,6 +173,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 // 초기화
 // -------------------------------------------------------------
 esp_err_t network_init(void) {
+    ESP_RETURN_ON_ERROR(m3_wifi_performance_init(),TAG,"Wi-Fi performance lock");
     s_wifi_event_group = xEventGroupCreate();
     if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
@@ -367,8 +369,11 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
 }
 
 // -------------------------------------------------------------
-// NVS: Wi-Fi 자격증명 저장
+// M3: SD JSON Wi-Fi configuration (shared NVS backend is bypassed)
 // -------------------------------------------------------------
+#include "m3_sd_settings.h"
+#define NETWORK_SETTINGS_LOAD_HOOK m3_sd_wifi_load
+#define NETWORK_SETTINGS_SAVE_HOOK m3_sd_wifi_store
 #include "network_settings.inc"
 
 esp_err_t network_get_ip_str(char *out_ip, size_t ip_len) {

@@ -2,6 +2,14 @@
 
 개발 지침: [AGENTS.md](AGENTS.md) · [최적화·PSRAM·PC 시뮬레이터 검증 절차](docs/OPTIMIZATION_AND_VALIDATION.md).
 
+홈 배경·3×3 앱·상단 CPU 그래프·공개 Wi-Fi 즉시 연결·라디오 음질 중계:
+[변경 내용과 적용 절차](docs/HOME_AND_RADIO.md).
+
+갤러리: [이미지·동영상 격자와 첫 프레임 미리보기](docs/GALLERY_GRID.md).
+서비스 웹: [SD `Main WebFlie` 폴더의 부팅 시 PSRAM 적재](docs/MAIN_WEB_PSRAM.md).
+
+소리·접근성: [부팅 멜로디, 개별 음량과 3개 언어 안내음성 설치](docs/SYSTEM_SOUNDS.md).
+
 사용자가 제공한 GUITION 4.3인치 480×800 IPS 정전식 터치 제품 사진과 사양에 맞춰 **JC4880P443C_I_W** 배선 프로파일로 작성한 ESP-IDF 5.5.5 펌웨어입니다. ESP32-P4 + C6, 32MB PSRAM, 16MB Flash를 대상으로 합니다. 사진만으로 PCB revision까지 확정할 수 없으므로 첫 설치 전 뒷면 모델명과 배선을 확인하세요. 다른 화면 모듈에 이 프로파일을 그대로 사용하지 마세요.
 
 소스와 호스트 테스트 단계입니다. 프로젝트 규칙에 따라 에이전트는 ESP-IDF 빌드·업로드를 실행하지 않았으며 실기기 동작·FPS·장시간 안정성은 검증하지 않았습니다.
@@ -234,3 +242,15 @@ PSRAM 추가 활용: 일반 할당 threshold 0, TLS 외부 힙, eSpeak BSS와 UI
 설치·앱 API·제한·검증 범위는 [SD 앱 안내](docs/SD_APPS.md)를 참고하세요.
 
 [스마트폰형 앱 사용·지원 포맷·녹음 복구](docs/PHONE_APPS.md)
+
+## 텍스트 리더
+
+홈의 텍스트 리더 또는 파일 앱에서 SD카드의 UTF-8 TXT·MD·LOG를 열 수 있습니다.
+스와이프/가장자리 탭, 읽던 위치 복원, 글자 크기·간격·여백·화면 테마·배경 설정을
+지원합니다. 사용법과 지원 범위는 [텍스트 리더 안내](docs/TEXT_READER.md)를 참고하세요.
+
+유튜브 뮤직의 현재·다음 곡 PSRAM 캐시, SD 저장, 자동 다음 곡과 앱별 새로고침 아이콘: [설명](docs/YOUTUBE_MUSIC_CACHE.md).
+
+## SD 전용 관리자 파일 관리
+
+P4 계열 사용자 파일은 SD카드에만 저장합니다. 추가·UTF-8 내용 편집·교체·삭제·다운로드는 [SD_ADMIN.md](SD_ADMIN.md)를 참고하세요. 펌웨어·OTA·NVS는 플래시를 유지합니다.

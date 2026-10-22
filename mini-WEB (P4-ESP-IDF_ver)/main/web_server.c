@@ -15,7 +15,7 @@
 #include "esp_flash.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-#include "esp_spiffs.h"
+#include "storage_view.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -43,41 +43,18 @@ static const char *TAG = "WEB_SVR";
 static httpd_handle_t s_server = NULL;
 static atomic_bool s_server_running;
 bool web_server_is_running(void) { return atomic_load(&s_server_running); }
-#define STORAGE_BASE_PATH "/spiffs"
+#define STORAGE_BASE_PATH SD_MEDIA_ROOT
 static void agent_recover_files(void);
+static void sd_admin_recover_folder(const char *path);
 
-static void web_factory_seed(bool force);
+
 esp_err_t web_server_storage_init(void) {
-  esp_vfs_spiffs_conf_t conf = {
-      .base_path = STORAGE_BASE_PATH,
-      .partition_label =
-          "littlefs", // Storage capacity comes from the board partition table.
-      .max_files = 6,
-      .format_if_mount_failed = true};
-
-  esp_err_t ret = esp_vfs_spiffs_register(&conf);
-  if (ret != ESP_OK) {
-    if (ret == ESP_FAIL) {
-      ESP_LOGE(TAG, "Failed to mount or format filesystem");
-    } else if (ret == ESP_ERR_NOT_FOUND) {
-      ESP_LOGE(TAG, "Failed to find SPIFFS partition");
-    } else {
-      ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
-    }
-    return ret;
-  }
-
+  if (!sd_media_ready()) return ESP_ERR_INVALID_STATE;
+  if (!sd_media_admin_lock()) return ESP_ERR_INVALID_STATE;
   agent_recover_files();
-  size_t total = 0, used = 0;
-  ret = esp_spiffs_info(conf.partition_label, &total, &used);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)",
-             esp_err_to_name(ret));
-  } else {
-    ESP_LOGI(TAG, "SPIFFS Partition size: total: %d KB, used: %d KB",
-             (int)(total / 1024), (int)(used / 1024));
-  }
-  web_factory_seed(false);
+  sd_admin_recover_folder("/");
+  sd_media_admin_unlock();
+  ESP_LOGI(TAG, "File storage: SD only");
   return ESP_OK;
 }
 
@@ -136,36 +113,7 @@ esp_err_t web_server_log_init(void) {
 
 #include "web_ai_security.inc"
 
-/* First boot: the product home page becomes the editable /spiffs/index.html.
- * Deleting or replacing it is remembered (NVS flag); a storage reset brings
- * it back. Generated from sites/p4-webserver/dist by tools/embed_p4_home.cjs. */
-static void web_factory_seed(bool force) {
-  nvs_handle_t h;
-  uint8_t seeded = 0;
-  if (!force && nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-    nvs_get_u8(h, "factory_seed", &seeded);
-    nvs_close(h);
-  }
-  if (seeded) return;
-  const char *path = STORAGE_BASE_PATH "/index.html";
-  struct stat st;
-  if (force || stat(path, &st) != 0) {
-    FILE *f = fopen(path, "wb");
-    size_t written = f ? fwrite(FACTORY_INDEX_HTML, 1, FACTORY_INDEX_HTML_LEN, f) : 0;
-    if (f) fclose(f);
-    if (written != FACTORY_INDEX_HTML_LEN) {
-      unlink(path);
-      ESP_LOGW(TAG, "Factory home page could not be written");
-      return;
-    }
-    ESP_LOGI(TAG, "Factory home page installed (%u bytes)", (unsigned)written);
-  }
-  if (nvs_open(NVS_SETTINGS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-    nvs_set_u8(h, "factory_seed", 1);
-    nvs_commit(h);
-    nvs_close(h);
-  }
-}
+
 
 static int get_initial_view_mode(void) {
   int mode = 0; // 0: 도움말/가이드 화면(기본값), 1: 메인 쇼케이스(HTML_MAIN),
@@ -229,7 +177,7 @@ static esp_err_t set_initial_page(const char *page) {
 
 static bool is_valid_initial_page(const char *page) {
   if (!page || page[0] != '/' || strlen(page) < 6 || strlen(page) >= 128 ||
-      strstr(page, "..") != NULL) {
+      strstr(page, "..") != NULL || strstr(page,"/.") != NULL) {
     return false;
   }
 
@@ -588,13 +536,8 @@ static esp_err_t api_system_get_handler(httpd_req_t *req) {
 
   uint32_t flash_total = 0;
   size_t disk_total = 0, disk_used = 0;
-  bool storage_valid = esp_flash_get_size(NULL, &flash_total) == ESP_OK &&
-                       esp_spiffs_info("littlefs", &disk_total, &disk_used) == ESP_OK &&
-                       flash_total >= disk_total && disk_total >= disk_used;
-  if (!storage_valid) {
-    flash_total = 0;
-    disk_total = disk_used = 0;
-  }
+  bool storage_valid = false; /* Flash is firmware/settings storage only. */
+  esp_flash_get_size(NULL, &flash_total);
 
   char product_url[96] = {0};
   network_get_mdns_url(product_url, sizeof(product_url));
@@ -701,152 +644,15 @@ static esp_err_t api_qr_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t api_files_get_handler(httpd_req_t *req) {
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-
-  size_t total_bytes = 0, used_bytes = 0;
-  if (esp_spiffs_info("littlefs", &total_bytes, &used_bytes) != ESP_OK) return httpd_resp_send_500(req);
-
-  DIR *dir = opendir(STORAGE_BASE_PATH);
-  if (!dir) {
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  if (httpd_resp_sendstr_chunk(req, "{\"total\":") != ESP_OK) { closedir(dir); return ESP_FAIL; }
-  char num_buf[96];
-  snprintf(num_buf, sizeof(num_buf), "%u,\"used\":%u,\"max_name_bytes\":%u,\"files\":[",
-           (unsigned int)total_bytes, (unsigned int)used_bytes,
-           (unsigned int)(CONFIG_SPIFFS_OBJ_NAME_LEN - 2));
-  if (httpd_resp_sendstr_chunk(req, num_buf) != ESP_OK) { closedir(dir); return ESP_FAIL; }
-
-  struct dirent *ent;
-  bool first = true;
-  while ((ent = readdir(dir)) != NULL) {
-    if (ent->d_name[0] == '.' || strstr(ent->d_name, ".aibak")) continue;
-    if (ent->d_type == DT_REG || ent->d_type == DT_UNKNOWN) {
-      char filepath[280];
-      snprintf(filepath, sizeof(filepath), "%s/%s", STORAGE_BASE_PATH,
-               ent->d_name);
-      struct stat st;
-      size_t fsize = 0;
-      if (stat(filepath, &st) == 0) {
-        fsize = st.st_size;
-      }
-
-      cJSON *entry = cJSON_CreateObject();
-      if (!entry) { closedir(dir); return ESP_FAIL; }
-      cJSON_AddStringToObject(entry, "name", ent->d_name);
-      cJSON_AddNumberToObject(entry, "size", fsize);
-      int64_t modified = file_date_read(ent->d_name);
-      if (modified) cJSON_AddNumberToObject(entry, "modified_at", (double)modified);
-      else cJSON_AddNullToObject(entry, "modified_at");
-      char *item = cJSON_PrintUnformatted(entry); cJSON_Delete(entry);
-      if (!item) { closedir(dir); return ESP_FAIL; }
-      esp_err_t sent = first ? ESP_OK : httpd_resp_sendstr_chunk(req, ",");
-      if (sent == ESP_OK) sent = httpd_resp_sendstr_chunk(req, item);
-      free(item);
-      if (sent != ESP_OK) { closedir(dir); return sent; }
-      first = false;
-    }
-  }
-  closedir(dir);
-
-  esp_err_t result = httpd_resp_sendstr_chunk(req, "]}");
-  if (result != ESP_OK) return result;
-  return httpd_resp_sendstr_chunk(req, NULL);
+  httpd_resp_set_status(req,"410 Gone");
+  httpd_resp_set_hdr(req,"Cache-Control","no-store");
+  return httpd_resp_sendstr(req,"P4 file storage is SD only; use /api/sd/files");
 }
 
 static esp_err_t api_upload_post_handler(httpd_req_t *req) {
-  char filename[128] = {0};
-  if (httpd_req_get_hdr_value_str(req, "X-Filename", filename, sizeof(filename)) != ESP_OK) {
-    char query[512] = {0}, encoded[384] = {0};
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
-        httpd_query_key_value(query, "filename", encoded, sizeof(encoded)) != ESP_OK)
-      return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or oversized filename");
-    if (!decode_file_url(filename, sizeof(filename), encoded, true))
-      return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename encoding or length");
-  }
-  if (strlen(filename) > CONFIG_SPIFFS_OBJ_NAME_LEN - 2)
-    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Filename exceeds storage limit");
-  for (const unsigned char *c = (const unsigned char *)filename; *c; ++c)
-    if (*c < 32 || *c == 127 || *c == '\\') return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
-  if (strlen(filename) == 0) {
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_sendstr(req, "Missing filename");
-    return ESP_FAIL;
-  }
-
-  // 파일명 보안 검증 (/ 또는 .. 차단)
-  if (strchr(filename, '/') != NULL || strstr(filename, "..") != NULL ||
-      filename[0] == '.' || strstr(filename, ".aibak") != NULL) {
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_sendstr(req, "Invalid filename");
-    return ESP_FAIL;
-  }
-
-  char filepath[280];
-  snprintf(filepath, sizeof(filepath), "%s/%s", STORAGE_BASE_PATH, filename);
-
-  size_t total_bytes = 0, used_bytes = 0;
-  if (esp_spiffs_info("littlefs", &total_bytes, &used_bytes) != ESP_OK)
-    return httpd_resp_send_500(req);
-  struct stat previous;
-  size_t old_size = stat(filepath, &previous) == 0 ? (size_t)previous.st_size : 0;
-  size_t free_bytes = total_bytes > used_bytes ? total_bytes - used_bytes : 0;
-  if ((size_t)req->content_len > free_bytes + old_size) {
-    httpd_resp_set_status(req, "507 Insufficient Storage");
-    return httpd_resp_sendstr(req, "Not enough storage; reduce files or use cloud media");
-  }
-
-  FILE *f = fopen(filepath, "wb");
-  if (!f) {
-    ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  char buf[1024];
-  int remaining = req->content_len;
-  unsigned int receive_timeouts = 0;
-  while (remaining > 0) {
-    int to_read = MIN(remaining, sizeof(buf));
-    int received = httpd_req_recv(req, buf, to_read);
-    if (received <= 0) {
-      if (received == HTTPD_SOCK_ERR_TIMEOUT && ++receive_timeouts < 3) {
-        continue;
-      }
-      ESP_LOGE(TAG, "Upload receive failed");
-      fclose(f);
-      unlink(filepath);
-      file_date_remove(filename);
-      httpd_resp_send_500(req);
-      return ESP_FAIL;
-    }
-    receive_timeouts = 0;
-    if (fwrite(buf, 1, received, f) != received) {
-      ESP_LOGE(TAG, "File write failed (disk full?)");
-      fclose(f);
-      unlink(filepath);
-      file_date_remove(filename);
-      httpd_resp_set_status(req, "507 Insufficient Storage");
-      httpd_resp_sendstr(req, "Disk full or write error");
-      return ESP_FAIL;
-    }
-    remaining -= received;
-  }
-  if (fclose(f) != 0) {
-    unlink(filepath); file_date_remove(filename);
-    httpd_resp_set_status(req, "507 Insufficient Storage");
-    return httpd_resp_sendstr(req, "File flush failed");
-  }
-  file_date_write(filename, file_date_request(req));
-
-  ESP_LOGI(TAG, "File uploaded successfully: %s (%d bytes)", filepath,
-           req->content_len);
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
-  return ESP_OK;
+  httpd_resp_set_status(req,"410 Gone");
+  httpd_resp_set_hdr(req,"Cache-Control","no-store");
+  return httpd_resp_sendstr(req,"P4 file storage is SD only; use /api/sd/files");
 }
 
 static void ota_reboot_task(void *pvParameter) {
@@ -938,45 +744,9 @@ static esp_err_t api_ota_post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t api_delete_post_handler(httpd_req_t *req) {
-  char filename[128] = {0};
-
-  char query[512] = {0}, encoded[384] = {0};
-  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-      httpd_query_key_value(query, "filename", encoded, sizeof(encoded)) == ESP_OK) {
-    if (!decode_file_url(filename, sizeof(filename), encoded, true))
-      return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename encoding");
-  }
-
-  if (strlen(filename) == 0 && req->content_len > 0 &&
-      req->content_len < sizeof(filename)) {
-    int ret = httpd_req_recv(req, filename, req->content_len);
-    if (ret > 0) {
-      filename[ret] = '\0';
-    }
-  }
-
-  if (strlen(filename) == 0 || strchr(filename, '/') != NULL ||
-      strstr(filename, "..") != NULL || strchr(filename, '\\') != NULL) {
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_sendstr(req, "Invalid filename");
-    return ESP_FAIL;
-  }
-
-  char filepath[280];
-  snprintf(filepath, sizeof(filepath), "%s/%s", STORAGE_BASE_PATH, filename);
-
-  if (unlink(filepath) == 0) {
-    file_date_remove(filename);
-    ESP_LOGI(TAG, "File deleted: %s", filepath);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
-    return ESP_OK;
-  } else {
-    ESP_LOGE(TAG, "Failed to delete: %s", filepath);
-    httpd_resp_set_status(req, "404 Not Found");
-    httpd_resp_sendstr(req, "File not found or delete failed");
-    return ESP_FAIL;
-  }
+  httpd_resp_set_status(req,"410 Gone");
+  httpd_resp_set_hdr(req,"Cache-Control","no-store");
+  return httpd_resp_sendstr(req,"P4 file storage is SD only; use /api/sd/files");
 }
 
 static esp_err_t api_ipv6_retry_post_handler(httpd_req_t *req) {
@@ -990,24 +760,9 @@ static esp_err_t api_ipv6_retry_post_handler(httpd_req_t *req) {
 
 /* Download from SPIFFS directly, even when an SD file has the same name. */
 static esp_err_t api_file_download_handler(httpd_req_t *req) {
-  char query[384], encoded[384], name[128], full[280];
-  if (httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK ||
-      httpd_query_key_value(query,"filename",encoded,sizeof(encoded))!=ESP_OK ||
-      !decode_file_url(name,sizeof(name),encoded,true) || !name[0] || name[0]=='.' ||
-      strchr(name,'/') || strchr(name,'\\') || strstr(name,".."))
-    return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid filename");
-  snprintf(full,sizeof(full),"%s/%s",STORAGE_BASE_PATH,name);
-  FILE *file=fopen(full,"rb");
-  if(!file) return httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"File not found");
-  httpd_resp_set_type(req,"application/octet-stream");
-  httpd_resp_set_hdr(req,"Content-Disposition","attachment");
+  httpd_resp_set_status(req,"410 Gone");
   httpd_resp_set_hdr(req,"Cache-Control","no-store");
-  httpd_resp_set_hdr(req,"X-Content-Type-Options","nosniff");
-  char buffer[1024];size_t n;esp_err_t result=ESP_OK;
-  while(result==ESP_OK && (n=fread(buffer,1,sizeof(buffer),file))>0) result=httpd_resp_send_chunk(req,buffer,n);
-  if(ferror(file)) result=ESP_FAIL;
-  fclose(file);
-  return result==ESP_OK?httpd_resp_sendstr_chunk(req,NULL):result;
+  return httpd_resp_sendstr(req,"P4 file storage is SD only; use /api/sd/files");
 }
 
 static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
@@ -1022,7 +777,9 @@ static esp_err_t spiffs_file_get_handler(httpd_req_t *req) {
   if (!decode_file_url(clean_name, sizeof(clean_name), encoded, false))
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path encoding");
 
-  if (strstr(clean_name, "..") != NULL) {
+  if (strstr(clean_name, "..") != NULL || strstr(clean_name,"/.") ||
+      strstr(clean_name,"//") || strstr(clean_name,"/ ") || strstr(clean_name," /") || strstr(clean_name,"./") || strchr(clean_name,'~') || strpbrk(clean_name,"\\:*?\"<>|") ||
+      (clean_name[0] && (clean_name[strlen(clean_name)-1]=='.' || clean_name[strlen(clean_name)-1]==' '))) {
     httpd_resp_set_status(req, "403 Forbidden");
     httpd_resp_sendstr(req, "Forbidden");
     return ESP_FAIL;
@@ -1197,9 +954,9 @@ static esp_err_t api_settings_post_handler(httpd_req_t *req) {
     if (reset_err == ESP_OK) reset_err = set_admin_password(DEFAULT_ADMIN_PW, pw_input);
     if (reset_err == ESP_OK) reset_err = set_initial_view_mode(0);
     if (reset_err == ESP_OK) reset_err = set_initial_page("");
-    if (reset_err == ESP_OK) reset_err = esp_spiffs_format("littlefs");
+    /* Reset settings only; preserve all SD files. */
     if (reset_err == ESP_OK) reset_err = file_dates_clear();
-    if (reset_err == ESP_OK) web_factory_seed(true);
+
     if (reset_err != ESP_OK) {
       ESP_LOGE(TAG, "Storage/default restore failed: %s", esp_err_to_name(reset_err));
       httpd_resp_set_status(req, "500 Internal Server Error");
@@ -1441,6 +1198,7 @@ esp_err_t web_server_start(void) {
     const httpd_uri_t sd_routes[] = {
       {.uri="/api/sd/files", .method=HTTP_GET, .handler=sd_admin_get},
       {.uri="/api/sd/files", .method=HTTP_POST, .handler=sd_admin_upload},
+      {.uri="/api/sd/files", .method=HTTP_PUT, .handler=sd_admin_upload},
       {.uri="/api/sd/files", .method=HTTP_DELETE, .handler=sd_admin_delete}
     };
     for (unsigned i=0;i<sizeof(sd_routes)/sizeof(sd_routes[0]);++i) {

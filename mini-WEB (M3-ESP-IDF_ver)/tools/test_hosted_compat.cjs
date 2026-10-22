@@ -22,13 +22,13 @@ project(hosted_v2_fixture LANGUAGES NONE)
   const run = () => spawnSync('cmake', ['-S', dir, '-B', path.join(dir, 'configured')], {encoding: 'utf8'});
   let result = run(); assert.equal(result.status, 0, result.stdout + result.stderr);
   if (!existing) { assert(!fs.existsSync(path.join(dir, 'sdkconfig'))); return; }
-  const config = fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8');
+  const config = fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8').replace(/\r\n/g, '\n');
   for (const line of ['CONFIG_UNRELATED_USER_CHOICE=17\n', 'CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y\n',
     '# CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW is not set\n', 'CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54\n',
     '# CONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW is not set\n']) assert(config.includes(line), line);
   assert(!/\nCONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y/.test(config));
   result = run(); assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8'), config, 'migration is idempotent');
+  assert.equal(fs.readFileSync(path.join(dir, 'sdkconfig'), 'utf8').replace(/\r\n/g, '\n'), config, 'migration is idempotent');
 }
 fixture('saved-config', true);
 fixture('new-config', false);

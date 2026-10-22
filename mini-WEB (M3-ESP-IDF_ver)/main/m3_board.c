@@ -16,6 +16,7 @@
 #endif
 
 static const char *TAG = "M3_BOARD";
+#include "m3_power.h"
 static i2c_master_bus_handle_t bus;
 static lv_display_t *display;
 static bool touch_ready;
@@ -152,5 +153,6 @@ esp_err_t m3_board_init(void) {
         backlight_pwm_ready = false;
         ESP_LOGW(TAG, "Backlight PWM unavailable; retaining full brightness");
     }
+    m3_power_init(); /* Read-only diagnostic before service/audio workers. */
     return ESP_OK;
 }

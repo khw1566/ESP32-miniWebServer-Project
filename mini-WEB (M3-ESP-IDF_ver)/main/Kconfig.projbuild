@@ -1,4 +1,12 @@
 menu "Mini WebServer M3"
+    config M3_WEB_ASSET_LIMIT_KB
+        int "PSRAM budget for SD Main WebFlie web files (KiB)"
+        range 256 16384
+        default 8192
+    config M3_WEB_ASSET_MAX_FILES
+        int "Maximum preloaded Main WebFlie files"
+        range 8 4096
+        default 512
     config M3_TOUCH_RESET
         int "GT911 reset GPIO (-1 if unconnected)"
         range -1 54

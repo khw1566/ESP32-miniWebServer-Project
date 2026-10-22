@@ -88,6 +88,8 @@ M3의 최근 기능 설명은 [라디오](<mini-WEB (M3-ESP-IDF_ver)/docs/RADIO.
 
 ## 웹 예제
 
+PC에서 이미지를 P4용 JPG/BMP 또는 웹용 WebP로 줄이려면 `scripts/ESP32_Image_Converter.bat`을 실행하세요. 파일·폴더 일괄 변환과 크기·품질 설정을 지원합니다. [이미지 변환기 사용법](tools/ESP32_IMAGE_CONVERTER.md)을 참고하세요.
+
 `web_examples`에 보드에서 제공할 HTML 및 미디어 예제가 있습니다. `scripts/Serve_Bianca_ngrok.bat`을 실행하면 Bianca/Fernando 보드용 웹 파일을 로컬 서버와 기존 ngrok으로 제공합니다. Python과 ngrok 설치 및 ngrok 계정 인증이 필요합니다. 세부 사용법은 `web_examples/09_bianca_fernando/README.md`를 참고하세요.
 
 ## S3 AI 키 저장 수정

@@ -145,6 +145,36 @@ function removeCall(source,name,replacement){
   result+=source.slice(offset,start)+replacement;offset=end;
  }
 }
+// Exercise UI -> queue admission too: worker-only tests bypassed a lost-SSID bug.
+const admission = {M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,
+ wifi_queue:true,state:{initialized:true,wifi_ready:true},state_lock:0,wifi_pending:false,
+ portENTER_CRITICAL:()=>{},portEXIT_CRITICAL:()=>{},network_settings_valid:s=>!!s && !!s.ssid,
+ claim:()=>{if(admission.wifi_pending)return false;admission.wifi_pending=true;return true;},
+ pdPASS:1,accept:true,xQueueSend:(_q,r)=>{admission.queued=structuredClone(r);return admission.accept?1:0;},
+ clear:r=>{r.settings={};},release:()=>{admission.wifi_pending=false;}};
+vm.createContext(admission);
+let admit=body('m3_runtime_wifi',runtime)
+ .replaceAll('&state_lock','state_lock').replaceAll('network_settings_valid(settings)','network_settings_valid(settings)')
+ .replace(/\bbool\s+/g,'let ')
+ .replace('atomic_compare_exchange_strong(&wifi_pending, &expected, true)','claim()')
+ .replace('wifi_request_t request = {.action = action};','let request = {action,settings:{}};')
+ .replace('request.settings = *settings','request.settings = {...settings}')
+ .replaceAll('&request','request').replace('memset(request, 0, sizeof(request))','clear(request)')
+ .replace('atomic_store(&wifi_pending, false)','release()');
+vm.runInContext('function admit(action,settings){'+admit+'}',admission);
+for(const action of [1,4]) {
+ admission.wifi_pending=false;
+ const selected={version:1,ssid:'Fixture Wi-Fi',pass:action===4?'':'fixture-secret',use_static:1,ip:'192.168.1.20'};
+ assert(admission.admit(action,selected));
+ assert.equal(admission.queued.settings.ssid,selected.ssid);
+ assert.equal(admission.queued.settings.ip,selected.ip);
+ assert.equal(admission.queued.settings.pass,selected.pass);
+ assert.equal(selected.ssid,'Fixture Wi-Fi','queue cleanup must not mutate caller settings');
+}
+admission.wifi_pending=false;admission.accept=false;
+assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));assert(!admission.wifi_pending);
+admission.accept=true;admission.state.wifi_ready=false;
+assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));
 let worker=removeCall(body('wifi_execute',runtime),'snprintf','record_message()')
  .replace('memset(next->settings.pass, 0, sizeof(next->settings.pass))','next->settings.pass = ""')
  .replace('memset(request, 0, sizeof(*request))','request.cleared = true')
@@ -156,6 +186,8 @@ worker=worker.replaceAll('60000000LL','60000000').replace('request.settings.pass
 const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPTIVE:1,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,M3_WIFI_RESULTS:8,
  setup_requested:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
  restore_wifi_password:()=>false,
+ NET_MODE_STA_CONNECTED:2,M3_CUE_WIFI_CONNECTED:3,M3_CUE_WIFI_SETUP:4,M3_CUE_WIFI_FAILED:5,
+ m3_i18n_language:()=>0,m3_feedback_emit:()=>{},
  pending:true,events:[],saved:0,connected:0,fallback:0,scanned:2,web:true,
  record_message:()=>{},publish:()=>radio.events.push('publish'),
  network_scan_wifi:()=>{radio.events.push('scan');return radio.scanned;},
@@ -224,7 +256,8 @@ passwords.wifi_open_selected=true;assert.equal(passwords.choose({ssid:'Saved',pa
 passwords.wifi_selected_ssid='Other';assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
 passwords.snapshot.wifi_password_saved=false;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
 // Execute secret restoration from the actual C helper, with an NVS mock.
-const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,
+const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,sdSaved:null,
+ m3_sd_wifi_find:(ssid,s)=>{if(!secrets.sdSaved || secrets.sdSaved.ssid!==ssid)return false;Object.assign(s,secrets.sdSaved);return true;},
  network_settings_load:s=>{Object.assign(s,secrets.saved);return secrets.available;},strcmp:passwords.strcmp,
  snprintf:(s,_size,_format,value)=>{s.pass=value;},memset:s=>{for(const k of Object.keys(s))s[k]='';secrets.cleared=s;}};
 vm.createContext(secrets);
@@ -238,6 +271,8 @@ assert(secrets.restore(candidate));assert.equal(candidate.pass,'stored-secret');
 assert.equal(secrets.cleared.pass,'');assert.equal(secrets.saved.pass,'stored-secret');
 candidate={ssid:'Other',pass:''};assert(!secrets.restore(candidate));assert.equal(candidate.pass,'');
 secrets.available=false;assert(!secrets.restore({ssid:'Saved',pass:''}));
+secrets.sdSaved={ssid:'Other',pass:'sd-fixture-secret'};candidate={ssid:'Other',pass:''};
+assert(secrets.restore(candidate));assert.equal(candidate.pass,'sd-fixture-secret');assert.equal(secrets.cleared.pass,'');
 // Both security icons are drawn with primitives; no font glyph dependency.
 const locks={GREEN:1,MUTED:2,LV_BORDER_SIDE_TOP:1,LV_BORDER_SIDE_LEFT:2,LV_BORDER_SIDE_RIGHT:4,
  lv_obj_get_child:(obj,i)=>obj.children[i],lv_color_hex:x=>x,

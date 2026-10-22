@@ -6,11 +6,17 @@ try { $projectHash = ([BitConverter]::ToString($algorithm.ComputeHash([Text.Enco
 finally { $algorithm.Dispose() }
 if (-not $HostedComponentPath) {
     $HostedComponentPath = Join-Path $env:TEMP "mini-web-m3-$projectHash\managed_components\espressif__esp_hosted"
+    if (-not (Test-Path -LiteralPath $HostedComponentPath)) {
+        $HostedComponentPath = Join-Path $PSScriptRoot 'managed_components\espressif__esp_hosted'
+    }
 }
 $manifest = Join-Path $HostedComponentPath 'idf_component.yml'
 if (-not (Test-Path -LiteralPath $manifest)) { throw 'Run the M3 Build first, or pass -HostedComponentPath to its resolved esp_hosted 2.13.0 component.' }
 if ((Get-Content -LiteralPath $manifest -Raw) -notmatch 'version:\s*[''"'']?2\.13\.0[''"'']?\s') { throw 'This M3 stack requires esp_hosted 2.13.0 and its matching C6 firmware.' }
 $source = Join-Path $HostedComponentPath 'examples\slave'
+if (-not (Test-Path -LiteralPath (Join-Path $source 'main\esp_hosted_coprocessor_fw_ver.h'))) {
+    $source = Join-Path $HostedComponentPath 'slave'
+}
 if (-not (Test-Path -LiteralPath (Join-Path $source 'main\esp_hosted_coprocessor_fw_ver.h'))) { throw 'Matching official slave example is missing' }
 $destination = Join-Path $env:TEMP "mini-web-m3-c6-$projectHash"
 if ($destination -match '[^\x00-\x7F]') { throw 'TEMP must be an ASCII path' }

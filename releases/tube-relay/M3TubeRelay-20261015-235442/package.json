@@ -1,0 +1,6 @@
+{
+  "name": "m3-tube-relay",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.mjs", "setup": "node setup.mjs", "test": "node test.mjs && node test_video_cache.mjs && node test_music_cache.mjs", "test:media": "node test_media.mjs" }
+}

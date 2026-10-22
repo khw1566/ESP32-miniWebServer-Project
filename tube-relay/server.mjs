@@ -7,9 +7,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, Interleaver, validVideoId, validChannelId, toItem, musicItem, videoProfile, videoFilter } from './lib.mjs';
-import { AudioCache } from './audio_cache.mjs';
+import { sanitize, searchText, JpegSplitter, PcmChunker, PACKET, packet, Interleaver, validVideoId, validChannelId, toItem, musicItem, videoProfile, videoFilter } from './lib.mjs';
+import { MusicCache } from './music_cache.mjs';
 import { VideoCache } from './video_cache.mjs';
+import { RadioRelay } from './radio.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = process.env.M3_TUBE_CONFIG || path.join(ROOT, 'config.json');
@@ -29,11 +30,12 @@ if (!config.token || config.token.length < 24) {
 const CACHE = path.join(CACHE_ROOT, 'thumb');
 fs.mkdirSync(CACHE, { recursive: true });
 const log = (...args) => console.log(new Date().toISOString().slice(11, 19), ...args);
-const audioCache = new AudioCache(path.join(CACHE_ROOT, 'audio'), log);
+const radioRelay = new RadioRelay(config.ffmpeg);
 
 function run(command, args, { timeout = 30000, binary = false, signal } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, signal });
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, signal,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' } });
     const out = [], err = [];
     let failure = null;
     // Wait for close before callers rename/delete files, especially on Windows.
@@ -133,6 +135,35 @@ async function resolve(id, audioOnly = false, signal) {
   return value;
 }
 
+const musicCache = new MusicCache(path.join(CACHE_ROOT, 'music'), async (id, file, signal) => {
+  // Let yt-dlp handle fragmented/DASH audio and refreshed signed URLs itself.
+  // A fixed MP3 format removes source Opus/AAC/container differences on the board.
+  const source = file.replace(/\.part$/, '.source');
+  try {
+    infoCache.delete(`a:${id}`);
+    const info = await resolve(id, true, signal);
+    if (info.live || !info.duration || info.duration > 1200) throw Error('Choose a non-live song up to 20 minutes');
+    for (const [attempt, format] of [AUDIO_FORMAT, 'ba/b'].entries()) {
+      try {
+        await ytdlp(['--ignore-config', '--no-playlist', '-f', format, '--no-part', '--no-progress',
+          '--no-mtime', '--retries', '3', '--fragment-retries', '3', '--socket-timeout', '15',
+          '--max-filesize', '96M', '-o', source, `https://www.youtube.com/watch?v=${id}`], { timeout: 90000, signal });
+        break;
+      } catch (error) {
+        fs.rmSync(source, { force: true });
+        if (signal.aborted || attempt) throw error;
+        log(`music ${id}: retrying with another audio format`);
+      }
+    }
+    if (fs.statSync(source).size > 96 * 1024 * 1024) throw Error('Source audio too large');
+    await run(config.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-i', source,
+      '-vn', '-sn', '-dn', '-t', '1200', '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '32000', '-ac', '2',
+      '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', file], { timeout: 90000, signal });
+    return { title: info.title, channel: info.channel, channel_id: info.channel_id, duration: info.duration,
+      bitrate: 64000, rate: 32000, channels: 2, format: 'mp3' };
+  } finally { fs.rmSync(source, { force: true }); }
+});
+
 // ---- Loopback media proxy ----
 // googlevideo cuts unbounded downloads after ~1.5 MB. ffmpeg sees an ordinary
 // seekable HTTP file here, while each upstream request asks for at most 1 MiB.
@@ -219,12 +250,10 @@ async function play(req, res, id, start, audioOnly = false, quality = 'low') {
   const waiting = setInterval(() => res.write(packet(PACKET.WAIT, 0)), 2000);
   let info;
   try {
-    info = await resolve(id, audioOnly);
-    // Music: fetch the whole track first; seeks and replays then read the local file.
-    if (audioOnly && !info.live) {
-      const input = info.inputs.find(i => i.audio) || info.inputs[0];
-      if (input && !input.manifest && input.size) info = { ...info, inputs: [{ ...input, file: await audioCache.get(id, input), video: false }] };
-    }
+    if (audioOnly) {
+      const song = await musicCache.get(id);
+      info = { ...song, live: false, inputs: [{ file: song.file, video: false, audio: true }] };
+    } else info = await resolve(id, false);
   }
   catch (error) {
     log(`resolve ${id} failed: ${error.message}`);
@@ -256,14 +285,14 @@ async function play(req, res, id, start, audioOnly = false, quality = 'low') {
     w: width, h: height, fps, rate, ch: channels, start, duration: info.duration, live,
     video: videoInput >= 0, audio: audioInput >= 0, title: info.title, channel: info.channel, channel_id: info.channel_id,
   }))));
-  let stopped = false, frames = 0, bytes = 0;
+  let stopped = false, frames = 0, bytes = 0, processClosed = false, processCode = null;
   const mux = new Interleaver(buf => { bytes += buf.length; return res.write(buf); }, { video: videoInput >= 0, audio: audioInput >= 0 });
   const pause = () => outputs.forEach(s => s?.pause());
   const resume = () => outputs.forEach(s => s?.resume());
   const pump = () => {
     if (stopped) return;
     if (!mux.pump()) { pause(); res.once('drain', () => { resume(); pump(); }); return; }
-    if (mux.finished) finish('eof');
+    if (mux.finished && processClosed) finish(processCode === 0 && (frames || chunker.total) ? 'eof' : 'ffmpeg error');
   };
   const splitter = new JpegSplitter(frame => { const pts = frames++ * 1000 / fps; mux.addVideo(pts, packet(PACKET.VIDEO, pts, frame)); });
   const frameBytes = 2 * channels;
@@ -279,14 +308,15 @@ async function play(req, res, id, start, audioOnly = false, quality = 'low') {
     if (stopped) return; stopped = true;
     if (session === current) session = null;
     child.kill('SIGKILL');
-    if (!res.writableEnded) res.end(packet(PACKET.END, 0, Buffer.from(JSON.stringify({ reason }))));
+    if (!res.writableEnded) res.end(packet(PACKET.END, 0, Buffer.from(JSON.stringify({ reason,
+      ...(reason === 'ffmpeg error' ? { error: sanitize(Buffer.concat(errors).toString().trim().slice(-300), 120) || 'Audio conversion failed' } : {}) }))));
     log(`play ${id} t=${start} ended (${reason}) frames=${frames} sent=${(bytes / 1048576).toFixed(1)}MiB`,
       errors.length ? Buffer.concat(errors).toString().trim().slice(-200) : '');
   };
   const current = { stop: finish };
   session = current;
   child.on('error', error => { log(`ffmpeg start failed: ${error.message}`); finish('ffmpeg error'); });
-  child.on('close', () => { mux.endVideo(); mux.endAudio(); pump(); setTimeout(() => finish(mux.finished ? 'eof' : 'ffmpeg exited'), 2000); });
+  child.on('close', code => { processClosed = true; processCode = code; mux.endVideo(); mux.endAudio(); pump(); });
   res.on('close', () => finish('client closed'));
   log(`play ${id} t=${start}${audioOnly ? ' audio' : ''} "${info.title}"`);
 }
@@ -307,9 +337,35 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/healthz') return json(res, 200, { ok: true, service: 'm3-tube-relay', protocol: 2 });
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    if (url.pathname === '/api/radio') {
+      if (req.method !== 'GET') return json(res, 405, { error: 'GET required' });
+      return await radioRelay.serve(req, res, url.searchParams.get('station'), url.searchParams.get('profile') || 'balanced');
+    }
     if (url.pathname === '/api/status') return json(res, 200, {
-      ok: toolsReady.ytdlp && toolsReady.ffmpeg, service: 'm3-tube-relay', protocol: 2, ...toolsReady,
+      ok: toolsReady.ytdlp && toolsReady.ffmpeg, service: 'm3-tube-relay', protocol: 2, music_cache: 1, ...toolsReady,
     });
+    if (url.pathname === '/api/music') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'POST required' });
+      const id = url.searchParams.get('id'); if (!validVideoId(id)) return json(res, 400, { error: 'bad song id' });
+      const job = musicCache.start(id);
+      return json(res, job ? 202 : 409, job ? { job } : { error: 'music preparation busy' });
+    }
+    if (url.pathname === '/api/music/status' || url.pathname === '/api/music/file') {
+      const key = url.searchParams.get('job');
+      if (!/^[a-f0-9]{32}$/.test(key || '')) return json(res, 400, { error: 'bad job' });
+      const status = musicCache.status(key); if (!status) return json(res, 404, { error: 'job not found' });
+      if (url.pathname.endsWith('/status')) {
+        if (req.method === 'DELETE') { musicCache.cancel(key); return json(res, 200, { ok: true }); }
+        if (req.method !== 'GET') return json(res, 405, { error: 'GET required' });
+        return json(res, 200, status);
+      }
+      if (req.method !== 'GET') return json(res, 405, { error: 'GET required' });
+      const file = musicCache.file(key); if (!file) return json(res, 409, { error: 'song not ready' });
+      const fd = fs.openSync(file, 'r'), bytes = fs.fstatSync(fd).size;
+      const input = fs.createReadStream(file, { fd, autoClose: true });
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': bytes, 'Cache-Control': 'no-store' });
+      input.on('error', () => res.destroy()); res.on('close', () => input.destroy()); input.pipe(res); return;
+    }
     if (url.pathname === '/api/download') {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST required' });
       const id = url.searchParams.get('id'), quality = url.searchParams.get('quality') || 'low';
@@ -336,7 +392,7 @@ const server = http.createServer(async (req, res) => {
     }
     const page = Math.min(20, Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1));
     if (url.pathname === '/api/search') {
-      const q = sanitize(url.searchParams.get('q'), 120);
+      const q = searchText(url.searchParams.get('q'), 384);
       if (!q) return json(res, 400, { error: 'empty query' });
       const music = url.searchParams.get('music') === '1';
       log(`${music ? 'music ' : ''}search "${q}" page ${page}`);

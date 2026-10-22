@@ -1,0 +1,142 @@
+[
+  {
+    "id": "soma-groove-mp3",
+    "name": "SomaFM Groove Salad / MP3 128k",
+    "url": "https://ice5.somafm.com/groovesalad-128-mp3",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "soma-groove-aac",
+    "name": "SomaFM Groove Salad / AAC 64k",
+    "url": "https://ice5.somafm.com/groovesalad-64-aac",
+    "aac": true,
+    "region": 0
+  },
+  {
+    "id": "soma-drone",
+    "name": "SomaFM Drone Zone / MP3 128k",
+    "url": "https://ice5.somafm.com/dronezone-128-mp3",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "soma-secret",
+    "name": "SomaFM Secret Agent / MP3 128k",
+    "url": "https://ice5.somafm.com/secretagent-128-mp3",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "swiss-jazz",
+    "name": "Radio Swiss Jazz / MP3 128k",
+    "url": "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "swiss-classic",
+    "name": "Radio Swiss Classic / MP3 128k",
+    "url": "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "swiss-pop",
+    "name": "Radio Swiss Pop / MP3 128k",
+    "url": "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128",
+    "aac": false,
+    "region": 0
+  },
+  {
+    "id": "bigb-kpop",
+    "name": "Korea Big B K-pop / MP3",
+    "url": "https://antares.dribbcast.com/proxy/kpop?mp=/s",
+    "aac": false,
+    "region": 1
+  },
+  {
+    "id": "setagaya",
+    "name": "Japan FM Setagaya / MP3",
+    "url": "https://fmsetagaya834.out.airtime.pro/fmsetagaya834_a",
+    "aac": false,
+    "region": 2
+  },
+  {
+    "id": "bigb-jpop",
+    "name": "Japan Big B J-pop / MP3",
+    "url": "https://antares.dribbcast.com/proxy/jpop?mp=/s",
+    "aac": false,
+    "region": 2
+  },
+  {
+    "id": "kbs-1radio",
+    "name": "KBS 1 Radio / Relay MP3",
+    "region": 1,
+    "kbs": "21",
+    "source": "https://radio.kbs.co.kr/"
+  },
+  {
+    "id": "kbs-happy",
+    "name": "KBS Happy FM / Relay MP3",
+    "region": 1,
+    "kbs": "22",
+    "source": "https://radio.kbs.co.kr/"
+  },
+  {
+    "id": "kbs-3radio",
+    "name": "KBS 3 Radio / Relay MP3",
+    "region": 1,
+    "kbs": "23",
+    "source": "https://radio.kbs.co.kr/"
+  },
+  {
+    "id": "kbs-classic",
+    "name": "KBS Classic FM / Relay MP3",
+    "region": 1,
+    "kbs": "24",
+    "source": "https://radio.kbs.co.kr/"
+  },
+  {
+    "id": "kbs-cool",
+    "name": "KBS Cool FM / Relay MP3",
+    "region": 1,
+    "kbs": "25",
+    "source": "https://radio.kbs.co.kr/"
+  },
+  {
+    "id": "j1-hits",
+    "name": "J1 HITS / MP3",
+    "url": "https://jenny.torontocast.com:2000/stream/J1HITS",
+    "region": 2,
+    "source": "https://www.j1fm.tokyo/j1/developers/"
+  },
+  {
+    "id": "j1-gold",
+    "name": "J1 GOLD / MP3",
+    "url": "https://jenny.torontocast.com:2000/stream/J1GOLD",
+    "region": 2,
+    "source": "https://www.j1fm.tokyo/j1/developers/"
+  },
+  {
+    "id": "shonan-beach",
+    "name": "Shonan Beach FM / MP3",
+    "url": "https://shonanbeachfm.out.airtime.pro:8000/shonanbeachfm_a",
+    "region": 2,
+    "source": "https://www.beachfm.co.jp/radio/"
+  },
+  {
+    "id": "japan-hits",
+    "name": "asia DREAM Japan Hits / MP3",
+    "url": "https://quincy.torontocast.com:2020/;",
+    "region": 2,
+    "source": "https://asiadreamradio.torontocast.stream/stations/japanhitsplayer.html"
+  },
+  {
+    "id": "jazz-sakura",
+    "name": "asia DREAM Jazz Sakura / MP3",
+    "url": "https://kathy.torontocast.com:3330/;",
+    "region": 2,
+    "source": "https://asiadreamradio.torontocast.stream/stations/jazzsakuraplayer.html"
+  }
+]

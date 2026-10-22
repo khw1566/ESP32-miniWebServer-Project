@@ -31,7 +31,7 @@ body{height:100vh;height:100dvh}.main-layout,.chat-container{min-height:0;min-wi
 <div class='sidebar' id='sidebar'>
 <div class='panel-title'>
 <span>API 설정</span>
-<span style='font-size:11px;color:var(--blue);font-weight:600;'>보드 암호화 저장</span>
+<span style='font-size:11px;color:var(--blue);font-weight:600;'>SD JSON 공용 키</span>
 </div>
 <div class='input-group'>
 <div class='input-label'>
@@ -373,7 +373,7 @@ async function aiFetch(url,options){
 }
 async function refreshAiKeyStatus(){
  const revision=g_keyRevision;
- try{const r=await aiFetch('/api/ai/key'),d=await r.json();if(revision!==g_keyRevision)return;if(!r.ok||!d.ok)throw Error(d.error||'저장 상태 조회 실패');g_keyConfigured=d.configured;$('apiKeyStatus').textContent=g_keyConfigured?'키 저장됨 · 보드에서 사용합니다. 키 원문은 조회할 수 없습니다.':'저장된 키가 없습니다. 새 키를 입력하고 저장하세요.';}catch(e){if(revision===g_keyRevision)$('apiKeyStatus').textContent=uiErrorText(e);}
+ try{const r=await aiFetch('/api/ai/key'),d=await r.json();if(revision!==g_keyRevision)return;if(!r.ok||!d.ok)throw Error(d.error||'저장 상태 조회 실패');g_keyConfigured=d.configured;$('apiKeyStatus').textContent=g_keyConfigured?'SD JSON 키 사용 중 · 기기와 웹 AI가 같은 gemini 항목을 사용합니다.':'SD JSON에 gemini 키가 없습니다. 카드 설정을 확인하거나 새 키를 저장하세요.';}catch(e){if(revision===g_keyRevision)$('apiKeyStatus').textContent=uiErrorText(e);}
 }
 async function saveAiKey(){
  if(g_keySaving)return g_keySaving;
@@ -383,7 +383,7 @@ async function saveAiKey(){
  if(key.length<16||key.length>255){$('apiKeyStatus').textContent='키 길이 오류: 현재 '+key.length+'자입니다. 키 원문 16~255자를 입력하세요.';return false;}
  if(!/^[A-Za-z0-9_.~+\/=-]+$/.test(key)){$('apiKeyStatus').textContent='키 형식 오류: 키 내부에 공백·보이지 않는 문자 또는 지원하지 않는 문자가 있습니다. 키 복사 버튼으로 다시 복사하세요. URL이나 명령문 전체는 넣지 마세요.';return false;}
  ++g_keyRevision;input.disabled=true;$('saveKeyButton').disabled=true;$('deleteKeyButton').disabled=true;$('apiKeyStatus').textContent='보드에 키 저장 중...';
- g_keySaving=(async()=>{try{const r=await aiFetch('/api/ai/key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}),d=await r.json();if(!r.ok||!d.ok||!d.configured)throw Error(d.error||'보드에서 키 저장을 확인하지 못했습니다.');g_keyConfigured=true;input.value='';$('apiKeyStatus').textContent='키를 암호화하여 저장했습니다. 입력란은 지웠습니다.';return true;}catch(e){$('apiKeyStatus').textContent=uiErrorText(e);return false;}
+ g_keySaving=(async()=>{try{const r=await aiFetch('/api/ai/key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}),d=await r.json();if(!r.ok||!d.ok||!d.configured)throw Error(d.error||'보드에서 키 저장을 확인하지 못했습니다.');g_keyConfigured=true;input.value='';$('apiKeyStatus').textContent='SD JSON에 저장했습니다. 웹 AI는 바로 적용되며 기기 AI·음성 기능은 재부팅 후 적용됩니다.';return true;}catch(e){$('apiKeyStatus').textContent=uiErrorText(e);return false;}
  finally{input.disabled=false;$('saveKeyButton').disabled=false;$('deleteKeyButton').disabled=false;}})();
  try{return await g_keySaving;}finally{g_keySaving=null;}
 }

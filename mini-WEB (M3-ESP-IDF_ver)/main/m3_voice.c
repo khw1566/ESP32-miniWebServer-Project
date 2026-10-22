@@ -1,4 +1,5 @@
 #include "m3_google_audio.h"
+#include "m3_azure_audio.h"
 #include "m3_gemini_config.h"
 #include "m3_voice.h"
 #include "m3_audio_apps.h"
@@ -54,15 +55,15 @@ bool m3_voice_set_key(const char *key) {
     if (state.busy) { portEXIT_CRITICAL(&lock); return false; }
     wipe(api_key, sizeof(api_key));
     if (length) memcpy(api_key, key, length);
-    state.key_ready = state.provider ? m3_google_stt_ready() : length != 0; ++state.revision;
+    state.key_ready = state.provider == 3 ? m3_azure_audio_ready() : state.provider ? m3_google_stt_ready() : length != 0; ++state.revision;
     portEXIT_CRITICAL(&lock); return true;
 }
 bool m3_voice_set_provider(unsigned provider) {
-    if (provider > 2) return false;
+    if (provider > 3) return false;
     portENTER_CRITICAL(&lock);
     if (state.busy) { portEXIT_CRITICAL(&lock); return false; }
     state.provider = provider;
-    state.key_ready = provider ? m3_google_stt_ready() : api_key[0] != 0;
+    state.key_ready = provider == 3 ? m3_azure_audio_ready() : provider ? m3_google_stt_ready() : api_key[0] != 0;
     ++state.revision;
     portEXIT_CRITICAL(&lock); return true;
 }
@@ -169,6 +170,15 @@ void m3_voice_run(unsigned job, const m3_voice_capture_t *capture) {
     if (samples < VOICE_RATE / 2 || peak < 64) { error = "No clear audio; speak closer and retry"; goto done; }
     wav_header(wav, samples * 2);
     portENTER_CRITICAL(&lock); unsigned provider = state.provider; portEXIT_CRITICAL(&lock);
+    if (provider == 3) {
+        publish(job, "Sending audio to Azure / Korean recognition...", true, false, NULL);
+        char recognized[385]; google_capture_t context = {job, capture};
+        bool recognized_ok = m3_azure_transcribe(wav, 44 + samples * 2, recognized, google_cancelled, &context, &error);
+        if (recognized_ok && active(job, capture)) {
+            publish(job, "Review recognized text, then Use text", false, false, recognized); success = true;
+        }
+        wipe(recognized, sizeof(recognized)); goto done;
+    }
     if (provider) {
         publish(job, "Sending audio to Gemini / Korean recognition...", true, false, NULL);
         char recognized[385]; google_capture_t context = {job, capture};

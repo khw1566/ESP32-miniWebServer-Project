@@ -4,4 +4,7 @@ cache/
 cloudflared.yml
 cloudflared.log
 relay.log
-M3TubeRelay.exe
+
+results/
+gui-smoke.png
+runtime/

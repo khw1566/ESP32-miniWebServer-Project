@@ -63,11 +63,13 @@ assert.equal(q.claim(),1);assert.equal(q.slots[0].state,q.SHOWN);assert.equal(q.
 q.slots[1].state=q.READY;assert.equal(q.frame(),'b');assert.equal(q.slots[0].state,q.FREE);assert.equal(q.claim(),0);
 
 const ui=read('main/m3_ui.c'),active=[];
-const main=body(ui,'build_home_main');
-assert(main.indexOf('lv_obj_t *wallpaper = bare(home)')<main.indexOf('lv_obj_t *foreground = bare(home)'));
+const main=body(ui,'build_home_main'),home=body(ui,'build_home');
+assert(home.indexOf('lv_obj_t *wallpaper = bare(home)')<home.indexOf('home_tiles = lv_tileview_create(home)'));
 assert(main.indexOf('home = foreground;')<main.indexOf('home_clock = label(home'));
-assert(main.includes('icon_part(wallpaper, -140, 300'));
-assert(main.includes('icon_part(wallpaper, 250, -120'));
+assert(home.includes('icon_part(wallpaper, -140, 300'));
+assert(home.includes('icon_part(wallpaper, 250, -120'));
+assert(home.includes('lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_TRANSP, 0)'));
+assert(!home.includes('T_HOME_MORE')&&!home.includes('T_HOME_SLIDE'),'extra apps have no heading or swipe caption');
 assert(!main.includes('icon_part(home,'),'decorative shapes cannot be siblings above widgets');
 // Build the real main tile body into a mock object tree to check the draw hierarchy.
 const tree={children:[]},layer={home_clock:null,home_date:null,home_net_icon:null,home_net:null,home_detail:null};
@@ -80,11 +82,18 @@ Object.assign(layer,{m3_font_clock:{},lv_font_montserrat_20:{},launch_app:()=>{}
  home_apps:parent=>node(parent,'app-icons')});
 vm.createContext(layer);vm.runInContext('function build(home){'+common(main).replace(/\(void \*\)\(uintptr_t\)/g,'')
  .replaceAll('&m3_font_clock','m3_font_clock').replaceAll('&lv_font_montserrat_20','lv_font_montserrat_20')+'}',layer);layer.build(tree);
-assert.equal(tree.children.length,2);const [wallpaper,foreground]=tree.children;
-assert.equal(wallpaper.children.length,2);assert(wallpaper.children.every(obj=>obj.kind==='orb'));
+assert.equal(tree.children.length,1);const [foreground]=tree.children;
 assert.equal(layer.home_clock.parent,foreground);assert.equal(layer.home_date.parent,foreground);
-assert.equal(layer.home_net.parent.parent,tree.children[1]);
+assert.equal(layer.home_net.parent.parent,foreground);
 assert(foreground.children.some(obj=>obj.kind==='app-icons'),'apps share the foreground layer');
+// The actual shared background constructor must put every decorative shape below the tileview.
+layer.lv_tileview_create=parent=>node(parent,'tileview');
+for(const name of new Set([...home.matchAll(/\b(lv_\w+)\(/g)].map(m=>m[1])))layer[name]??=()=>{};
+for(const name of new Set([...home.matchAll(/\b[A-Z][A-Z0-9_]*\b/g)].map(m=>m[0])))layer[name]??=0;
+layer.LV_PCT=n=>n;
+const shared={children:[]};vm.runInContext('function background(home){'+common(home.split('for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i)')[0])+'}',layer);
+layer.background(shared);assert.deepEqual(shared.children.map(obj=>obj.kind),['layer','tileview']);
+assert(shared.children[0].children.every(obj=>obj.kind==='orb'));
 const nav={home_tiles:{},home_sheets:[{}, {}, {}, {}],home_index:1,home_dots:Array.from({length:4},()=>({})),home_page_name:{},HOME_PAGE_COUNT:4,HOME_PHOTOS:3,APP_HOME:0,current_app:0,CYAN:1,
  lv_obj_get_child:obj=>obj,lv_obj_set_width:(o,w)=>o.width=w,lv_obj_set_style_bg_color:()=>{},lv_color_hex:n=>n,lv_obj_center:()=>{},
  tr:n=>n,home_page_title:n=>'page-'+n,set_text:(o,s)=>o.text=s,m3_photos_activate:enabled=>active.push(enabled),lv_tileview_get_tile_active:()=>nav.home_sheets[nav.selected]};

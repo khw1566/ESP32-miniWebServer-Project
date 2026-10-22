@@ -1,0 +1,136 @@
+[
+  {
+    "file": "m1-product-retouched.webp",
+    "kind": "AI-retouched user product photograph",
+    "model": "m1",
+    "tool": "built-in image_gen",
+    "note": "User-supplied physical product; cleaned background, lighting and perspective. Screen detail in retouch is illustrative; exact UI is in native simulator captures."
+  },
+  {
+    "file": "m1-screen-home.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "홈 대시보드",
+    "description": "Wi-Fi와 서버 상태, RAM·Flash·SD 용량",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_home.png",
+    "sha256": "e51cb6e0de7e7c53e9a2d16417f7c47aa1367ebddb276cf2ae7f7051559314e1",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m1-screen-wifi.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "Wi-Fi 설정",
+    "description": "주변 공유기 목록과 연결 입력란",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_wifi.png",
+    "sha256": "0c90213ce251258975b4bc0e41e05264fef73164619b9ca776b423d9475ca7e1",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m1-screen-keyboard.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "키보드",
+    "description": "실제 온보드 영문·숫자 키보드",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_keyboard.png",
+    "sha256": "d2a949a6c1c130a76d0fa4e79861ad74f18ac4d9588c54f988debe896bea02b7",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m1-screen-storage.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "SD 스토리지",
+    "description": "SD 용량과 파일 목록",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_storage_sd.png",
+    "sha256": "bc4f903bbca04c0fd2cbc0bbbf55a3f7e4a3642c69a3f8ca6dda9a7c515c8e98",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m1-screen-flash.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "내부 Flash",
+    "description": "시스템·파일·여유 공간",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_storage_flash.png",
+    "sha256": "9460393e2cece53d7f13245e9fc13cb7129d528b843a2455428f994196ff24de",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m1-screen-qr.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m1",
+    "title": "접속 QR",
+    "description": "문서용 IP를 사용한 모의 접속 QR",
+    "source": "results\\product-ui-capture-20261015\\m1-current\\frames\\m1_qr_local.png",
+    "sha256": "8b7fb450d9af78c9bbb544e4a395102177bc4de313eea980c4b86de23707f26e",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-product-retouched.webp",
+    "kind": "AI-retouched user product photograph",
+    "model": "m3",
+    "tool": "built-in image_gen",
+    "note": "User-supplied physical product; cleaned background, lighting and perspective. Screen detail in retouch is illustrative; exact UI is in native simulator captures."
+  },
+  {
+    "file": "m3-screen-home.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "홈 런처",
+    "description": "시계·연결 상태와 앱 탐색",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_00_home.png",
+    "sha256": "f7465b76067cd389a729bd6b7d8624cf357712d5daf6ad7a509373b72947efc2",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-screen-wifi.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "Wi-Fi",
+    "description": "무선 설정과 연결 안내",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_01_wifi.png",
+    "sha256": "94373480bc289d3fde4feb9df81d12691902bfe784d1800c024a877cf6a43a6c",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-screen-radio.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "라디오",
+    "description": "인터넷 라디오 인터페이스",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_06_radio.png",
+    "sha256": "04d0352bcf23e36050ce3eb798583a46d09367024b94c3b6a756de2c2e8c6e48",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-screen-files.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "파일",
+    "description": "저장소와 파일 탐색",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_02_files.png",
+    "sha256": "2a6a274879415bffcdda71784b9c54e708483263c9624f2a3c359275b3bbff47",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-screen-agent.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "AI 에이전트",
+    "description": "외부 AI 대화 인터페이스",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_09_agent.png",
+    "sha256": "4a5268abd95908d1ae4edf6d6312b443758d1e0028304a11ba54087d0bd9f34c",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  },
+  {
+    "file": "m3-screen-gallery.webp",
+    "kind": "Native PC LVGL capture",
+    "model": "m3",
+    "title": "갤러리",
+    "description": "사진·영상 라이브러리 인터페이스",
+    "source": "results\\product-ui-capture-20261015\\m3-current\\frames\\ko_12_gallery.png",
+    "sha256": "bfce8244eeef79d4681ef89035bd0a4840eb763b268c7c6494361ec454f4a96f",
+    "note": "Actual firmware UI source; network, storage, service states are fixtures. Not a physical LCD capture."
+  }
+]

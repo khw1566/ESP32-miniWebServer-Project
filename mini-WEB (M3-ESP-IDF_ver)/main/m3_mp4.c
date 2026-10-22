@@ -154,6 +154,61 @@ done:
     if (decoder) esp_aac_dec_close(decoder);
     free(encoded); free(pcm); free(stereo); return result;
 }
+static m3_mp4_result_t thumbnail_decode(esp_h264_dec_handle_t decoder, esp_h264_dec_param_sw_handle_t parameters,
+    const m3_mp4_info_t *info, uint8_t *data, unsigned bytes, unsigned job, bool (*current)(unsigned), uint8_t *canvas, bool *ready) {
+    esp_h264_dec_in_frame_t input = {.raw_data = {.buffer = data, .len = bytes}};
+    unsigned stalled = 0;
+    while (input.raw_data.len && current(job)) {
+        esp_h264_dec_out_frame_t output = {0}; input.consume = 0;
+        esp_h264_err_t err = esp_h264_dec_process(decoder, &input, &output);
+        if (err != ESP_H264_ERR_OK) return err == ESP_H264_ERR_MEM ? M3_MP4_MEMORY : M3_MP4_VIDEO_ERROR;
+        if (input.consume > input.raw_data.len || (!input.consume && (!output.out_size || ++stalled > 4))) return M3_MP4_VIDEO_ERROR;
+        if (input.consume) stalled = 0;
+        if (output.out_size) {
+            esp_h264_resolution_t size = {0};
+            if (esp_h264_dec_get_resolution(parameters, &size) != ESP_H264_ERR_OK || size.width != info->width || size.height != info->height ||
+                !m3_mp4_i420_fit(output.outbuf, output.out_size, size.width, size.height, canvas)) return M3_MP4_VIDEO_ERROR;
+            *ready = true; return M3_MP4_OK;
+        }
+        input.raw_data.buffer += input.consume; input.raw_data.len -= input.consume;
+    }
+    return current(job) ? M3_MP4_OK : M3_MP4_STOPPED;
+}
+m3_mp4_result_t m3_mp4_thumbnail(const char *relative, unsigned job, bool (*current)(unsigned), uint8_t *canvas) {
+    if (!current || !canvas || !current(job)) return M3_MP4_STOPPED;
+    m3_mp4_demux_t *demux = NULL; m3_mp4_info_t info;
+    esp_h264_dec_handle_t decoder = NULL; esp_h264_dec_param_sw_handle_t parameters = NULL;
+    uint8_t *buffer = NULL; bool ready = false;
+    m3_mp4_result_t result = m3_mp4_demux_open(relative, job, current, &demux, &info);
+    if (result != M3_MP4_OK) goto done;
+    esp_h264_dec_cfg_sw_t config = {.pic_type = ESP_H264_RAW_FMT_I420};
+    esp_h264_err_t err = esp_h264_dec_sw_new(&config, &decoder);
+    if (err != ESP_H264_ERR_OK) { result = err == ESP_H264_ERR_MEM ? M3_MP4_MEMORY : M3_MP4_VIDEO_ERROR; goto done; }
+    if (esp_h264_dec_open(decoder) != ESP_H264_ERR_OK || esp_h264_dec_sw_get_param_hd(decoder, &parameters) != ESP_H264_ERR_OK) { result = M3_MP4_VIDEO_ERROR; goto done; }
+    buffer = heap_caps_malloc(VIDEO_BYTES + 6, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buffer) { result = M3_MP4_MEMORY; goto done; }
+    unsigned used = 0;
+    for (unsigned i = 0; i < 2; ++i) {
+        int bytes = 0; const uint8_t *data = m3_mp4_demux_parameter(demux, i != 0, 0, &bytes);
+        if (!data || bytes <= 0 || used + 4 + bytes + 6 > VIDEO_BYTES) { result = M3_MP4_FORMAT; goto done; }
+        memcpy(buffer + used, "\0\0\0\1", 4); used += 4; memcpy(buffer + used, data, bytes); used += bytes;
+    }
+    memcpy(buffer + used, "\0\0\0\1\x09\xf0", 6); used += 6;
+    result = thumbnail_decode(decoder, parameters, &info, buffer, used, job, current, canvas, &ready);
+    for (unsigned i = 0; result == M3_MP4_OK && !ready && i < info.video_samples && i < 8 && current(job); ++i) {
+        m3_mp4_sample_t sample;
+        if (!m3_mp4_demux_sample(demux, true, i, &sample) || !m3_mp4_demux_read(demux, &sample, buffer, VIDEO_BYTES)) { result = M3_MP4_STORAGE; break; }
+        if (!m3_mp4_avcc_sample(buffer, sample.bytes, info.nal_length)) { result = M3_MP4_FORMAT; break; }
+        memcpy(buffer + sample.bytes, "\0\0\0\1\x09\xf0", 6);
+        result = thumbnail_decode(decoder, parameters, &info, buffer, sample.bytes + 6, job, current, canvas, &ready);
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (result == M3_MP4_OK && !ready) result = M3_MP4_VIDEO_ERROR;
+done:
+    if (!current(job)) result = M3_MP4_STOPPED;
+    if (decoder) { esp_h264_dec_close(decoder); esp_h264_dec_del(decoder); }
+    m3_mp4_demux_close(demux); free(buffer); return result;
+}
 m3_mp4_result_t m3_mp4_play(const char *relative, unsigned job, const m3_audio_output_t *audio, const m3_mp4_view_t *view) {
     if (!relative || !audio || !view || !view->current || !view->paused || !view->acquire || !view->publish) return M3_MP4_FORMAT;
     player_t *p = heap_caps_calloc(1, sizeof(*p), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

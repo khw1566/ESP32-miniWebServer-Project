@@ -13,6 +13,42 @@
 
 #include "../../main/m3_ui.c"
 
+/* Reader fixtures: UTF-8 text in memory; no SD or NVS evidence. */
+static m3_reader_settings_t sim_reader_settings = {1,22,1,0,8,24,0,0};
+static m3_reader_state_t sim_reader;
+static const char sim_reader_text[] =
+    "제1장. 작은 화면 속의 책\n\n"
+    "창밖으로 아침 햇살이 들어왔다. 책장을 넘길 때마다 새로운 이야기가 시작되었다. "
+    "글자 크기와 줄 간격을 바꾸어도 읽던 곳에서 이야기를 이어 갈 수 있다.\n\n"
+    "Chapter 1. A book in your hands\n\n"
+    "The morning light touched the desk. Every page opened another window. "
+    "Swipe left or up to continue, right or down to return. Tap the center to hide the controls.\n\n"
+    "제2장. 이어지는 이야기\n\n"
+    "천천히 읽는 시간은 작은 휴식이 된다. 화면의 색과 글자의 간격을 고르고 편안하게 읽어 보자. "
+    "마지막 문장까지 글이 끊기지 않고 이어진다.\n";
+esp_err_t m3_reader_start(void) { return ESP_OK; }
+bool m3_reader_supported(const char *name) { const char *p = strrchr(name, '.'); return p && (!strcmp(p,".txt") || !strcmp(p,".md") || !strcmp(p,".log")); }
+void m3_reader_settings(m3_reader_settings_t *out) { *out = sim_reader_settings; }
+bool m3_reader_configure(const m3_reader_settings_t *p) { sim_reader_settings = *p; return true; }
+void m3_reader_state(m3_reader_state_t *out) { *out = sim_reader; out->available = true; }
+bool m3_reader_open(const char *path) {
+    sim_reader.status = M3_READER_READY; sim_reader.bytes = sizeof(sim_reader_text)-1;
+    ++sim_reader.generation; ++sim_reader.revision; snprintf(sim_reader.path,sizeof(sim_reader.path),"%s",path); return true;
+}
+bool m3_reader_resume(void) { return false; }
+void m3_reader_close(void) { sim_reader.status = M3_READER_IDLE; }
+size_t m3_reader_copy(unsigned generation, unsigned offset, char *out, size_t capacity) {
+    if (generation != sim_reader.generation || offset >= sim_reader.bytes) { out[0]=0; return 0; }
+    size_t size = sim_reader.bytes-offset; if (size >= capacity) size=capacity-1;
+    while (size && ((unsigned char)sim_reader_text[offset+size]&0xc0)==0x80) --size;
+    memcpy(out,sim_reader_text+offset,size); out[size]=0; return size;
+}
+unsigned m3_reader_align(unsigned generation, unsigned offset) {
+    (void)generation; if (offset >= sim_reader.bytes) offset = sim_reader.bytes ? sim_reader.bytes-1 : 0;
+    while (offset && ((unsigned char)sim_reader_text[offset]&0xc0)==0x80) --offset; return offset;
+}
+void m3_reader_progress(unsigned generation, unsigned offset) { (void)generation; sim_reader.resume=offset; }
+
 /* SD app UI fixtures; they do not execute scripts or access an SD card. */
 static bool sim_sd_app_running, sim_sd_app_empty, sim_sd_app_error;
 void m3_sd_apps_poll(void) {}
@@ -121,6 +157,22 @@ bool m3_tube_download(const char *id, const char *title) {
 }
 void m3_tube_download_cancel(void) { sim_download.busy = false; snprintf(sim_download.message, sizeof(sim_download.message), "Download cancelled"); }
 void m3_tube_download_state(m3_tube_download_t *out) { *out = sim_download; }
+static bool sim_music_cache_loading;
+static char sim_cached_ids[2][12];
+void m3_tube_music_prepare(const char *current, const char *next) {
+    snprintf(sim_cached_ids[0],sizeof(sim_cached_ids[0]),"%s",current?current:"");
+    snprintf(sim_cached_ids[1],sizeof(sim_cached_ids[1]),"%s",next?next:"");
+}
+void m3_tube_music_autonext(bool enabled) { (void)enabled; }
+void m3_tube_music_cache(const char *id,m3_tube_music_cache_t *out) {
+    memset(out,0,sizeof(*out)); out->loading=sim_music_cache_loading && !strcmp(id,sim_cached_ids[1]);
+    out->ready=!out->loading; out->total=2400000; out->bytes=out->loading?1600000:2400000; out->percent=out->loading?67:100;
+    snprintf(out->message,sizeof(out->message),"%s",out->loading?"Loading music into PSRAM":"Music ready in PSRAM");
+}
+bool m3_tube_music_download(const char *id,const char *title) {
+    if (!m3_tube_download(id,title)) return false; sim_download.music=true;
+    snprintf(sim_download.message,sizeof(sim_download.message),"Saving music to SD"); return true;
+}
 esp_err_t m3_tube_start(void) { return ESP_OK; }
 static bool sim_listing(bool channel, const char *text, unsigned page) {
     sim_tube.status = M3_TUBE_LIST_READY; sim_tube.channel = channel; sim_tube.page = page; sim_tube.more = true;
@@ -143,13 +195,16 @@ bool m3_tube_music_search(const char *query, unsigned page) {
     sim_music.count = sim_item_count > M3_TUBE_ITEMS ? M3_TUBE_ITEMS : sim_item_count;
     memcpy(sim_music.items, sim_items, sizeof(m3_tube_item_t) * sim_music.count);
     snprintf(sim_music.query, sizeof(sim_music.query), "%s", query); ++sim_music.revision;
+    sim_music.thumbs = (uint16_t)((1u << sim_music.count) - 1);
+    sim_music.thumb_set = 2 + ((sim_music.thumb_set ^ 1) & 1);
     return true;
 }
 void m3_tube_music_list(m3_tube_list_t *out) { *out = sim_music; }
 bool m3_tube_play_audio(const char *id, unsigned start) {
+    unsigned revision = sim_player.revision + 1;
     memset(&sim_player, 0, sizeof(sim_player));
     sim_player.active = true; sim_player.audio_only = true; sim_player.position_ms = 63000 + start * 1000; sim_player.duration_s = 201;
-    snprintf(sim_player.id, sizeof(sim_player.id), "%s", id); ++sim_player.revision; return true;
+    snprintf(sim_player.id, sizeof(sim_player.id), "%s", id); sim_player.revision = revision; return true;
 }
 bool m3_tube_play(const char *id, unsigned start) {
     sim_player.audio_only = false;
@@ -163,6 +218,12 @@ const uint8_t *m3_tube_frame(void) { return sim_player.active ? sim_frame : NULL
 static lv_display_t *display;
 static uint16_t frame[480 * 800];
 static int sim_lang = -1;
+/* System sounds are simulated state only; this renderer does not open a codec. */
+static m3_feedback_settings_t sim_feedback = {1,1,45,1,35,1,55,0};
+void m3_feedback_get(m3_feedback_settings_t *out) { *out = sim_feedback; }
+bool m3_feedback_update(const m3_feedback_settings_t *p) { sim_feedback = *p; return true; }
+void m3_feedback_clear(void) {}
+void m3_feedback_emit(unsigned cue, unsigned language) { (void)cue; (void)language; }
 static m3_preferences_t sim_preferences = {1,100,30,1,0,40,40,0};
 bool m3_preferences_restarting(void) { return false; }
 void m3_preferences_get(m3_preferences_t *out) { *out = sim_preferences; }
@@ -196,13 +257,18 @@ bool network_settings_valid(const network_settings_t *settings) { return setting
 /* Service mocks. The scenario selects online/offline and busy states. */
 static bool sim_online = true, sim_playing = true, sim_agent_busy, sim_voice_recording = true, sim_voice_busy;
 static const char *sim_audio_message;
+static unsigned sim_tts_provider = 3, sim_stt_provider;
 static m3_recorder_state_t sim_recorder;
 static bool sim_sd_ready = true;
 static bool sim_ipv6_ready = true;
+static m3_power_state_t sim_power;
 void m3_runtime_state(m3_runtime_state_t *out) {
     memset(out, 0, sizeof(*out));
     out->initialized = out->web = out->wifi_ready = true;
+    out->cpu_valid = true; out->cpu_revision = (unsigned)(esp_timer_get_time() / 1000000) + 1;
+    out->cpu_percent[0] = 28 + out->cpu_revision % 30; out->cpu_percent[1] = 42 + out->cpu_revision % 40;
     out->sd = sim_sd_ready;
+    out->power = sim_power;
     out->cloud = sim_online;
     out->mode = sim_online ? NET_MODE_STA_CONNECTED : NET_MODE_AP_CAPTIVE;
     out->rssi = -58; out->requests = 42;
@@ -243,12 +309,6 @@ static unsigned sim_volume = 40;
 void m3_audio_state(m3_audio_state_t *out) {
     memset(out, 0, sizeof(*out));
     out->ready = true; out->playing = sim_playing; out->volume = sim_volume; out->progress = sim_playing ? 38 : 0;
-    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
-    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
-    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
-    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
-    out->mdns_ready = true;
-    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
     snprintf(out->message, sizeof(out->message), "%s", sim_audio_message ? sim_audio_message :
         sim_playing ? "Radio / MP3 / net 412 KiB / PCM 740 ms / gaps 0" : "Ready / PCM16 WAV");
 }
@@ -264,37 +324,27 @@ void m3_recorder_finish(void) {
     snprintf(sim_recorder.message, sizeof(sim_recorder.message), "Recording saved");
 }
 bool m3_audio_radio(const char *url, bool aac) { (void)url; (void)aac; return true; }
-void m3_audio_tts_provider(unsigned provider) { (void)provider; }
+bool m3_audio_radio_preset(const char *station, unsigned profile) { (void)station; return profile < 3; }
+unsigned m3_audio_tts_selected(void) { return sim_tts_provider; }
+void m3_audio_tts_provider(unsigned provider) { sim_tts_provider = provider; }
 bool m3_audio_speak(const char *text, unsigned speed) { (void)text; (void)speed; return true; }
 bool m3_audio_voice(void) { return true; }
 void m3_audio_stop(void) {}
 void m3_audio_volume(unsigned percent) { sim_volume = percent; m3_preferences_volume(percent); }
 void m3_voice_state(m3_voice_state_t *out) {
-    memset(out, 0, sizeof(*out)); out->key_ready = true; out->revision = 3; out->recording = sim_voice_recording; out->busy = sim_voice_busy;
+    memset(out, 0, sizeof(*out)); out->key_ready = true; out->revision = 3; out->recording = sim_voice_recording; out->busy = sim_voice_busy; out->provider = sim_stt_provider;
     snprintf(out->text, sizeof(out->text), "%s", "내일 날씨 알려줘");
-    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
-    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
-    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
-    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
-    out->mdns_ready = true;
-    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
     snprintf(out->message, sizeof(out->message), "Recording 3 / 8 seconds / level 2210");
 }
 static unsigned sim_mic_level;
 unsigned m3_voice_level(void) { return sim_mic_level; }
 int m3_voice_dbfs(void) { return sim_mic_level ? (int)sim_mic_level / 2 - 60 : -90; }
-bool m3_voice_set_provider(unsigned provider) { (void)provider; return true; }
+bool m3_voice_set_provider(unsigned provider) { sim_stt_provider = provider; return true; }
 bool m3_voice_set_key(const char *key) { (void)key; return true; }
 void m3_voice_finish(void) {}
 void m3_agent_state(m3_agent_state_t *out) {
     memset(out, 0, sizeof(*out)); out->ready = out->key_ready = true; out->revision = sim_agent_busy ? 5 : 2; out->model = 1;
     out->busy = sim_agent_busy;
-    snprintf(out->domain_url, sizeof(out->domain_url), "https://m3-a1b2c3d4e5f6.audreaming.com/");
-    snprintf(out->ipv6_url, sizeof(out->ipv6_url), "%s", sim_online && sim_ipv6_ready ? "http://[2001:db8:42::1234]/" : "");
-    snprintf(out->ipv6_status, sizeof(out->ipv6_status), "%s", sim_ipv6_ready ? "global_ready" : "no_global_prefix");
-    snprintf(out->cloud_status, sizeof(out->cloud_status), "%s", sim_online ? "online" : "waiting_wifi");
-    out->mdns_ready = true;
-    snprintf(out->mdns_url, sizeof(out->mdns_url), "http://m3-v1-2-a1b2c3d4e5f6.local/");
     snprintf(out->message, sizeof(out->message), "%s", sim_agent_busy ? "Gemini thinking..." : "Ready");
     snprintf(out->answer, sizeof(out->answer), "%s",
         "\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94! \xED\x98\x84\xEC\x9E\xAC Wi-Fi\xEB\x8A\x94 \xEC\x97\xB0\xEA\xB2\xB0\xEB\x90\x98\xEC\x96\xB4 \xEC\x9E\x88\xEA\xB3\xA0 "
@@ -365,13 +415,34 @@ int main(int argc, char **argv) {
 }
 
 /* Gallery fixtures do not decode media or use SD hardware. */
+static m3_gallery_library_t sim_gallery_library;
+static m3_gallery_state_t sim_gallery_state;
+static uint16_t sim_gallery_copied;
 esp_err_t m3_gallery_start(void) { return ESP_OK; }
 bool m3_gallery_supported(const char *name) { const char *ext = strrchr(name, '.'); return ext && (!strcmp(ext, ".png") || !strcmp(ext, ".jpg") || !strcmp(ext, ".avi") || !strcmp(ext, ".mp4")); }
-bool m3_gallery_open(const char *path) { (void)path; return true; }
-void m3_gallery_close(void) {}
+bool m3_gallery_media(const char *name) { return m3_gallery_supported(name); }
+bool m3_gallery_video(const char *name) { const char *ext = strrchr(name, '.'); return ext && (!strcmp(ext, ".mp4") || !strcmp(ext, ".avi")); }
+bool m3_gallery_path_valid(const char *path) { return path && path[0] == '/' && !strstr(path, ".."); }
+bool m3_gallery_open(const char *path) { sim_gallery_state.status=M3_GALLERY_READY; sim_gallery_state.video=m3_gallery_video(path); sim_gallery_state.mp4=sim_gallery_state.video; sim_gallery_state.frames=1; ++sim_gallery_state.revision; return true; }
+void m3_gallery_close(void) { sim_gallery_state.status=M3_GALLERY_IDLE; }
 void m3_gallery_audio_cancel(void) {}
-void m3_gallery_pause(void) {}
+void m3_gallery_pause(void) { sim_gallery_state.paused=!sim_gallery_state.paused; ++sim_gallery_state.revision; }
 bool m3_gallery_active(void) { return false; }
-void m3_gallery_state(m3_gallery_state_t *out) { memset(out, 0, sizeof(*out)); out->status = M3_GALLERY_IDLE; }
-const uint8_t *m3_gallery_frame(void) { return NULL; }
+void m3_gallery_state(m3_gallery_state_t *out) { *out=sim_gallery_state; }
+const uint8_t *m3_gallery_frame(void) {
+    for(unsigned y=0;y<M3_PHOTO_H;++y)for(unsigned x=0;x<M3_PHOTO_W;++x){unsigned p=(y*M3_PHOTO_W+x)*2;uint16_t color=((x/48+y/48)&1)?0x04df:0xb815;sim_photo_pixels[p]=color;sim_photo_pixels[p+1]=color>>8;}
+    return sim_photo_pixels;
+}
+bool m3_gallery_library_request(unsigned page) {
+    ++sim_gallery_library.generation; ++sim_gallery_library.revision; sim_gallery_library.status=M3_GALLERY_READY;
+    sim_gallery_library.page=page; sim_gallery_library.count=22; sim_gallery_library.shown=page==2?4:9; sim_gallery_copied=0;
+    for(unsigned i=0;i<sim_gallery_library.shown;++i){sim_gallery_library.items[i].video=i%3==1;snprintf(sim_gallery_library.items[i].path,256,"/albums/写真_%u.%s",page*9+i,sim_gallery_library.items[i].video?"mp4":"jpg");}
+    return true;
+}
+void m3_gallery_library_state(m3_gallery_library_t *out) { *out=sim_gallery_library; }
+bool m3_gallery_thumbnail_copy(unsigned job,unsigned index,uint8_t *out,size_t capacity) {
+    if(job!=sim_gallery_library.generation || index>=sim_gallery_library.shown || capacity<M3_GALLERY_THUMB_BYTES || (sim_gallery_copied&(1u<<index)))return false;
+    for(unsigned y=0;y<120;++y)for(unsigned x=0;x<120;++x){unsigned p=(y*120+x)*2;uint16_t color=(index%2)?((x/24+y/24)&1?0xfbc0:0x284f):((x/20+y/20)&1?0x04df:0xb815);out[p]=color;out[p+1]=color>>8;}
+    sim_gallery_copied|=1u<<index; return true;
+}
 bool m3_runtime_file_action(bool sd, const char *a, const char *b, bool remove) { (void)sd; (void)a; (void)b; (void)remove; return true; }

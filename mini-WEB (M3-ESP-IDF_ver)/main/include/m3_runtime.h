@@ -1,10 +1,14 @@
 #pragma once
 #include "storage_view.h"
 #include "network_manager.h"
+#include "m3_power.h"
 #define M3_WIFI_RESULTS 8
 typedef enum { M3_WIFI_SCAN, M3_WIFI_CONNECT, M3_WIFI_SETUP, M3_WIFI_IPV6, M3_WIFI_CONNECT_SAVED } m3_wifi_action_t;
 typedef struct {
     bool initialized, web, sd, cloud;
+    m3_power_state_t power;
+    bool cpu_valid;
+    unsigned cpu_percent[2], cpu_revision;
     net_mode_t mode;
     int rssi;
     unsigned requests, disconnects, file_revision;

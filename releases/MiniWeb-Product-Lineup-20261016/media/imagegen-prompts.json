@@ -1,0 +1,16 @@
+{
+  "tool": "built-in image_gen",
+  "transparent_background": true,
+  "edits": [
+    {
+      "model": "m1",
+      "source": "user supplied physical product photograph",
+      "prompt": "Use case: background-extraction and precise product photo retouch. Asset type: authentic product photograph for the Mini WebServer product website. Edit the provided photograph, do not invent a new model. M1 small handheld web server: yellow 3D printed rectangular housing, rounded corners, four corner screw holes, dark small rectangular opening above portrait LCD. Preserve the distinctive yellow material and the screen's existing Mini WEB M1 dashboard with Wi-Fi, WEB ON, RAM/FLASH/SD bars and Korean action buttons. Keep the enclosure width, thickness, opening and screen proportions faithful. Remove the entire desk, computer, keyboard, cables, room and distractions. Return exactly one isolated whole product on a truly transparent alpha background. Professional neutral softbox lighting, correct white balance and exposure, remove glare/haze and lens reflections, modest sharpening and noise reduction. Keep real 3D print texture, no glossy redesign. Straighten the product to stand vertically while retaining a modest natural three-quarter perspective, center the entire object with 10% padding on every side. Preserve the original screen layout, readable original text and icons as closely as possible; do not add a logo, claims, UI controls, hardware ports or accessories. No external captions, no montage, no frame. Photorealistic retouched existing hardware, not a CGI concept."
+    },
+    {
+      "model": "m3",
+      "source": "user supplied physical product photograph",
+      "prompt": "Use case: background-extraction and precise product photo retouch. Asset type: authentic product photograph for the Mini WebServer product website. Edit the provided photograph, do not invent a new model. M3 handheld web server: light gray 3D printed rectangular enclosure with a black glass front, a small centered circular sensor at the top, large portrait display. Preserve the actual dark blue home screen with 23:52 clock, Korean date, status card and the six colorful rounded app icons shown in the photo. Preserve body proportions, slightly visible left edge thickness, narrow gray rim and black bezel. Remove the entire desk, computer, keyboard, cables, room and distractions. Return exactly one isolated whole product on a truly transparent alpha background. Professional neutral softbox lighting, correct white balance and exposure, remove glare/haze and lens reflections, modest sharpening and noise reduction. Keep real 3D print texture, no glossy redesign. Straighten the product to stand vertically while retaining a modest natural three-quarter perspective, center the entire object with 10% padding on every side. Preserve the original screen layout, readable original text and icons as closely as possible; do not add a logo, claims, UI controls, hardware ports or accessories. No external captions, no montage, no frame. Photorealistic retouched existing hardware, not a CGI concept."
+    }
+  ]
+}
