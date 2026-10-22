@@ -287,6 +287,7 @@
     "SET_RESTART_MANUAL": "保存しました。手動で再起動して適用してください。",
     "SET_SAVE_FAILED": "設定を保存できません。再試行してください。",
     "SET_BRIGHTNESS_ERROR": "バックライト制御失敗。標準の明るさを維持します。",
+    "SET_FLASH_USAGE": "機能別フラッシュ使用量",
     "SD_APPS": "SDアプリ",
     "SD_APPS_HINT": "SD /apps/*.lua を3秒ごとに自動検索します。ファイルを押すと実行します。",
     "SD_APPS_EMPTY": "アプリがないか、SDカードを使用できません。",

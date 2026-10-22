@@ -24,6 +24,7 @@
 #include "m3_agent.h"
 #include "m3_i18n.h"
 #include "m3_tube.h"
+#include "m3_flash_usage_view.h"
 #include "esp_heap_caps.h"
 #include "esp_psram.h"
 #include "esp_timer.h"
@@ -3491,6 +3492,8 @@ static void build_settings(lv_obj_t *system) {
     button(box, LV_SYMBOL_SAVE, T_STT_KEY_SAVE, BTN_SECONDARY, voice_save_key, NULL);
     voice_key_info = label(box, "", MUTED);
     voice_key_status();
+    box = card(system, T_SET_FLASH_USAGE);
+    m3_flash_usage_view_build(box, &(m3_flash_view_style_t){TEXT, MUTED, CYAN, SURFACE_HI, &st_btn, &st_btn_pressed});
     box = card(system, T_SEC_ABOUT);
     system_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(system_info, 4, 0);
 }
@@ -3552,6 +3555,7 @@ static void style_keyboard(void) {
 static void apply_language(void) {
     for (unsigned i = 0; i < binding_count; ++i) bind_apply(i);
     for (unsigned i = 0; i < segment_count; ++i) segment_refresh(&segments[i]);
+    m3_flash_usage_view_refresh();
     lv_label_set_text(app_title, tr(app_names[current_app]));
     seen_agent = seen_voice = seen_wifi = seen_scan = seen_files = ~0u;
     web_qr_dirty = true;

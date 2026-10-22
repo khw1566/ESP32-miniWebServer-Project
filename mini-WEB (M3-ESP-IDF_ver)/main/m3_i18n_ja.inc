@@ -283,6 +283,7 @@ static const char *const japanese_texts[T_COUNT] = {
     [T_SET_RESTART_MANUAL] = "保存しました。手動で再起動して適用してください。",
     [T_SET_SAVE_FAILED] = "設定を保存できません。再試行してください。",
     [T_SET_BRIGHTNESS_ERROR] = "バックライト制御失敗。標準の明るさを維持します。",
+    [T_SET_FLASH_USAGE] = "機能別フラッシュ使用量",
     [T_REC_START] = "録音開始",
     [T_REC_STOP] = "停止して保存",
     [T_REC_PLAY] = "最新を再生",

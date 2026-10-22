@@ -306,6 +306,7 @@ static const text_pair_t texts[T_COUNT] = {
     [T_SET_RESTART_MANUAL] = {"Saved. Restart manually to apply operating mode.", "저장했습니다. 직접 재시작해 운영 모드를 적용하세요."},
     [T_SET_SAVE_FAILED] = {"Settings could not be saved. Try again.", "설정을 저장하지 못했습니다. 다시 시도하세요."},
     [T_SET_BRIGHTNESS_ERROR] = {"Backlight control failed. Full brightness is retained.", "백라이트 제어 실패. 기본 밝기를 유지합니다."},
+    [T_SET_FLASH_USAGE] = {"Flash usage by function", "기능별 플래시 사용량"},
     [T_REC_START] = {"Record", "녹음 시작"},
     [T_REC_STOP] = {"Stop and save", "정지 후 저장"},
     [T_REC_PLAY] = {"Play last", "최근 녹음 재생"},
