@@ -146,7 +146,7 @@ static cJSON *execute_tool(const char *name, cJSON *args, unsigned token) {
     if (!strcmp(name, "speak_text")) {
         cJSON *text = cJSON_GetObjectItemCaseSensitive(args, "text");
         m3_audio_state_t audio; m3_audio_state(&audio);
-        bool queued = cJSON_IsString(text) && m3_speech_text_valid(text->valuestring) && !audio.playing && !deferred_speech[0];
+        bool queued = cJSON_IsString(text) && m3_tts_text_valid(text->valuestring) && !audio.playing && !deferred_speech[0];
         if (queued) snprintf(deferred_speech, sizeof(deferred_speech), "%s", text->valuestring);
         return tool_result(queued, queued ? "Korean TTS staged until response; playback not yet queued/completed" : "Audio busy, speech already staged or invalid text");
     }
@@ -304,7 +304,7 @@ static void worker(void *unused) {
         answer[0] = trace[0] = deferred_speech[0] = 0;
         if (active(request.generation)) run_request(&request, answer, trace, history_user, history_answer);
         if (active(request.generation) && answer[0] && deferred_speech[0]) {
-            if (!m3_audio_speak(deferred_speech))
+            if (!m3_audio_speak(deferred_speech, 165))
                 update(request.generation, "Reply ready; speech could not be queued", answer, trace);
         }
         memset(deferred_speech, 0, sizeof(deferred_speech));
