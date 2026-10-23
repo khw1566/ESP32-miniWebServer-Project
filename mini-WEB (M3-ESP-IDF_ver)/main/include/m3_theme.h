@@ -3,10 +3,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-/* Wallpapers are drawn from LVGL shapes; ids M3_WALLPAPER_LIVE_FIRST..LAST animate. */
-#define M3_WALLPAPER_COUNT 9
-#define M3_WALLPAPER_LIVE_FIRST 5
-#define M3_WALLPAPER_LIVE_LAST 7
+/* Wallpapers are drawn from LVGL shapes; m3_wallpaper_live() tells which ones animate. */
+#define M3_WALLPAPER_COUNT 12
 enum { M3_OUTLINE_NONE, M3_OUTLINE_SUBTLE, M3_OUTLINE_ACCENT, M3_OUTLINE_COUNT };
 enum { M3_CORNER_ROUND, M3_CORNER_COMPACT, M3_CORNER_SQUARE, M3_CORNER_COUNT };
 enum { M3_STYLE_DARK, M3_STYLE_WHITE, M3_STYLE_MODERN, M3_STYLE_CLASSIC, M3_STYLE_COUNT };
@@ -17,6 +15,7 @@ enum { M3_STYLE_DARK, M3_STYLE_WHITE, M3_STYLE_MODERN, M3_STYLE_CLASSIC, M3_STYL
 typedef struct {
     uint32_t ink, surface, surface_hi, line, text, muted, field;
     uint32_t key_bg, key_item, key_checked, key_text, danger_bg, danger_text;
+    uint32_t shade_top, shade_bottom, glass; /* activity panel gradient and translucent panels */
 } m3_palette_t;
 #define M3_PALETTE_ROLES (sizeof(m3_palette_t) / sizeof(uint32_t))
 typedef struct {

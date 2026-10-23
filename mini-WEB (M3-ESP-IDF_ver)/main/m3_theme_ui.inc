@@ -173,7 +173,7 @@ static void theme_apply(const m3_theme_t *next) {
         theme_recolor(lv_display_get_screen_active(m3_board_display()), from, to, THEME_ROLES);
         lv_chart_set_series_color(cpu_chart, cpu_series[0], lv_color_hex(CYAN)); lv_chart_set_series_color(cpu_chart, cpu_series[1], lv_color_hex(MAGENTA));
         lv_chart_set_series_color(chart, heap_series, lv_color_hex(CYAN)); lv_chart_set_series_color(chart, psram_series, lv_color_hex(MAGENTA));
-        calendar_stamp = 0; update_calendar(); home_page_update();
+        calendar_stamp = 0; update_calendar(); home_page_update(); render_game();
     }
     if (recolor || previous.wallpaper != ui_theme.wallpaper) m3_wallpaper_build(home_wallpaper, ui_theme.wallpaper, CYAN, MAGENTA);
     theme_controls_refresh();
@@ -285,7 +285,7 @@ static void theme_card(lv_obj_t *system) {
     theme_corner_tabs = segmented(box, corners, NULL, M3_CORNER_COUNT, ui_theme.corners, theme_option_event);
     text(box, T_THEME_WALLPAPER, TEXT);
     static const m3_text_t names[M3_WALLPAPER_COUNT] = {T_WALL_AURORA, T_WALL_MIDNIGHT, T_WALL_SUNSET, T_WALL_OCEAN,
-        T_WALL_MONO, T_WALL_STARS, T_WALL_DRIFT, T_WALL_BUBBLES, T_WALL_DAWN};
+        T_WALL_MONO, T_WALL_STARS, T_WALL_DRIFT, T_WALL_BUBBLES, T_WALL_DAWN, T_WALL_CLOUDS, T_WALL_PETALS, T_WALL_BOKEH};
     lv_obj_t *grid = theme_grid(box);
     for (unsigned i = 0; i < M3_WALLPAPER_COUNT; ++i) {
         lv_obj_t *tile = theme_tile(grid, 98, 118, theme_wall_event, i);
