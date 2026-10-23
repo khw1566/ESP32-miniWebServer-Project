@@ -1,6 +1,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
 const root=path.resolve(__dirname,'..'),common=path.join(__dirname,'firmware_common');
-const read=f=>fs.readFileSync(f,'utf8');
+// Git can check out synchronized copies with CRLF on Windows.
+const read=f=>fs.readFileSync(f,'utf8').replace(/\r\n/g,'\n');
 const html=read(path.join(common,'wifi_setup.html'));
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 class Element {

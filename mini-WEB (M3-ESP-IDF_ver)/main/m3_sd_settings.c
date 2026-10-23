@@ -1,5 +1,6 @@
 #include "m3_sd_settings.h"
 #include "network_manager.h"
+#include "m3_memory.h"
 #include "sd_media.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -25,6 +26,9 @@ static atomic_bool keys_loaded;
 static portMUX_TYPE wifi_lock = portMUX_INITIALIZER_UNLOCKED;
 static network_settings_t wifi_settings;
 static bool wifi_loaded;
+/* The SD lock serializes writers; readers copy under wifi_lock, never borrow. */
+static M3_PSRAM_BSS network_settings_t wifi_profiles[2][M3_WIFI_PROFILE_LIMIT];
+static unsigned wifi_bank, wifi_count;
 const char *m3_sd_gemini_key(void) { return atomic_load(&keys_loaded) ? gemini : ""; }
 const char *m3_sd_google_tts_key(void) { return atomic_load(&keys_loaded) ? tts : ""; }
 const char *m3_sd_openai_key(void) { return atomic_load(&keys_loaded) ? openai : ""; }
@@ -111,6 +115,122 @@ static bool history_valid(const cJSON *json) {
     cJSON_ArrayForEach(item, networks) if (!profile(item, &s)) { valid = false; break; }
     mbedtls_platform_zeroize(&s, sizeof(s)); return valid;
 }
+static void cache_history(const cJSON *json) {
+    unsigned bank = 1 - wifi_bank, count = 0;
+    memset(wifi_profiles[bank], 0, sizeof(wifi_profiles[bank]));
+    const cJSON *networks = cJSON_GetObjectItemCaseSensitive(json, "networks");
+    if (!networks) {
+        if (profile(json, &wifi_profiles[bank][0])) count = 1;
+    } else {
+        const cJSON *item;
+        cJSON_ArrayForEach(item, networks) {
+            if (count == M3_WIFI_PROFILE_LIMIT) break;
+            network_settings_t candidate;
+            if (profile(item, &candidate)) {
+                unsigned i = 0;
+                while (i < count && strcmp(wifi_profiles[bank][i].ssid, candidate.ssid)) ++i;
+                wifi_profiles[bank][i] = candidate;
+                if (i == count) ++count;
+            }
+            mbedtls_platform_zeroize(&candidate, sizeof(candidate));
+        }
+    }
+    portENTER_CRITICAL(&wifi_lock);
+    unsigned old = wifi_bank;
+    wifi_bank = bank; wifi_count = count;
+    portEXIT_CRITICAL(&wifi_lock);
+    mbedtls_platform_zeroize(wifi_profiles[old], sizeof(wifi_profiles[old]));
+}
+unsigned m3_sd_wifi_profiles(m3_wifi_profile_info_t *out, unsigned capacity) {
+    portENTER_CRITICAL(&wifi_lock);
+    unsigned count = wifi_count;
+    if (out) for (unsigned i = 0; i < count && i < capacity; ++i) {
+        memcpy(out[i].ssid, wifi_profiles[wifi_bank][i].ssid, sizeof(out[i].ssid));
+        out[i].secured = wifi_profiles[wifi_bank][i].pass[0] != 0;
+    }
+    portEXIT_CRITICAL(&wifi_lock);
+    return count;
+}
+bool m3_sd_wifi_known(const char *ssid) {
+    if (!ssid) return false;
+    bool found = false;
+    portENTER_CRITICAL(&wifi_lock);
+    for (unsigned i = 0; i < wifi_count; ++i)
+        if (!strcmp(wifi_profiles[wifi_bank][i].ssid, ssid)) { found = true; break; }
+    portEXIT_CRITICAL(&wifi_lock);
+    return found;
+}
+bool m3_sd_wifi_activate(const char *ssid) {
+    if (!ssid) return false;
+    bool found = false;
+    portENTER_CRITICAL(&wifi_lock);
+    for (unsigned i = 0; i < wifi_count; ++i)
+        if (!strcmp(wifi_profiles[wifi_bank][i].ssid, ssid)) {
+            wifi_settings = wifi_profiles[wifi_bank][i]; wifi_loaded = found = true; break;
+        }
+    portEXIT_CRITICAL(&wifi_lock);
+    return found;
+}
+bool m3_sd_wifi_matches(const char *ssid, bool open) {
+    if (!ssid) return false;
+    bool found = false;
+    portENTER_CRITICAL(&wifi_lock);
+    for (unsigned i = 0; i < wifi_count; ++i)
+        if (!strcmp(wifi_profiles[wifi_bank][i].ssid, ssid)) {
+            found = open == (wifi_profiles[wifi_bank][i].pass[0] == 0); break;
+        }
+    portEXIT_CRITICAL(&wifi_lock);
+    return found;
+}
+static cJSON *profile_json(const network_settings_t *s) {
+    cJSON *json = cJSON_CreateObject();
+    bool ok = json && cJSON_AddStringToObject(json, "ssid", s->ssid) &&
+        cJSON_AddStringToObject(json, "password", s->pass) && cJSON_AddBoolToObject(json, "static", s->use_static);
+    if (ok && s->use_static) ok = cJSON_AddStringToObject(json, "ip", s->ip) &&
+        cJSON_AddStringToObject(json, "gateway", s->gateway) && cJSON_AddStringToObject(json, "netmask", s->netmask) &&
+        cJSON_AddStringToObject(json, "dns", s->dns);
+    if (!ok) { release_json(json); return NULL; }
+    return json;
+}
+/* Build a replacement before touching disk. Keep every other profile unchanged. */
+static cJSON *updated_history(const cJSON *old, const network_settings_t *saved, const char *removed, esp_err_t *error) {
+    cJSON *json = cJSON_CreateObject(), *networks = cJSON_CreateArray();
+    bool ok = json && networks && cJSON_AddNumberToObject(json, "version", 1);
+    if (!ok || !cJSON_AddItemToObject(json, "networks", networks)) {
+        release_json(networks); release_json(json); *error = ESP_ERR_NO_MEM; return NULL;
+    }
+    const cJSON *list = cJSON_GetObjectItemCaseSensitive(old, "networks");
+    const cJSON *item = list ? list->child : old;
+    unsigned count = 0;
+    for (; item; item = list ? item->next : NULL) {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "ssid");
+        if (!cJSON_IsString(name) || (saved && !strcmp(name->valuestring, saved->ssid)) ||
+            (removed && !strcmp(name->valuestring, removed))) continue;
+        /* Normalize duplicate SSIDs from hand-edited histories. */
+        bool duplicate = false;
+        const cJSON *entry;
+        cJSON_ArrayForEach(entry, networks) if (!strcmp(cJSON_GetObjectItemCaseSensitive(entry, "ssid")->valuestring, name->valuestring)) duplicate = true;
+        if (duplicate) continue;
+        if (++count > M3_WIFI_PROFILE_LIMIT - (saved ? 1 : 0)) {
+            release_json(json); *error = ESP_ERR_NO_MEM; return NULL;
+        }
+        cJSON *copy = cJSON_Duplicate(item, true);
+        if (!copy || !cJSON_AddItemToArray(networks, copy)) {
+            release_json(copy); release_json(json); *error = ESP_ERR_NO_MEM; return NULL;
+        }
+    }
+    if (saved) {
+        cJSON *entry = profile_json(saved);
+        if (!entry || !cJSON_AddItemToArray(networks, entry)) {
+            release_json(entry); release_json(json); *error = ESP_ERR_NO_MEM; return NULL;
+        }
+    }
+    const cJSON *last = cJSON_GetObjectItemCaseSensitive(old, "last_ssid");
+    const char *selected = saved ? saved->ssid : cJSON_IsString(last) ? last->valuestring : "";
+    if (removed && !strcmp(selected, removed)) selected = "";
+    if (!cJSON_AddStringToObject(json, "last_ssid", selected)) { release_json(json); *error = ESP_ERR_NO_MEM; return NULL; }
+    *error = ESP_OK; return json;
+}
 static bool write_json(const char *path, cJSON *json) {
     char temporary[128], backup[128];
     snprintf(temporary,sizeof(temporary),"%s.tmp",path);
@@ -148,19 +268,36 @@ esp_err_t m3_sd_wifi_store(const network_settings_t *s) {
     if (!network_settings_valid(s)) return ESP_ERR_INVALID_ARG;
     if (!sd_media_ready()) return ESP_ERR_INVALID_STATE;
     if (!sd_media_admin_lock()) return ESP_ERR_TIMEOUT;
-    cJSON *json=cJSON_CreateObject();
-    bool ok=json && cJSON_AddNumberToObject(json,"version",1) &&
-        cJSON_AddStringToObject(json,"ssid",s->ssid) && cJSON_AddStringToObject(json,"password",s->pass) &&
-        cJSON_AddBoolToObject(json,"static",s->use_static);
-    if (ok && s->use_static) ok=cJSON_AddStringToObject(json,"ip",s->ip) && cJSON_AddStringToObject(json,"gateway",s->gateway) &&
-        cJSON_AddStringToObject(json,"netmask",s->netmask) && cJSON_AddStringToObject(json,"dns",s->dns);
+    bool absent; cJSON *previous = read_history(&absent);
+    esp_err_t error = ESP_FAIL;
+    cJSON *json = previous || absent ? updated_history(previous, s, NULL, &error) : NULL;
+    bool ok = json != NULL;
     ok=ok && (mkdir(PRIVATE_ROOT,0700)==0 || errno==EEXIST) && write_json(WIFI_PATH,json);
-    release_json(json);
-    if (ok) { portENTER_CRITICAL(&wifi_lock);wifi_settings=*s;wifi_loaded=true;portEXIT_CRITICAL(&wifi_lock); }
+    if (ok) { cache_history(json); m3_sd_wifi_activate(s->ssid); }
+    release_json(json); release_json(previous);
     sd_media_admin_unlock();
     if (ok) ESP_LOGI("SD_CONFIG","Wi-Fi JSON committed");
     else ESP_LOGW("SD_CONFIG","Wi-Fi JSON save failed; settings not reported as saved");
-    return ok ? ESP_OK : ESP_FAIL;
+    return ok ? ESP_OK : error != ESP_OK ? error : ESP_FAIL;
+}
+esp_err_t m3_sd_wifi_forget(const char *ssid) {
+    if (!ssid || !*ssid) return ESP_ERR_INVALID_ARG;
+    if (!sd_media_ready()) return ESP_ERR_INVALID_STATE;
+    if (!sd_media_admin_lock()) return ESP_ERR_TIMEOUT;
+    bool absent; cJSON *old = read_history(&absent);
+    esp_err_t error = ESP_FAIL;
+    cJSON *json = old ? updated_history(old, NULL, ssid, &error) : NULL;
+    bool ok = json && write_json(WIFI_PATH, json);
+    if (ok) {
+        cache_history(json);
+        portENTER_CRITICAL(&wifi_lock);
+        if (!strcmp(wifi_settings.ssid, ssid)) {
+            mbedtls_platform_zeroize(&wifi_settings, sizeof(wifi_settings)); wifi_loaded = false;
+        }
+        portEXIT_CRITICAL(&wifi_lock);
+    }
+    release_json(json); release_json(old); sd_media_admin_unlock();
+    return ok ? ESP_OK : error != ESP_OK ? error : ESP_FAIL;
 }
 void m3_sd_wifi_save(const network_settings_t *s) { (void)m3_sd_wifi_store(s); }
 bool m3_sd_wifi_load(network_settings_t *out) {
@@ -275,6 +412,11 @@ void m3_sd_settings_init(void) {
     atomic_store(&keys_loaded,true);
     network_settings_t settings;
     bool wifi=m3_sd_wifi_find("",&settings);
+    if (sd_media_admin_lock()) {
+        bool absent; cJSON *json = read_history(&absent);
+        if (json) cache_history(json);
+        release_json(json); sd_media_admin_unlock();
+    }
     portENTER_CRITICAL(&wifi_lock);
     if(wifi) wifi_settings=settings;
     wifi_loaded=wifi;

@@ -147,6 +147,7 @@ function removeCall(source,name,replacement){
 }
 // Exercise UI -> queue admission too: worker-only tests bypassed a lost-SSID bug.
 const admission = {M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,
+ M3_WIFI_USE_PROFILE:5,M3_WIFI_FORGET_PROFILE:6,
  wifi_queue:true,state:{initialized:true,wifi_ready:true},state_lock:0,wifi_pending:false,
  portENTER_CRITICAL:()=>{},portEXIT_CRITICAL:()=>{},network_settings_valid:s=>!!s && !!s.ssid,
  claim:()=>{if(admission.wifi_pending)return false;admission.wifi_pending=true;return true;},
@@ -162,7 +163,7 @@ let admit=body('m3_runtime_wifi',runtime)
  .replaceAll('&request','request').replace('memset(request, 0, sizeof(request))','clear(request)')
  .replace('atomic_store(&wifi_pending, false)','release()');
 vm.runInContext('function admit(action,settings){'+admit+'}',admission);
-for(const action of [1,4]) {
+for(const action of [1,4,5,6]) {
  admission.wifi_pending=false;
  const selected={version:1,ssid:'Fixture Wi-Fi',pass:action===4?'':'fixture-secret',use_static:1,ip:'192.168.1.20'};
  assert(admission.admit(action,selected));
@@ -176,14 +177,22 @@ assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));assert(!admission.wifi_pendin
 admission.accept=true;admission.state.wifi_ready=false;
 assert(!admission.admit(4,{ssid:'Fixture Wi-Fi'}));
 let worker=removeCall(body('wifi_execute',runtime),'snprintf','record_message()')
- .replace('memset(next->settings.pass, 0, sizeof(next->settings.pass))','next->settings.pass = ""')
+ .replaceAll('memset(next->settings.pass, 0, sizeof(next->settings.pass))','next->settings.pass = ""')
  .replace('memset(request, 0, sizeof(*request))','request.cleared = true')
  .replace(/->/g,'.').replace(/\b(?:esp_err_t|int) (\w+)\s*=/g,'let $1 =')
  .replace('next.settings = request.settings','next.settings = {...request.settings}')
  .replace(/&request.settings/g,'request.settings')
+ .replaceAll('&next.settings','next.settings')
  .replace('atomic_store(&wifi_pending, false)','pending = false');
-worker=worker.replaceAll('60000000LL','60000000').replace('request.settings.pass[0] != 0','request.settings.pass.length > 0');
+worker=worker.replaceAll('60000000LL','60000000').replaceAll('request.settings.pass[0] != 0','request.settings.pass.length > 0')
+ .replaceAll('next.settings.pass[0] != 0','next.settings.pass.length > 0');
 const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPTIVE:1,M3_WIFI_SCAN:0,M3_WIFI_CONNECT:1,M3_WIFI_SETUP:2,M3_WIFI_IPV6:3,M3_WIFI_CONNECT_SAVED:4,M3_WIFI_RESULTS:8,
+ NULL:null,M3_WIFI_USE_PROFILE:5,M3_WIFI_FORGET_PROFILE:6,ESP_ERR_NOT_FOUND:261,ESP_ERR_NO_MEM:257,M3_WIFI_PROFILE_LIMIT:32,WIFI_AUTH_OPEN:0,
+ m3_sd_wifi_profiles:()=>0,m3_sd_wifi_known:()=>false,m3_sd_wifi_forget:()=>0,
+ m3_sd_wifi_matches:()=>false,
+ m3_sd_wifi_find:()=>true,network_recovery_pending:()=>false,
+ network_settings_load:s=>{Object.assign(s,radio.stored??{ssid:'Saved',pass:''});return true;},
+ network_connect_saved:()=>{radio.events.push('scan-saved');radio.events.push('connect');return radio.connected;},
  setup_requested:false,web_paused:false,domain_paused:false,next_wifi_retry:0,now:0,esp_timer_get_time:()=>radio.now,
  restore_wifi_password:()=>false,
  NET_MODE_STA_CONNECTED:2,M3_CUE_WIFI_CONNECTED:3,M3_CUE_WIFI_SETUP:4,M3_CUE_WIFI_FAILED:5,
@@ -191,7 +200,7 @@ const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPT
  pending:true,events:[],saved:0,connected:0,fallback:0,scanned:2,web:true,
  record_message:()=>{},publish:()=>radio.events.push('publish'),
  network_scan_wifi:()=>{radio.events.push('scan');return radio.scanned;},
- network_save_configuration:()=>{radio.events.push('save');return radio.saved;},
+ network_save_configuration:s=>{radio.events.push('save');if(!radio.saved)radio.stored={...s};return radio.saved;},
  dns_server_stop:()=>radio.events.push('dns-stop'),dns_server_start:()=>radio.events.push('dns-start'),
  network_connect_sta:()=>{radio.events.push('connect');return radio.connected;},
  network_start_softap:()=>{radio.events.push('setup');return radio.fallback;},
@@ -201,12 +210,12 @@ const radio={ESP_OK:0,ESP_ERR_INVALID_STATE:259,NET_MODE_IDLE:0,NET_MODE_AP_CAPT
 vm.createContext(radio);vm.runInContext('function execute(next,request){'+worker+'}',radio);
 function execute(action,overrides={}){
  Object.assign(radio,{pending:true,events:[],saved:0,connected:0,fallback:0,scanned:2,web:true},overrides);
- const state={networks:[],scan_revision:0,settings_revision:0,wifi_revision:0};
+ const state={networks:[],scan_count:0,settings:{},scan_revision:0,settings_revision:0,wifi_revision:0};
  const request={action,settings:{ssid:'Example',pass:'secret123'}};radio.execute(state,request);
  assert(request.cleared);assert(!radio.pending);assert.equal(state.wifi_revision,1);return state;
 }
 let state=execute(1);assert.deepEqual(radio.events,['publish','save','dns-stop','connect','publish']);
-assert.equal(state.settings.pass,'');assert.equal(state.settings_revision,1);
+assert.equal(state.settings.pass,'');assert.equal(state.settings_revision,2);
 execute(1,{saved:5});assert(!radio.events.includes('connect'));assert(!radio.events.includes('setup'));
 execute(1,{connected:5});assert.deepEqual(radio.events,['publish','save','dns-stop','connect','setup','dns-start','publish']);
 execute(1,{connected:5,fallback:5});assert(!radio.events.includes('dns-start'));
@@ -218,23 +227,25 @@ state=execute(4,{restore_wifi_password:s=>{s.pass='saved-secret';return true;}})
 assert(radio.events.includes('connect'));assert(state.wifi_password_saved);assert.equal(state.settings.pass,'');
 assert(!radio.setup_requested);
 execute(2);assert(radio.setup_requested,'explicit setup disables automatic handover');
-for(const scanned of [-1,0,8]){state=execute(0,{scanned});assert.equal(state.scan_count,Math.max(0,scanned));assert.equal(state.scan_revision,1);assert(!radio.events.includes('save'));}
+for(const scanned of [-1,0,8]){state=execute(0,{scanned,network_scan_wifi:items=>{for(let i=0;i<scanned;i++)items[i]={ssid:'Fixture-'+i};return scanned;}});assert.equal(state.scan_count,Math.max(0,scanned));assert.equal(state.scan_revision,1);assert(!radio.events.includes('save'));}
 // Execute periodic recovery with the real worker; initial failure leaves a retryable portal.
 let recovery=body('retry_saved_wifi',runtime).replaceAll('60000000LL','60000000')
- .replace('wifi_request_t request = {.action = M3_WIFI_CONNECT, .retry = true};','let request = {action:M3_WIFI_CONNECT,retry:true,settings:{}};')
+ .replace('wifi_request_t request = {.action = M3_WIFI_CONNECT, .retry = true};','let request = {action:M3_WIFI_CONNECT,retry:true,settings:{pass:""}};')
  .replace('bool expected = false','let expected = false')
  .replace('atomic_compare_exchange_strong(&wifi_pending, &expected, true)','claim_wifi()')
  .replaceAll('&request.settings','request.settings').replaceAll('&request','request')
  .replace('memset(request, 0, sizeof(request))','request.cleared = true').replaceAll('->','.');
 Object.assign(radio,{loaded:true,mode:1,clients:false,network_get_mode:()=>radio.mode,network_setup_has_clients:()=>radio.clients,
+ m3_sd_wifi_profiles:()=>radio.loaded?2:0,
  network_settings_load:s=>{Object.assign(s,{ssid:'Saved',pass:'saved-secret'});return radio.loaded;},
  claim_wifi:()=>{if(radio.pending)return false;radio.pending=true;return true;},
  wifi_execute:(next,request)=>radio.execute(next,request)});
 vm.runInContext('function recover(next){'+recovery+'}',radio);
 const recover=(overrides={})=>{Object.assign(radio,{setup_requested:false,next_wifi_retry:60000000,now:60000000,
  pending:false,loaded:true,mode:1,clients:false,events:[],saved:0,connected:0,web:true},overrides);
- radio.recover({wifi_ready:true,settings_revision:0,wifi_revision:0});return radio.events;};
+ radio.recover({wifi_ready:true,settings:{},scan_count:0,settings_revision:0,wifi_revision:0});return radio.events;};
 assert(recover().includes('connect'));assert.equal(radio.next_wifi_retry,120000000);
+assert(radio.events.includes('scan-saved'),'automatic recovery must scan stored profiles first');
 assert(!radio.events.includes('save'),'automatic retries must not rewrite NVS');
 assert(!recover({clients:true}).includes('connect'),'active setup clients keep their connection');
 assert(!recover({now:59999999}).includes('connect'));
@@ -245,16 +256,19 @@ assert(!recover({mode:3}).includes('connect'));
 assert(recover({connected:5}).includes('setup'),'failed retry restores the portal');
 // Saved-password selection must never turn an explicitly selected open AP into a secured AP.
 const passwords={M3_WIFI_CONNECT:1,M3_WIFI_CONNECT_SAVED:4,wifi_open_selected:false,wifi_selected_ssid:'Saved',
- snapshot:{wifi_password_saved:true,settings:{ssid:'Saved'}},strcmp:(a,b)=>a===b?0:1};
+ snapshot:{wifi_password_saved:true,saved_wifi_count:0,saved_wifi:[],settings:{ssid:'Saved'}},strcmp:(a,b)=>a===b?0:1};
 vm.createContext(passwords);
 vm.runInContext('function choose(settings){'+body('wifi_connection_action')
- .replace('bool explicit_open','let explicit_open').replaceAll('->','.').replace('!settings.pass[0]','!settings.pass.length')+'}',passwords);
+ .replace(/\bbool\s+/g,'let ').replace(/\bunsigned\s+/g,'let ').replaceAll('->','.').replace('!settings.pass[0]','!settings.pass.length')+'}',passwords);
 assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
 assert.equal(passwords.choose({ssid:'Saved',pass:'new-secret'}),1);
 assert.equal(passwords.choose({ssid:'Other',pass:''}),1);
 passwords.wifi_open_selected=true;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
 passwords.wifi_selected_ssid='Other';assert.equal(passwords.choose({ssid:'Saved',pass:''}),4);
 passwords.snapshot.wifi_password_saved=false;assert.equal(passwords.choose({ssid:'Saved',pass:''}),1);
+passwords.snapshot.saved_wifi=[{ssid:'Other',secured:true}];passwords.snapshot.saved_wifi_count=1;
+assert.equal(passwords.choose({ssid:'Other',pass:''}),1,'explicitly selected open AP keeps its empty password');
+passwords.wifi_open_selected=false;assert.equal(passwords.choose({ssid:'Other',pass:''}),4,'reuse credentials from any saved slot');
 // Execute secret restoration from the actual C helper, with an NVS mock.
 const secrets={saved:{ssid:'Saved',pass:'stored-secret'},available:true,sdSaved:null,
  m3_sd_wifi_find:(ssid,s)=>{if(!secrets.sdSaved || secrets.sdSaved.ssid!==ssid)return false;Object.assign(s,secrets.sdSaved);return true;},

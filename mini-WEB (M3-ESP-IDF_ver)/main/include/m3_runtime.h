@@ -2,8 +2,10 @@
 #include "storage_view.h"
 #include "network_manager.h"
 #include "m3_power.h"
+#include "m3_sd_settings.h"
 #define M3_WIFI_RESULTS 8
-typedef enum { M3_WIFI_SCAN, M3_WIFI_CONNECT, M3_WIFI_SETUP, M3_WIFI_IPV6, M3_WIFI_CONNECT_SAVED } m3_wifi_action_t;
+typedef enum { M3_WIFI_SCAN, M3_WIFI_CONNECT, M3_WIFI_SETUP, M3_WIFI_IPV6, M3_WIFI_CONNECT_SAVED,
+    M3_WIFI_USE_PROFILE, M3_WIFI_FORGET_PROFILE } m3_wifi_action_t;
 typedef enum { M3_WEB_STOP_DOMAIN, M3_WEB_STOP_ALL, M3_WEB_START_DOMAIN, M3_WEB_START_ALL } m3_web_action_t;
 typedef struct {
     bool initialized, web, sd, cloud;
@@ -30,6 +32,8 @@ typedef struct {
     unsigned scan_revision, settings_revision, wifi_revision;
     int scan_count;
     wifi_scan_item_t networks[M3_WIFI_RESULTS];
+    unsigned saved_wifi_count;
+    m3_wifi_profile_info_t saved_wifi[M3_WIFI_PROFILE_LIMIT];
     network_settings_t settings; /* Public fields only; password is always cleared. */
     char wifi_message[128];
     unsigned mutation_revision;

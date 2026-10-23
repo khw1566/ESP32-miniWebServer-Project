@@ -22,7 +22,45 @@ static unsigned revision;
 static bool dirty, web_active;
 static atomic_int restart_phase;
 static int64_t next_save;
-
+/* Separate key preserves the existing eight-byte device preferences. */
+static m3_typography_t typography = {1, 0, 16, 0};
+static unsigned typography_revision;
+static bool typography_dirty;
+static int64_t typography_next_save;
+bool m3_typography_valid(const m3_typography_t *p) {
+    return p && p->version == 1 && p->family < 3 && p->pixels >= M3_SYSTEM_FONT_MIN &&
+        p->pixels <= M3_SYSTEM_FONT_MAX && p->reserved == 0;
+}
+void m3_typography_get(m3_typography_t *out) {
+    portENTER_CRITICAL(&lock); *out = typography; portEXIT_CRITICAL(&lock);
+}
+bool m3_typography_update(const m3_typography_t *p) {
+    if (!m3_typography_valid(p)) return false;
+    portENTER_CRITICAL(&lock);
+    if (memcmp(&typography, p, sizeof(typography))) { typography = *p; typography_dirty = true; ++typography_revision; }
+    portEXIT_CRITICAL(&lock);
+    return true;
+}
+void m3_typography_poll(void) {
+    if (esp_timer_get_time() < typography_next_save || !storage_lock) return;
+    typography_next_save = esp_timer_get_time() + 2000000;
+    if (xSemaphoreTake(storage_lock, 0) != pdTRUE) return;
+    m3_typography_t p; unsigned captured; bool pending;
+    portENTER_CRITICAL(&lock); p = typography; captured = typography_revision; pending = typography_dirty; portEXIT_CRITICAL(&lock);
+    if (pending) {
+        nvs_handle_t nvs;
+        esp_err_t err = nvs_open("m3_device", NVS_READWRITE, &nvs);
+        if (err == ESP_OK) {
+            err = nvs_set_blob(nvs, "typography", &p, sizeof(p));
+            if (err == ESP_OK) err = nvs_commit(nvs);
+            nvs_close(nvs);
+        }
+        if (err == ESP_OK) {
+            portENTER_CRITICAL(&lock); if (captured == typography_revision) typography_dirty = false; portEXIT_CRITICAL(&lock);
+        } else ESP_LOGW("M3_SETTINGS", "Typography save failed: %s", esp_err_to_name(err));
+    }
+    xSemaphoreGive(storage_lock);
+}
 bool m3_preferences_valid(const m3_preferences_t *p) {
     return p && p->version == 1 && p->brightness >= 5 && p->brightness <= 100 &&
         p->max_fps >= 5 && p->max_fps <= 60 && p->animations <= 1 && p->web_focus <= 1 &&
@@ -68,6 +106,9 @@ esp_err_t m3_preferences_init(void) {
     if (nvs_open("m3_device", NVS_READONLY, &nvs) == ESP_OK) {
         found = nvs_get_blob(nvs, "preferences", &saved, &length) == ESP_OK &&
             length == sizeof(saved) && m3_preferences_valid(&saved);
+        m3_typography_t type; size_t type_length = sizeof(type);
+        if (nvs_get_blob(nvs, "typography", &type, &type_length) == ESP_OK &&
+            type_length == sizeof(type) && m3_typography_valid(&type)) typography = type;
         nvs_close(nvs);
     }
     if (found) current = saved;

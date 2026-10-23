@@ -63,7 +63,7 @@ static void build_gallery(lv_obj_t *page, unsigned volume) {
     lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     gallery_library = bare(page); lv_obj_set_size(gallery_library, LV_PCT(100), LV_PCT(100));
     gallery_grid_info = label(gallery_library, "", MUTED); lv_obj_set_pos(gallery_grid_info, 16, 48); lv_obj_set_size(gallery_grid_info, 448, 24);
-    lv_label_set_long_mode(gallery_grid_info, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(gallery_grid_info);
     lv_obj_t *refresh = refresh_button(gallery_library,T_GALLERY_REFRESH,gallery_refresh,NULL);
     lv_obj_set_pos(refresh,416,0); lv_obj_set_size(refresh,48,44);
     lv_obj_t *grid = bare(gallery_library); lv_obj_set_pos(grid, 16, 80); lv_obj_set_size(grid, 448, 472);
@@ -87,7 +87,7 @@ static void build_gallery(lv_obj_t *page, unsigned volume) {
         lv_obj_t *triangle = label(item->play, LV_SYMBOL_PLAY, 0xffffff); lv_obj_set_width(triangle, LV_SIZE_CONTENT);
         lv_obj_align(triangle, LV_ALIGN_CENTER, 1, 0);
         item->name = label(item->tile, "", TEXT); lv_obj_set_pos(item->name, 6, 128); lv_obj_set_size(item->name, 128, 22);
-        lv_label_set_long_mode(item->name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        label_ellipsis(item->name);
         lv_obj_add_flag(item->tile, LV_OBJ_FLAG_HIDDEN);
     }
     gallery_page_prev = button(gallery_library, LV_SYMBOL_LEFT, T_FILES_PREV, BTN_SECONDARY, gallery_page, (void *)(intptr_t)-1);
@@ -98,7 +98,7 @@ static void build_gallery(lv_obj_t *page, unsigned volume) {
     lv_obj_set_style_text_align(gallery_page_label, LV_TEXT_ALIGN_CENTER, 0);
     gallery_viewer = bare(page); lv_obj_set_size(gallery_viewer, LV_PCT(100), LV_PCT(100));
     gallery_name = label(gallery_viewer, "", TEXT); lv_obj_set_pos(gallery_name, 16, 10); lv_obj_set_size(gallery_name, 390, 26);
-    lv_label_set_long_mode(gallery_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(gallery_name);
     lv_obj_t *back = icon_button(gallery_viewer, LV_SYMBOL_LEFT, gallery_library_open, NULL);
     lv_obj_set_pos(back, 420, 0); lv_obj_set_size(back, 44, 40);
     gallery_canvas = lv_canvas_create(gallery_viewer); lv_obj_set_pos(gallery_canvas, 24, 44);
@@ -111,7 +111,7 @@ static void build_gallery(lv_obj_t *page, unsigned volume) {
     lv_obj_set_pos(gallery_next_media, 392, 536); lv_obj_set_size(gallery_next_media, 52, 44);
     lv_obj_t *line = volume_row(gallery_viewer, 6, volume); lv_obj_set_pos(line, 16, 590); lv_obj_set_size(line, 448, 30);
     gallery_info = label(gallery_viewer, "", MUTED); lv_obj_set_pos(gallery_info, 16, 630); lv_obj_set_size(gallery_info, 448, 22);
-    lv_label_set_long_mode(gallery_info, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(gallery_info);
     lv_obj_add_flag(gallery_viewer, LV_OBJ_FLAG_HIDDEN);
 }
 static void gallery_grid_tick(void) {

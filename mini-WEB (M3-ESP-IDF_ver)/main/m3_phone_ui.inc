@@ -31,7 +31,7 @@ static void build_calculator(lv_obj_t *page) {
     lv_textarea_set_max_length(calculator_input, 192); lv_textarea_set_one_line(calculator_input, true);
     lv_textarea_set_text(calculator_input, "");
     calculator_result = label(box, "0", CYAN); lv_obj_set_style_text_font(calculator_result, FONT_ICON, 0);
-    lv_obj_set_width(calculator_result, LV_PCT(100)); lv_label_set_long_mode(calculator_result, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(calculator_result, LV_PCT(100)); label_ellipsis(calculator_result);
     static const char *const keys[] = {
         "DEG", "(", ")", "Ans", "AC",
         "sin(", "cos(", "tan(", "log(", "ln(",

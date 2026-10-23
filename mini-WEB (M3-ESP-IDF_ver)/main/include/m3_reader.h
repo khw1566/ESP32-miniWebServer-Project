@@ -6,7 +6,8 @@
 #define M3_READER_MAX_BYTES (4U * 1024U * 1024U)
 #define M3_READER_WINDOW 8192
 typedef struct {
-    uint8_t version, font_px, theme, letter_space, line_space, margin, background, reserved;
+    /* font_family uses the former zero reserved byte; version-1 settings remain valid. */
+    uint8_t version, font_px, theme, letter_space, line_space, margin, background, font_family;
 } m3_reader_settings_t;
 typedef enum { M3_READER_IDLE, M3_READER_LOADING, M3_READER_READY, M3_READER_NO_SD,
     M3_READER_BUSY, M3_READER_IO, M3_READER_TOO_LARGE, M3_READER_ENCODING, M3_READER_MEMORY } m3_reader_status_t;

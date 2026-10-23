@@ -64,10 +64,11 @@ q.slots[1].state=q.READY;assert.equal(q.frame(),'b');assert.equal(q.slots[0].sta
 
 const ui=read('main/m3_ui.c'),active=[];
 const main=body(ui,'build_home_main'),home=body(ui,'build_home');
-assert(home.indexOf('lv_obj_t *wallpaper = bare(home)')<home.indexOf('home_tiles = lv_tileview_create(home)'));
+assert(home.indexOf('home_wallpaper = bare(home)')<home.indexOf('home_tiles = lv_tileview_create(home)'));
 assert(main.indexOf('home = foreground;')<main.indexOf('home_clock = label(home'));
-assert(home.includes('icon_part(wallpaper, -140, 300'));
-assert(home.includes('icon_part(wallpaper, 250, -120'));
+assert(home.includes('m3_wallpaper_build(home_wallpaper, ui_theme.wallpaper, CYAN, MAGENTA)'));
+const wallpaper=read('main/m3_wallpaper.c');
+assert(wallpaper.includes('shape(holder, -140, 300')&&wallpaper.includes('shape(holder, 250, -120'),'default wallpaper keeps the original orbs');
 assert(home.includes('lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_TRANSP, 0)'));
 assert(!home.includes('T_HOME_MORE')&&!home.includes('T_HOME_SLIDE'),'extra apps have no heading or swipe caption');
 assert(!main.includes('icon_part(home,'),'decorative shapes cannot be siblings above widgets');
@@ -77,6 +78,7 @@ function node(parent,kind){const obj={parent,kind,children:[]};parent.children.p
 for(const name of new Set([...main.matchAll(/\b(lv_\w+)\(/g)].map(m=>m[1])))layer[name]=()=>{};
 for(const name of new Set([...main.matchAll(/\b[A-Z][A-Z0-9_]*\b/g)].map(m=>m[0])))layer[name]=0;
 Object.assign(layer,{m3_font_clock:{},lv_font_montserrat_20:{},launch_app:()=>{},bare:parent=>node(parent,'layer'),
+ label_ellipsis:()=>{},
  icon_part:parent=>node(parent,'orb'),label:(parent,text)=>node(parent,'label'),
  lv_button_create:parent=>node(parent,'status-card'),lv_label_create:parent=>node(parent,'label'),
  home_apps:parent=>node(parent,'app-icons')});
@@ -90,13 +92,13 @@ assert(foreground.children.some(obj=>obj.kind==='app-icons'),'apps share the for
 layer.lv_tileview_create=parent=>node(parent,'tileview');
 for(const name of new Set([...home.matchAll(/\b(lv_\w+)\(/g)].map(m=>m[1])))layer[name]??=()=>{};
 for(const name of new Set([...home.matchAll(/\b[A-Z][A-Z0-9_]*\b/g)].map(m=>m[0])))layer[name]??=0;
-layer.LV_PCT=n=>n;
+layer.LV_PCT=n=>n;layer.ui_theme={wallpaper:0};layer.m3_wallpaper_build=holder=>node(holder,'orb');
 const shared={children:[]};vm.runInContext('function background(home){'+common(home.split('for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i)')[0])+'}',layer);
 layer.background(shared);assert.deepEqual(shared.children.map(obj=>obj.kind),['layer','tileview']);
 assert(shared.children[0].children.every(obj=>obj.kind==='orb'));
 const nav={home_tiles:{},home_sheets:[{}, {}, {}, {}],home_index:1,home_dots:Array.from({length:4},()=>({})),home_page_name:{},HOME_PAGE_COUNT:4,HOME_PHOTOS:3,APP_HOME:0,current_app:0,CYAN:1,
  lv_obj_get_child:obj=>obj,lv_obj_set_width:(o,w)=>o.width=w,lv_obj_set_style_bg_color:()=>{},lv_color_hex:n=>n,lv_obj_center:()=>{},
- tr:n=>n,home_page_title:n=>'page-'+n,set_text:(o,s)=>o.text=s,m3_photos_activate:enabled=>active.push(enabled),lv_tileview_get_tile_active:()=>nav.home_sheets[nav.selected]};
+ tr:n=>n,home_page_title:n=>'page-'+n,set_text:(o,s)=>o.text=s,m3_photos_activate:enabled=>active.push(enabled),theme_wallpaper_sync:()=>{},lv_tileview_get_tile_active:()=>nav.home_sheets[nav.selected]};
 vm.createContext(nav);vm.runInContext('function update(){'+common(body(ui,'home_page_update'))+'}\nfunction changed(event){'+common(body(ui,'home_tile_changed'))
  .replace('(void)event;','').replace('lv_obj_t *active','let active').replace('home_page_update()','update()')+'}',nav);
 for(const index of [0,1,2,3,2,1]){nav.selected=index;nav.changed(null);assert.equal(nav.home_index,index);assert.equal(active.at(-1),index===3);assert.equal(nav.home_dots[index].width,24);}

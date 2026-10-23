@@ -1,5 +1,6 @@
 #include "m3_music.h"
 #include "m3_reader.h"
+#include "m3_reader_font.h"
 #include "m3_sd_apps.h"
 #include "m3_photos.h"
 #include "m3_calendar.h"
@@ -25,6 +26,8 @@
 #include "m3_i18n.h"
 #include "m3_tube.h"
 #include "m3_flash_usage_view.h"
+#include "m3_theme.h"
+#include "m3_wallpaper.h"
 #include "esp_heap_caps.h"
 #include "esp_psram.h"
 #include "esp_timer.h"
@@ -40,16 +43,18 @@
 #include <stdlib.h>
 #include <limits.h>
 
-/* Palette. CYAN/MAGENTA remain the product accents; everything else is neutral. */
-#define CYAN 0x00e5ef
-#define MAGENTA 0xf548ba
+/* Palette. CYAN/MAGENTA are the theme accents chosen in Settings (m3_theme_ui.inc);
+ * everything else is neutral. They are variables, so static tables cannot use them. */
+static uint32_t theme_primary = M3_THEME_PRIMARY, theme_accent = M3_THEME_ACCENT, theme_on_accent = 0x00272b;
+#define CYAN theme_primary
+#define MAGENTA theme_accent
 #define INK 0x0a0e14
 #define SURFACE 0x151b25
 #define SURFACE_HI 0x202938
 #define LINE 0x2b3647
 #define TEXT 0xe9eef5
 #define MUTED 0x8c99ab
-#define ON_ACCENT 0x00272b
+#define ON_ACCENT theme_on_accent
 #define GREEN 0x34d399
 #define AMBER 0xfbbf24
 #define RED 0xf87171
@@ -105,6 +110,8 @@ static void shade_set(bool open);
 static lv_obj_t *net_title, *net_dot, *network, *qr, *qr_url;
 static lv_obj_t *ssid_field, *pass_field, *ip_field, *gateway_field, *mask_field, *dns_field;
 static lv_obj_t *static_switch, *static_fields, *wifi_info, *wifi_actions[3], *scan_buttons[M3_WIFI_RESULTS];
+static lv_obj_t *wifi_saved_count, *wifi_saved_rows[M3_WIFI_PROFILE_LIMIT], *wifi_saved_names[M3_WIFI_PROFILE_LIMIT];
+static lv_obj_t *wifi_saved_connect[M3_WIFI_PROFILE_LIMIT], *wifi_saved_remove[M3_WIFI_PROFILE_LIMIT];
 static unsigned seen_scan, seen_settings, seen_wifi;
 static bool wifi_open_selected;
 static char wifi_selected_ssid[33];
@@ -185,6 +192,10 @@ static lv_style_t st_page, st_card, st_row, st_btn, st_btn_pressed, st_primary, 
     st_caption, st_track, st_indicator, st_knob, st_title, st_bare;
 static m3_preferences_t ui_preferences = {1, 100, 30, 1, 0, 40, 40, 0};
 static lv_obj_t *brightness_slider, *fps_slider, *brightness_value, *fps_value;
+static m3_typography_t ui_typography = {1, 0, 16, 0};
+static lv_obj_t *font_family_tabs, *font_size_slider, *font_size_value, *font_preview;
+static unsigned applied_font_family = 255, applied_font_pixels = 255;
+static void apply_typography(void);
 static lv_obj_t *mute_switch, *animation_switch, *focus_switch, *settings_info;
 static lv_obj_t *wake_tabs, *screen_shield, *restart_confirm, *restart_info;
 static lv_obj_t *shade_note;
@@ -195,6 +206,7 @@ static bool screen_blanked, screen_waking;
 static uint32_t screen_release_at;
 static unsigned applied_brightness = 255, applied_fps = 255, applied_animations = 255;
 static void update_preferences(void);
+static void theme_wallpaper_sync(void);
 static uint32_t ui_duration(uint32_t ms) { return ui_preferences.animations ? ms : 0; }
 static lv_anim_enable_t ui_animation(void) { return ui_preferences.animations ? LV_ANIM_ON : LV_ANIM_OFF; }
 static void styles_init(void) {
@@ -270,7 +282,8 @@ static void styles_init(void) {
     lv_style_init(&st_caption);
     lv_style_set_text_color(&st_caption, lv_color_hex(MUTED)); lv_style_set_text_line_space(&st_caption, 3);
     lv_style_init(&st_title);
-    lv_style_set_text_font(&st_title, FONT_TITLE); lv_style_set_text_color(&st_title, lv_color_hex(TEXT));
+    lv_style_set_text_font(&st_title, m3_system_font(ui_typography.pixels + 4, ui_typography.family));
+    lv_style_set_text_color(&st_title, lv_color_hex(TEXT));
 
     lv_style_init(&st_track);
     lv_style_set_bg_color(&st_track, lv_color_hex(SURFACE_HI)); lv_style_set_bg_opa(&st_track, LV_OPA_COVER);
@@ -327,6 +340,11 @@ static const char *status_text(const char *english) {
 }
 
 /* ---------- Small widget helpers. ---------- */
+static void label_ellipsis(lv_obj_t *obj) {
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
+    /* DOT needs a bounded line: content height would simply grow and wrap. */
+    lv_obj_set_height(obj, lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height);
+}
 static lv_obj_t *label(lv_obj_t *parent, const char *text, uint32_t color) {
     lv_obj_t *obj = lv_label_create(parent);
     lv_label_set_text(obj, text);
@@ -371,7 +389,7 @@ static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, butt
         lv_obj_add_style(obj, &st_primary, 0); lv_obj_add_style(obj, &st_primary_pressed, LV_STATE_PRESSED);
     } else if (kind == BTN_DANGER) lv_obj_add_style(obj, &st_danger, 0);
     lv_obj_t *text_obj = lv_label_create(obj); lv_obj_set_width(text_obj, LV_PCT(100));
-    lv_label_set_long_mode(text_obj, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(text_obj);
     lv_obj_set_style_text_align(text_obj, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(text_obj);
     bind_text(text_obj, id, symbol, BIND_TEXT);
     lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
@@ -485,7 +503,7 @@ static unsigned tts_phase(const m3_audio_state_t *audio) {
 
 /* Segmented control on a button matrix: translated labels, exactly one choice. */
 typedef struct { lv_obj_t *obj; const char *const *fixed; const char *map[5]; m3_text_t ids[4]; uint8_t count, selected; } segment_t;
-static segment_t segments[20];
+static segment_t segments[24];
 static unsigned segment_count;
 static segment_t *segment_of(lv_obj_t *obj) {
     for (unsigned i = 0; i < segment_count; ++i) if (segments[i].obj == obj) return &segments[i];
@@ -1045,6 +1063,14 @@ static void select_network(lv_event_t *event) {
     wifi_open_selected = snapshot.networks[index].authmode == WIFI_AUTH_OPEN;
     snprintf(wifi_selected_ssid, sizeof(wifi_selected_ssid), "%s", snapshot.networks[index].ssid);
     form_dirty = true;
+    if (snapshot.networks[index].saved) {
+        network_settings_t settings = {.version = 1};
+        snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.networks[index].ssid);
+        bool accepted = m3_runtime_wifi(M3_WIFI_USE_PROFILE, &settings);
+        memset(&settings, 0, sizeof(settings));
+        set_text(wifi_info, tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY));
+        return;
+    }
     if (wifi_open_selected) {
         /* Public networks always use an empty password and automatic addressing. */
         network_settings_t settings = {.version = 1};
@@ -1061,10 +1087,23 @@ static void wifi_feedback(const char *message, uint32_t color) {
     lv_obj_set_style_text_color(wifi_info, lv_color_hex(color), 0);
     lv_obj_scroll_to_view_recursive(wifi_info, ui_animation());
 }
+static void wifi_saved_action(lv_event_t *event) {
+    unsigned value = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    unsigned index = value % M3_WIFI_PROFILE_LIMIT;
+    if (index >= snapshot.saved_wifi_count) return;
+    network_settings_t settings = {.version = 1};
+    snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.saved_wifi[index].ssid);
+    hide_keyboard();
+    bool accepted = m3_runtime_wifi(value >= M3_WIFI_PROFILE_LIMIT ? M3_WIFI_FORGET_PROFILE : M3_WIFI_USE_PROFILE, &settings);
+    memset(&settings, 0, sizeof(settings));
+    wifi_feedback(tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY), accepted ? CYAN : AMBER);
+}
 static m3_wifi_action_t wifi_connection_action(const network_settings_t *settings) {
     bool explicit_open = wifi_open_selected && !strcmp(settings->ssid, wifi_selected_ssid);
-    return !settings->pass[0] && !explicit_open && snapshot.wifi_password_saved &&
-        !strcmp(settings->ssid, snapshot.settings.ssid) ? M3_WIFI_CONNECT_SAVED : M3_WIFI_CONNECT;
+    bool saved = snapshot.wifi_password_saved && !strcmp(settings->ssid, snapshot.settings.ssid);
+    for (unsigned i = 0; i < snapshot.saved_wifi_count; ++i)
+        if (snapshot.saved_wifi[i].secured && !strcmp(settings->ssid, snapshot.saved_wifi[i].ssid)) saved = true;
+    return !settings->pass[0] && !explicit_open && saved ? M3_WIFI_CONNECT_SAVED : M3_WIFI_CONNECT;
 }
 static void wifi_action(lv_event_t *event) {
     m3_wifi_action_t action = (m3_wifi_action_t)(uintptr_t)lv_event_get_user_data(event);
@@ -1150,11 +1189,24 @@ static void update_wifi(void) {
                 lv_obj_set_style_text_color(lv_obj_get_child(scan_buttons[i], 0),
                     lv_color_hex(bars >= 3 ? GREEN : bars == 2 ? AMBER : RED), 0);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 1), snapshot.networks[i].ssid);
-                snprintf(text, sizeof(text), "%d dBm", snapshot.networks[i].rssi);
+                snprintf(text, sizeof(text), "%s%s%d dBm", snapshot.networks[i].saved ? tr(T_WIFI_SAVED) : "",
+                    snapshot.networks[i].saved ? " · " : "", snapshot.networks[i].rssi);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 2), text);
                 wifi_security(lv_obj_get_child(scan_buttons[i], 3), snapshot.networks[i].authmode == WIFI_AUTH_OPEN);
                 lv_obj_remove_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
             } else lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    char count[80]; snprintf(count, sizeof(count), tr(T_WIFI_SAVED_COUNT), snapshot.saved_wifi_count);
+    set_text(wifi_saved_count, count);
+    for (unsigned i = 0; i < M3_WIFI_PROFILE_LIMIT; ++i) {
+        power_visible(wifi_saved_rows[i], i < snapshot.saved_wifi_count);
+        if (i >= snapshot.saved_wifi_count) continue;
+        set_text(wifi_saved_names[i], snapshot.saved_wifi[i].ssid);
+        if (snapshot.wifi_busy || !snapshot.wifi_ready) {
+            lv_obj_add_state(wifi_saved_connect[i], LV_STATE_DISABLED); lv_obj_add_state(wifi_saved_remove[i], LV_STATE_DISABLED);
+        } else {
+            lv_obj_remove_state(wifi_saved_connect[i], LV_STATE_DISABLED); lv_obj_remove_state(wifi_saved_remove[i], LV_STATE_DISABLED);
         }
     }
 }
@@ -1678,7 +1730,7 @@ static void screen_off(lv_event_t *event) {
         lv_obj_add_flag(screen_shield, LV_OBJ_FLAG_HIDDEN);
         set_text(shade_note, tr(T_SET_BRIGHTNESS_ERROR)); return;
     }
-    screen_blanked = true;
+    screen_blanked = true; theme_wallpaper_sync();
 }
 static void screen_wake_tick(lv_timer_t *timer) {
     (void)timer;
@@ -1690,7 +1742,7 @@ static void screen_wake_tick(lv_timer_t *timer) {
         esp_err_t err = m3_board_set_screen_on(true);
         /* The board driver fails with backlight on, so always remove the shield. */
         if (err != ESP_OK) set_text(settings_info, tr(T_SET_BRIGHTNESS_ERROR));
-        screen_blanked = false; screen_waking = true; screen_release_at = now;
+        screen_blanked = false; screen_waking = true; screen_release_at = now; theme_wallpaper_sync();
     }
     if (screen_waking) {
         if (pressed) screen_release_at = now;
@@ -2426,7 +2478,7 @@ static void create_shade(lv_obj_t *screen) {
     lv_obj_t *handle = icon_part(shade, 205, 12, 70, 5, 3); lv_obj_set_style_bg_opa(handle, LV_OPA_40, 0);
     lv_obj_t *title = text(shade, T_SHADE_TITLE, TEXT); lv_obj_set_pos(title, 20, 36); lv_obj_add_style(title, &st_title, 0);
     static const m3_text_t names[] = {T_SHADE_RAM, T_SHADE_PSRAM, T_SHADE_SD};
-    static const uint32_t colors[] = {CYAN, MAGENTA, AMBER};
+    const uint32_t colors[] = {CYAN, MAGENTA, AMBER};
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_t *panel = bare(shade); lv_obj_set_pos(panel, 16 + i * 152, 80); lv_obj_set_size(panel, 144, 200);
         lv_obj_set_style_bg_color(panel, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(panel, LV_OPA_10, 0);
@@ -2472,19 +2524,20 @@ static void create_shade(lv_obj_t *screen) {
         lv_obj_set_pos(job_icons[i], 8, 17); lv_obj_set_size(job_icons[i], 36, 36);
         lv_obj_set_style_text_font(job_icons[i], FONT_ICON, 0);
         job_labels[i] = label(job_cards[i], "", TEXT); lv_obj_set_pos(job_labels[i], 48, 8);
-        lv_obj_set_size(job_labels[i], 162, 54); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_size(job_labels[i], 162, 58); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_DOT);
         if (i == 1 || i == 2 || i == 4 || i == 5) {
-            lv_obj_set_width(job_labels[i], 108);
-            job_stops[i] = button(job_cards[i], NULL, T_SERVICE_STOP, BTN_SECONDARY, service_stop, (void *)(uintptr_t)i);
-            lv_obj_set_pos(job_stops[i], 160, 19); lv_obj_set_size(job_stops[i], 52, 32);
+            lv_obj_set_width(job_labels[i], 120);
+            job_stops[i] = icon_button(job_cards[i], LV_SYMBOL_STOP, service_stop, (void *)(uintptr_t)i);
+            lv_obj_set_pos(job_stops[i], 176, 17); lv_obj_set_size(job_stops[i], 36, 36);
+            lv_obj_set_style_text_font(job_stops[i], &lv_font_montserrat_20, 0);
         }
     }
-    shade_note = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(shade_note, 20, 660); lv_obj_set_size(shade_note, 440, 24);
-    lv_label_set_long_mode(shade_note, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    shade_note = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(shade_note, 20, 658); lv_obj_set_size(shade_note, 440, 34);
+    label_ellipsis(shade_note);
     lv_obj_t *close = button(shade, LV_SYMBOL_UP, T_SHADE_CLOSE, BTN_SECONDARY, shade_close, NULL);
-    lv_obj_set_pos(close, 16, 684); lv_obj_set_width(close, 216);
+    lv_obj_set_pos(close, 16, 700); lv_obj_set_width(close, 216);
     lv_obj_t *off = button(shade, LV_SYMBOL_POWER, T_SCREEN_OFF, BTN_SECONDARY, screen_off, NULL);
-    lv_obj_set_pos(off, 248, 684); lv_obj_set_width(off, 216);
+    lv_obj_set_pos(off, 248, 700); lv_obj_set_width(off, 216);
     shade_motion(shade, -HOME_TOP);
 }
 
@@ -2503,13 +2556,14 @@ static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data) 
     lv_obj_add_style(obj, &st_list, 0); lv_obj_add_style(obj, &st_btn_pressed, LV_STATE_PRESSED);
     lv_obj_add_style(obj, &st_list_checked, LV_STATE_CHECKED); lv_obj_add_style(obj, &st_disabled, LV_STATE_DISABLED);
     lv_obj_t *icon = lv_label_create(obj); lv_obj_set_width(icon, 22);
-    lv_obj_t *name = lv_label_create(obj); grow(name); lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *name = lv_label_create(obj); grow(name); label_ellipsis(name);
     lv_obj_t *meta = lv_label_create(obj); lv_obj_add_style(meta, &st_caption, 0);
     (void)icon;
     lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
     return obj;
 }
+#include "m3_theme_ui.inc"
 static void home_apps(lv_obj_t *home, unsigned first, unsigned count, int top) {
     _Static_assert(sizeof(app_icons) / sizeof(app_icons[0]) == APP_COUNT - 1, "one icon per app");
     unsigned end = first + count;
@@ -2531,7 +2585,7 @@ static void home_apps(lv_obj_t *home, unsigned first, unsigned count, int top) {
         lv_obj_t *name = text(home, app_names[app_icons[i].app], TEXT);
         lv_obj_set_pos(name, x - 18, y + 84); lv_obj_set_width(name, 112);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        label_ellipsis(name);
     }
 }
 static void build_home_main(lv_obj_t *home) {
@@ -2562,9 +2616,9 @@ static void build_home_main(lv_obj_t *home) {
     home_net_icon = lv_label_create(badge); lv_label_set_text(home_net_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(home_net_icon, &lv_font_montserrat_20, 0); lv_obj_center(home_net_icon);
     home_net = label(status_card, "", TEXT); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
-    lv_label_set_long_mode(home_net, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(home_net);
     home_detail = label(status_card, "", 0xaab6c6); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
-    lv_label_set_long_mode(home_detail, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(home_detail);
     lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, 0xaab6c6); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -16, 0);
     home_apps(home, 0, HOME_PRIMARY_APPS, 296);
@@ -2582,6 +2636,7 @@ static void home_page_update(void) {
     }
     set_text(home_page_name, home_index >= 2 && home_index < HOME_PHOTOS ? "" : tr(home_page_title(home_index)));
     m3_photos_activate(current_app == APP_HOME && home_index == HOME_PHOTOS);
+    theme_wallpaper_sync();
 }
 static void home_tile_changed(lv_event_t *event) {
     (void)event;
@@ -2634,8 +2689,8 @@ static void update_calendar(void) {
 static void build_home_calendar(lv_obj_t *tile) {
     lv_obj_t *heading = text(tile, T_CAL_TITLE, TEXT); lv_obj_set_pos(heading, 24, 22);
     lv_obj_set_width(heading, 432);
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    label_ellipsis(heading);
+    lv_obj_add_style(heading, &st_title, 0);
     lv_obj_t *previous = icon_button(tile, LV_SYMBOL_LEFT, calendar_move, (void *)(intptr_t)-1);
     lv_obj_set_pos(previous, 24, 72); lv_obj_set_size(previous, 44, 44);
     lv_obj_t *next = icon_button(tile, LV_SYMBOL_RIGHT, calendar_move, (void *)(intptr_t)1);
@@ -2688,8 +2743,8 @@ static void update_photos(void) {
 static void build_home_photos(lv_obj_t *tile) {
     lv_obj_t *heading = text(tile, T_PHOTO_TITLE, TEXT); lv_obj_set_pos(heading, 24, 14);
     lv_obj_set_width(heading, 432);
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    label_ellipsis(heading);
+    lv_obj_add_style(heading, &st_title, 0);
     photo_canvas = lv_canvas_create(tile); lv_obj_set_pos(photo_canvas, 24, 68);
     lv_obj_set_size(photo_canvas, M3_PHOTO_W, M3_PHOTO_H);
     lv_obj_remove_flag(photo_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -2697,9 +2752,9 @@ static void build_home_photos(lv_obj_t *tile) {
     photo_empty = label(tile, tr(T_PHOTO_EMPTY), MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
     lv_obj_set_style_text_align(photo_empty, LV_TEXT_ALIGN_CENTER, 0);
     photo_name = label(tile, "", TEXT); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
-    lv_label_set_long_mode(photo_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(photo_name);
     photo_info = label(tile, tr(T_PHOTO_HINT), MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
-    lv_label_set_long_mode(photo_info, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(photo_info);
     lv_obj_t *previous = button(tile, LV_SYMBOL_PREV, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)-1);
     lv_obj_set_pos(previous, 24, 614); lv_obj_set_size(previous, 64, 40);
     photo_pause = button(tile, NULL, T_MUSIC_PAUSE, BTN_SECONDARY, photo_toggle, NULL);
@@ -2713,16 +2768,9 @@ static void build_home(lv_obj_t *home) {
     lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0); lv_obj_set_style_pad_all(home, 0, 0);
     lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
     /* One fixed wallpaper below all transparent tiles keeps swipes continuous. */
-    lv_obj_t *wallpaper = bare(home); lv_obj_set_size(wallpaper, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_pos(wallpaper, 0, 0);
-    lv_obj_set_style_bg_opa(wallpaper, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(wallpaper, lv_color_hex(0x0b1424), 0);
-    lv_obj_set_style_bg_grad_color(wallpaper, lv_color_hex(0x1d0f2c), 0);
-    lv_obj_set_style_bg_grad_dir(wallpaper, LV_GRAD_DIR_VER, 0);
-    lv_obj_t *orb = icon_part(wallpaper, -140, 300, 460, 460, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(0x0891b2), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_20, 0);
-    orb = icon_part(wallpaper, 250, -120, 340, 340, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(MAGENTA), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_10, 0);
+    home_wallpaper = bare(home); lv_obj_set_size(home_wallpaper, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(home_wallpaper, 0, 0);
+    m3_wallpaper_build(home_wallpaper, ui_theme.wallpaper, CYAN, MAGENTA);
     home_tiles = lv_tileview_create(home); lv_obj_remove_style_all(home_tiles);
     lv_obj_set_pos(home_tiles, 0, 0); lv_obj_set_size(home_tiles, 480, 660);
     lv_obj_set_scrollbar_mode(home_tiles, LV_SCROLLBAR_MODE_OFF);
@@ -2817,6 +2865,26 @@ static void build_wifi(lv_obj_t *net) {
     lv_obj_add_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
     wifi_actions[1] = button(box, LV_SYMBOL_OK, T_WIFI_CONNECT, BTN_PRIMARY, wifi_action, (void *)(uintptr_t)M3_WIFI_CONNECT);
     wifi_actions[2] = button(box, LV_SYMBOL_GPS, T_WIFI_HOTSPOT, BTN_SECONDARY, wifi_action, (void *)(uintptr_t)M3_WIFI_SETUP);
+    box = card(net, T_WIFI_SAVED_NETWORKS);
+    wifi_saved_count = label(box, "", CYAN);
+    caption(box, T_WIFI_SAVED_HINT);
+    for (unsigned i = 0; i < M3_WIFI_PROFILE_LIMIT; ++i) {
+        wifi_saved_rows[i] = row(box);
+        wifi_saved_connect[i] = lv_button_create(wifi_saved_rows[i]);
+        lv_obj_remove_style_all(wifi_saved_connect[i]);
+        lv_obj_add_style(wifi_saved_connect[i], &st_btn, 0);
+        lv_obj_add_style(wifi_saved_connect[i], &st_btn_pressed, LV_STATE_PRESSED);
+        lv_obj_add_style(wifi_saved_connect[i], &st_disabled, LV_STATE_DISABLED);
+        grow(wifi_saved_connect[i]); lv_obj_set_height(wifi_saved_connect[i], 48);
+        wifi_saved_names[i] = label(wifi_saved_connect[i], "", TEXT);
+        lv_obj_center(wifi_saved_names[i]);
+        lv_obj_set_width(wifi_saved_names[i], LV_PCT(100));
+        label_ellipsis(wifi_saved_names[i]);
+        lv_obj_add_event_cb(wifi_saved_connect[i], wifi_saved_action, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        wifi_saved_remove[i] = icon_button(wifi_saved_rows[i], LV_SYMBOL_TRASH, wifi_saved_action,
+            (void *)(uintptr_t)(i + M3_WIFI_PROFILE_LIMIT));
+        lv_obj_add_flag(wifi_saved_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
     box = card(net, T_SEC_HELP);
     caption(box, T_WIFI_HELP);
 }
@@ -2828,7 +2896,7 @@ static void build_files(lv_obj_t *files) {
     icon_button(line, LV_SYMBOL_UP, parent_folder, NULL);
     lv_obj_t *texts = bare(line); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 4, 0);
-    file_path = label(texts, "", TEXT); lv_label_set_long_mode(file_path, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    file_path = label(texts, "", TEXT); label_ellipsis(file_path);
     file_info = text(texts, T_FILES_READING, MUTED);
     file_bar = bar(box, AMBER, 6);
     box = card(files, T_NONE);
@@ -2879,7 +2947,7 @@ static void radio_filter(lv_event_t *event) {
 static void build_radio(lv_obj_t *radio, unsigned volume) {
     lv_obj_t *box = card(radio, T_NOW_PLAYING);
     radio_now = label(box, "", TEXT); lv_obj_add_style(radio_now, &st_title, 0);
-    lv_label_set_long_mode(radio_now, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(radio_now);
     radio_info = text(box, T_RADIO_IDLE, MUTED);
     radio_bar = bar(box, MAGENTA, 6);
     lv_obj_t *line = row(box);
@@ -3075,13 +3143,13 @@ static void build_agent(lv_obj_t *agent) {
 static void build_music(lv_obj_t *music, unsigned volume) {
     lv_obj_t *box = card(music, T_NOW_PLAYING);
     music_title = label(box, "", TEXT); lv_obj_add_style(music_title, &st_title, 0);
-    lv_label_set_long_mode(music_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(music_title);
     lv_obj_t *visual_row = bare(box); lv_obj_set_size(visual_row, LV_PCT(100), 200);
     lv_obj_t *visual = bare(visual_row); lv_obj_set_size(visual, 200, 200); lv_obj_center(visual);
     lv_obj_add_flag(visual, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(visual, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(visual, music_swipe_event, LV_EVENT_GESTURE, NULL);
-    static const uint32_t colors[] = {CYAN, GREEN, MAGENTA};
+    const uint32_t colors[] = {CYAN, GREEN, MAGENTA};
     for (unsigned i = 0; i < 24; ++i) {
         music_rays[i] = lv_line_create(visual); lv_obj_set_pos(music_rays[i], 0, 0);
         lv_obj_set_style_line_color(music_rays[i], lv_color_hex(colors[i / 8]), 0);
@@ -3127,7 +3195,7 @@ static void build_music(lv_obj_t *music, unsigned volume) {
     for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
         music_rows[i] = button(box, LV_SYMBOL_PLAY, T_NONE, BTN_SECONDARY, music_track_event, (void *)(uintptr_t)i);
         music_labels[i] = lv_obj_get_child(music_rows[i], 0);
-        lv_obj_set_width(music_labels[i], LV_PCT(94)); lv_label_set_long_mode(music_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(music_labels[i], LV_PCT(94)); label_ellipsis(music_labels[i]);
         lv_obj_set_style_text_align(music_labels[i], LV_TEXT_ALIGN_LEFT, 0); lv_obj_add_flag(music_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
     line = row(box);
@@ -3176,7 +3244,7 @@ static void build_tube(lv_obj_t *tube) {
         lv_obj_center(chip_text);
     }
     lv_obj_t *line = row(tube_search_view);
-    tube_heading = label(line, "", TEXT); grow(tube_heading); lv_label_set_long_mode(tube_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_heading = label(line, "", TEXT); grow(tube_heading); label_ellipsis(tube_heading);
     tube_back_search = button(line, LV_SYMBOL_LEFT, T_TUBE_BACK_SEARCH, BTN_SECONDARY, tube_back_to_search, NULL);
     lv_obj_set_size(tube_back_search, LV_SIZE_CONTENT, 40); lv_obj_set_style_pad_hor(tube_back_search, 14, 0);
     lv_obj_add_flag(tube_back_search, LV_OBJ_FLAG_HIDDEN);
@@ -3203,9 +3271,9 @@ static void build_tube(lv_obj_t *tube) {
         lv_obj_t *texts = bare(item->button); grow(texts); lv_obj_set_height(texts, M3_TUBE_THUMB_H);
         lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 3, 0);
         item->title = label(texts, "", TEXT); lv_obj_set_height(item->title, 42);
-        lv_label_set_long_mode(item->title, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_style_text_line_space(item->title, 2, 0);
-        item->channel = label(texts, "", MUTED); lv_label_set_long_mode(item->channel, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->channel, 20);
-        item->meta = label(texts, "", MUTED); lv_label_set_long_mode(item->meta, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->meta, 20);
+        label_ellipsis(item->title); lv_obj_set_style_text_line_space(item->title, 2, 0);
+        item->channel = label(texts, "", MUTED); label_ellipsis(item->channel);
+        item->meta = label(texts, "", MUTED); label_ellipsis(item->meta);
         lv_obj_add_flag(item->button, LV_OBJ_FLAG_HIDDEN);
     }
     tube_pager = row(tube_search_view);
@@ -3246,7 +3314,7 @@ static void build_tube(lv_obj_t *tube) {
     lv_obj_t *list_button = icon_button(line, LV_SYMBOL_LIST, tube_close, NULL); lv_obj_set_size(list_button, 64, 56);
     tube_title = label(body, "", TEXT); lv_obj_set_style_text_line_space(tube_title, 4, 0);
     line = row(body);
-    tube_channel = label(line, "", MUTED); grow(tube_channel); lv_label_set_long_mode(tube_channel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_channel = label(line, "", MUTED); grow(tube_channel); label_ellipsis(tube_channel);
     tube_channel_button = button(line, LV_SYMBOL_LIST, T_TUBE_CHANNEL, BTN_SECONDARY, tube_channel_event, NULL);
     lv_obj_set_size(tube_channel_button, LV_SIZE_CONTENT, 44); lv_obj_set_style_pad_hor(tube_channel_button, 14, 0);
     tube_player_status = label(body, "", MUTED);
@@ -3281,7 +3349,7 @@ static void build_monitor(lv_obj_t *monitor) {
     lv_qrcode_set_dark_color(web_qr, lv_color_hex(0x000000)); lv_qrcode_set_light_color(web_qr, lv_color_hex(0xffffff));
     lv_obj_center(web_qr); lv_obj_add_flag(web_frame, LV_OBJ_FLAG_HIDDEN);
     web_url = label(box, "", CYAN);
-    lv_label_set_long_mode(web_url, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(web_url);
     web_hint = label(box, "", MUTED); lv_label_set_long_mode(web_hint, LV_LABEL_LONG_WRAP);
     web_retry = button(box, NULL, T_WEB_RETRY, BTN_SECONDARY, web_retry_ipv6, NULL);
     lv_obj_add_flag(web_retry, LV_OBJ_FLAG_HIDDEN);
@@ -3347,6 +3415,7 @@ static void sound_control(lv_obj_t *box, m3_text_t name, unsigned channel, bool 
     lv_obj_add_event_cb(sound_sliders[channel], sound_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)channel);
     button(box, LV_SYMBOL_PLAY, T_SOUND_PREVIEW, BTN_SECONDARY, sound_preview, (void *)(uintptr_t)channel);
 }
+#include "m3_sound_ui.inc"
 static void settings_changed(lv_event_t *event) {
     unsigned kind = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     m3_preferences_t p; m3_preferences_get(&p);
@@ -3355,6 +3424,45 @@ static void settings_changed(lv_event_t *event) {
     else if (kind == 2) p.animations = lv_obj_has_state(animation_switch, LV_STATE_CHECKED);
     else if (kind == 3) { m3_audio_volume(lv_obj_has_state(mute_switch, LV_STATE_CHECKED) ? 0 : p.last_volume); return; }
     m3_preferences_update(&p);
+}
+static void typography_changed(lv_event_t *event) {
+    (void)event;
+    m3_typography_t p = {1, segment_value(font_family_tabs), lv_slider_get_value(font_size_slider), 0};
+    if (m3_typography_update(&p)) apply_typography();
+}
+static void typography_lines(lv_obj_t *obj) {
+    if (lv_obj_check_type(obj, &lv_textarea_class) && lv_textarea_get_one_line(obj)) {
+        int height = lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height + 28;
+        lv_obj_set_height(obj, height < 52 ? 52 : height);
+    }
+    if (lv_obj_check_type(obj, &lv_label_class) && lv_label_get_long_mode(obj) == LV_LABEL_LONG_DOT) {
+        bool job = false;
+        for (unsigned i = 0; i < 6; ++i) if (obj == job_labels[i]) job = true;
+        if (!job) lv_obj_set_height(obj, lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height);
+    }
+    for (unsigned i = 0; i < lv_obj_get_child_count(obj); ++i) typography_lines(lv_obj_get_child(obj, i));
+}
+static void apply_typography(void) {
+    m3_typography_get(&ui_typography);
+    const lv_font_t *font = m3_system_font(ui_typography.pixels, ui_typography.family);
+    if (applied_font_family != ui_typography.family || applied_font_pixels != ui_typography.pixels) {
+        applied_font_family = ui_typography.family; applied_font_pixels = ui_typography.pixels;
+        lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
+        lv_obj_set_style_text_font(screen, font, 0);
+        lv_style_set_text_font(&st_title, m3_system_font(ui_typography.pixels + 4, ui_typography.family));
+        const lv_font_t *compact = m3_system_font(ui_typography.pixels > 20 ? 20 : ui_typography.pixels, ui_typography.family);
+        lv_style_set_text_font(&st_caption, compact);
+        lv_obj_set_style_text_font(shade, compact, 0);
+        lv_obj_report_style_change(&st_title); lv_obj_report_style_change(&st_caption);
+        lv_obj_set_style_text_font(font_preview, font, 0);
+        typography_lines(screen);
+        int status_y = (44 - font->line_height) / 2;
+        lv_obj_set_y(status_clock, status_y); lv_obj_set_y(status, status_y);
+        lv_obj_invalidate(screen);
+    }
+    if (segment_value(font_family_tabs) != ui_typography.family) segment_select(font_family_tabs, ui_typography.family);
+    if (!lv_obj_has_state(font_size_slider, LV_STATE_PRESSED)) lv_slider_set_value(font_size_slider, ui_typography.pixels, LV_ANIM_OFF);
+    char value[24]; snprintf(value, sizeof(value), "%u px", ui_typography.pixels); set_text(font_size_value, value);
 }
 static void wake_mode_changed(lv_event_t *event) {
     (void)event;
@@ -3384,6 +3492,7 @@ static void apply_operation_mode(lv_event_t *event) {
 }
 static void update_preferences(void) {
     m3_preferences_get(&ui_preferences);
+    apply_typography();
     if (!screen_blanked && applied_brightness != ui_preferences.brightness) {
         applied_brightness = ui_preferences.brightness;
         if (m3_board_set_brightness(applied_brightness) != ESP_OK) set_text(settings_info, tr(T_SET_BRIGHTNESS_ERROR));
@@ -3414,6 +3523,7 @@ static void update_preferences(void) {
     if (ui_preferences.animations) lv_obj_add_state(animation_switch, LV_STATE_CHECKED);
     else lv_obj_remove_state(animation_switch, LV_STATE_CHECKED);
     if (segment_value(wake_tabs) != ui_preferences.wake_mode) segment_select(wake_tabs, ui_preferences.wake_mode);
+    theme_wallpaper_sync();
 }
 static lv_obj_t *settings_switch(lv_obj_t *box, m3_text_t title, bool checked, unsigned kind) {
     lv_obj_t *line = row(box); grow(text(line, title, TEXT));
@@ -3436,12 +3546,28 @@ static void build_settings(lv_obj_t *system) {
     static const m3_text_t wake_choices[] = {T_WAKE_HOLD, T_WAKE_DOUBLE_TAP};
     wake_tabs = segmented(box, wake_choices, NULL, 2, p.wake_mode, wake_mode_changed);
     caption(box, T_SET_WAKE_HINT);
+    theme_card(system);
+    box = card(system, T_SET_FONT);
+    static const m3_text_t font_names[] = {T_READER_GOTHIC, T_READER_GOTHIC_BOLD, T_READER_MYEONGJO};
+    font_family_tabs = segmented(box, font_names, NULL, M3_READER_FONT_COUNT, ui_typography.family, typography_changed);
+    text(box, T_SET_FONT_SIZE, TEXT); font_size_value = label(box, "", CYAN);
+    font_size_slider = lv_slider_create(box); style_slider(font_size_slider);
+    lv_obj_set_width(font_size_slider, LV_PCT(100));
+    lv_slider_set_range(font_size_slider, M3_SYSTEM_FONT_MIN, M3_SYSTEM_FONT_MAX);
+    lv_slider_set_value(font_size_slider, ui_typography.pixels, LV_ANIM_OFF);
+    lv_obj_add_event_cb(font_size_slider, typography_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    caption(box, T_SET_FONT_PREVIEW);
+    font_preview = text(box, T_SET_FONT_SAMPLE, TEXT);
+    lv_label_set_long_mode(font_preview, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(font_preview, 6, 0);
+    caption(box, T_SET_FONT_HINT);
     box = card(system, T_SET_SOUND);
     volume_row(box, 5, p.volume);
     mute_switch = settings_switch(box, T_SET_MUTE, p.volume == 0, 3);
     sound_card = box;
     m3_feedback_settings_t sound; m3_feedback_get(&sound);
     caption(box, T_SOUND_HINT);
+    sound_pack_list(box);
     sound_control(box, T_SOUND_BOOT, 0, sound.boot_enabled, sound.boot_volume);
     sound_control(box, T_SOUND_EFFECTS, 1, sound.effects_enabled, sound.effects_volume);
     sound_control(box, T_SOUND_GUIDANCE, 2, sound.guidance_enabled, sound.guidance_volume);
@@ -3567,12 +3693,14 @@ esp_err_t m3_ui_start(void) {
     if (!m3_board_display() || !lvgl_port_lock(1000)) return ESP_ERR_INVALID_STATE;
     m3_i18n_load();
     m3_preferences_get(&ui_preferences);
-    styles_init();
+    m3_typography_get(&ui_typography);
+    m3_theme_load(&ui_theme); theme_resolve();
+    styles_init(); theme_styles();
     lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
     lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), true, &m3_font_korean);
     lv_display_set_theme(m3_board_display(), theme);
     lv_obj_set_style_bg_color(screen, lv_color_hex(INK), 0);
-    lv_obj_set_style_text_font(screen, &m3_font_korean, 0);
+    lv_obj_set_style_text_font(screen, m3_system_font(ui_typography.pixels, ui_typography.family), 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(TEXT), 0);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     /* Status bar: time left, network/audio state right. Pull down for the activity shade. */
@@ -3583,9 +3711,10 @@ esp_err_t m3_ui_start(void) {
     lv_obj_add_event_cb(status_strip, shade_touch, LV_EVENT_ALL, NULL);
     status_clock = label(status_strip, "--:--", TEXT); lv_obj_set_pos(status_clock, 22, 13); lv_obj_set_width(status_clock, 80);
     status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 108, 13); lv_obj_set_width(status, 150);
-    lv_label_set_long_mode(status, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(status);
     lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
     status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 270, 13);
+    lv_obj_set_style_text_font(status_audio, &lv_font_montserrat_20, 0);
     lv_obj_set_width(status_audio, 20); lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 294, 8); lv_obj_set_size(signal, 44, 28);
     for (unsigned i = 0; i < 4; ++i) wifi_levels[i] = icon_part(signal, 8 + i * 8, 22 - (i + 1) * 5, 5, (i + 1) * 5, 2);
@@ -3615,7 +3744,7 @@ esp_err_t m3_ui_start(void) {
     lv_obj_set_style_radius(back_button, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_pad_all(back_button, 0, 0);
     lv_obj_set_ext_click_area(back_button, 10);
     app_title = label(screen, "", TEXT); lv_obj_set_pos(app_title, 74, 58); lv_obj_set_width(app_title, 390);
-    lv_label_set_long_mode(app_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(app_title);
     lv_obj_add_style(app_title, &st_title, 0);
     viewport = lv_obj_create(screen); lv_obj_remove_style_all(viewport); lv_obj_set_pos(viewport, 0, CONTENT_TOP);
     lv_obj_set_size(viewport, 480, HOME_TOP - CONTENT_TOP);

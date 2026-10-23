@@ -77,3 +77,28 @@ python "mini-WEB (M3-ESP-IDF_ver)/tools/test_system_sound_assets.py"
 PC 시뮬레이터의 `84_system_sounds`~`86_accessibility_tones` 시나리오도 추가했습니다.
 프로젝트의 에이전트 직접 컴파일 금지 규칙에 따라 이번 작업에서는 새 PC 화면이나
 실기 소리를 검증하지 않았습니다.
+
+## 사운드 세트
+
+설정의 소리 카드에서 부팅 멜로디와 효과음의 **사운드 세트**를 고릅니다. 세트를 누르면
+그 세트의 부팅 멜로디를 부팅 멜로디 음량으로 미리 들려줍니다. 선택은 NVS
+`m3_device/sound_pack`(1바이트)에 소리 설정과 함께 저장되며, 기존 8바이트
+`sound_settings` 형식은 그대로입니다. 안내음성 WAV는 세트와 관계없이 그대로 쓰입니다.
+
+| 세트 | 성격 |
+| --- | --- |
+| 기본 | 기존 사인파 멜로디와 효과음 그대로 |
+| 크리스탈 | 높은 음역의 벨 음색, 잔향처럼 감쇠 |
+| 레트로 | 부드럽게 다듬은 사각파 칩튠 |
+| 부드럽게 | 낮고 느린 삼각파 |
+| 미니멀 | 짧고 단순한 사인파 |
+
+모든 음은 기기가 합성하므로 WAV를 내장하지 않습니다. 다섯 세트 표는 약 650바이트입니다.
+원본은 `tools/sound_packs.json`이고 `python tools/generate_sound_packs.py`로
+`main/m3_sound_packs.inc`를 만듭니다. 세트 설계·미리듣기 절차는 저장소의
+`.skill-drafts/m3-sound-design` 스킬을 따르며, 스킬의 `scripts/sound_lab.py`가
+기기와 같은 합성으로 PC용 미리듣기 WAV와 길이·음역 경고를 출력합니다.
+
+```powershell
+node "mini-WEB (M3-ESP-IDF_ver)/tools/test_sound_packs.cjs"
+```

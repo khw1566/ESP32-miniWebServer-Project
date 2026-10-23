@@ -11,7 +11,9 @@
 - Markdown은 서식을 해석하지 않고 원문을 표시한다. PDF, EPUB, UTF-16,
   CP949 등의 인코딩은 지원하지 않는다. 텍스트 편집기에서 UTF-8로 저장한다.
 - `.private` 등 숨김 경로, 상대 경로 이동, 바이너리 및 잘못된 UTF-8을 거부한다.
-- 한글 음절은 기존 Nanum 글리프를 사용한다. 일본어·한자·기호는 프로젝트에
+- 한글·영문은 나눔고딕, 나눔고딕 Bold, 나눔명조 중에서 선택한다. 한글
+  완성형 11,172자와 영문 ASCII를 지원한다. 원본 글꼴에 없는 문자는 기존
+  대체 글꼴로 넘긴다. 일본어·한자·기호는 프로젝트에
   포함된 기존 Unifont 부분 집합의 범위까지 표시한다. 글꼴에 없는 문자는
   LVGL 대체 글리프로 보일 수 있다.
 
@@ -32,6 +34,7 @@
 
 | 항목 | 범위/선택 |
 | --- | --- |
+| 글꼴 | 고딕, 굵은 고딕, 명조; 한글·영문에 함께 적용 |
 | 글자 크기 | 16~36 px, 한글·영문·지원 CJK 글리프 함께 확대 |
 | 화면 테마 | 밝게, 종이색, 어둡게, 초록; 배경색과 글자색을 함께 변경 |
 | 배경 | 단색, 종이 질감, 줄무늬; 별도 이미지 파일 불필요 |
@@ -62,7 +65,11 @@
 - UI는 PSRAM의 8 KiB 창으로 복사한다. 외부 문서 포인터를 빌려 사용하지 않는다.
   세대 번호와 잠금으로 교체·취소 중의 해제된 메모리 접근을 방지한다.
 - 페이지 이력은 PSRAM 1 KiB, 글리프 확대 scratch는 LVGL 작업의 호출 스택
-  2 KiB다. 기존 글리프를 확대하며 추가 영구 글리프 아틀라스를 만들지 않는다.
+  2 KiB다. 본문용 24 px 글리프는 2 bpp 안티앨리어싱 데이터로 압축하여
+  Flash에 보관한다. 시스템과 리더기가 선택한 글꼴을 최대 두 개까지 PSRAM에
+  각각 약 1.4~1.5 MiB씩 풀어 사용한다. 두 화면에서 같은 글꼴을 선택하면
+  데이터를 공유한다. 어느 화면에서도 사용하지 않는 이전 글꼴의 버퍼는 해제한다. 크기 변경에는
+  같은 원본과 보간을 사용한다. 글꼴·크기별 LVGL 객체의 주소와 측정값은 유지한다.
 - 읽기 설정과 위치 저장은 읽기 작업에서 처리하며 변경 revision이 일치할 때만
   dirty 상태를 해제한다. 새로운 입력으로 큐가 덮이면 오래된 결과를 게시하지 않는다.
 
@@ -74,6 +81,10 @@
 다시 지정한다. 이 설정이 빠지면 본문과 설정 화면이 왼쪽 위 작은 사각형에
 잘린다. `test_reader.cjs`는 실제 초기화 코드와 모의 LVGL 크기 계산으로
 부모·배경·설정 영역 및 부모 높이 변경을 검사한다. 실제 화면 렌더링은 별도다.
+
+본문은 `LV_LABEL_LONG_WRAP`을 사용한다. `LV_LABEL_LONG_CLIP`은 LVGL 9.2에서
+`expand`를 설정하므로, 페이지 계산은 여러 줄이어도 실제 본문은 한 줄로
+잘리는 문제가 있었다. 본문과 페이지 계산이 같은 너비·글꼴·간격으로 줄을 나눈다.
 
 `sd_assets/books/M3_Reader_Sample.txt`를 SD카드에 복사해 사용한다. 예를 들어
 프로젝트 폴더에서 `E:`를 실제 SD 드라이브로 바꿔 실행한다.
@@ -87,6 +98,7 @@ Copy-Item -LiteralPath .\sd_assets\books\M3_Reader_Sample.txt -Destination E:\bo
 
 ```powershell
 node tools/test_reader.cjs
+python tools/test_reader_fonts.py
 node tools/test_i18n.cjs
 node tools/test_touch_apps.cjs
 node tools/test_home_widgets.cjs
@@ -96,7 +108,16 @@ node tools/test_psram_policy.cjs
 ```
 
 검사는 실제 C 함수 본문을 모의 객체에서 실행하거나 소스 계약을 확인한다.
-시뮬레이터에 리더 시나리오 90~97을 추가했으며 기본 앱 순회는 한국어·영어
+`test_reader_fonts.py`는 내장 글리프 테이블을 압축 해제한 뒤 포함된 원본 TTF의
+래스터와 전체 비교한다. 원본에 없는 문자의 대체 처리도 검사한다.
+`tools/ui_sim/reader_fonts_preview.png`는 내장 데이터로 만든 글리프 비교용이며
+LVGL 화면 또는 실물 화면이 아니다. 폰트 재생성은 Pillow가 있는 Python에서
+`python tools/generate_reader_fonts.py`로 실행한다. 글꼴 출처는
+[Google Fonts 나눔고딕](https://github.com/google/fonts/tree/main/ofl/nanumgothic)과
+[나눔명조](https://github.com/google/fonts/tree/main/ofl/nanummyeongjo)이며,
+`third_party`에 원본 TTF, OFL 라이선스와 SHA-256 기록을 보관한다.
+
+시뮬레이터에 리더 시나리오 90~97(96b 굵은 고딕, 96c 36 px 명조 포함)을 추가했으며 기본 앱 순회는 한국어·영어
 모두를 지원한다. 이 작업에서 펌웨어 컴파일·링크·플래시, 새 네이티브 UI
 렌더링과 실물 SD/터치는 실행하지 않았다. 프로젝트 지침에 따라 사용자가
 빌드·플래시 후 글자 잘림, 여러 줄바꿈, 가장자리 탭, 빠른 넘김, 앱 종료·재진입,

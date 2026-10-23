@@ -165,11 +165,64 @@ def blob(ids, image, sizes):
     return MAGIC + struct.pack('<3I', 1, image, len(ids)) + struct.pack(f'<{BLOB_PARTS}I', *values)
 
 
+def table_offset(raw, size):
+    """Resolve the table object, not its string literal (which also occurs in memcmp).
+
+    ESP32-P4 uses ELF32 little-endian. Read the SDK linker's symbol/section tables
+    directly, without an external Python package or an nm/objcopy subprocess.
+    The old local name is accepted so existing, already-linked ELFs can be retried.
+    """
+    def unpack(fmt, offset):
+        if offset < 0 or offset + struct.calcsize(fmt) > len(raw):
+            raise ValueError('truncated ELF metadata')
+        return struct.unpack_from(fmt, raw, offset)
+
+    if raw[:7] != b'\x7fELF\x01\x01\x01':
+        raise ValueError('expected a little-endian ELF32 file')
+    header = unpack('<HHIIIIIHHHHHH', 16)
+    section_offset, section_size, section_count = header[5], header[10], header[11]
+    if section_size != 40 or not section_count:
+        raise ValueError('unsupported ELF section table')
+    sections = [unpack('<10I', section_offset + i * section_size) for i in range(section_count)]
+    matches = []
+    for symbols in sections:
+        if symbols[1] != 2:  # SHT_SYMTAB, not a raw marker in .rodata or debug data.
+            continue
+        if symbols[9] != 16 or symbols[5] % 16 or symbols[6] >= len(sections):
+            raise ValueError('invalid ELF symbol table')
+        strings = sections[symbols[6]]
+        if strings[1] != 3 or strings[4] + strings[5] > len(raw):
+            raise ValueError('invalid ELF symbol names')
+        names = raw[strings[4]:strings[4] + strings[5]]
+        for offset in range(symbols[4], symbols[4] + symbols[5], 16):
+            name, address, length, info, _, index = unpack('<IIIBBH', offset)
+            end = names.find(b'\0', name)
+            if name >= len(names) or end < 0:
+                raise ValueError('invalid ELF symbol name')
+            if names[name:end] not in (b'm3_flash_usage_blob', b'blob'):
+                continue
+            if info & 15 != 1 or length != size or not 0 < index < len(sections):
+                continue  # Not a defined object with the fixed C struct layout.
+            section = sections[index]
+            if section[1] != 1 or not section[2] & 2 or section[2] & (1 | 4):
+                continue  # Require allocated, read-only PROGBITS, not BSS/debug/code.
+            relative = address - section[3]
+            first = section[4] + relative
+            if relative < 0 or relative + size > section[5] or first + size > len(raw):
+                raise ValueError('usage table extends outside its ELF section')
+            if raw[first:first + len(MAGIC)] == MAGIC:
+                matches.append(first)
+    if len(matches) != 1:
+        raise ValueError(f'expected exactly one usage table object, found {len(matches)}')
+    return matches[0]
+
+
 def patch(elf_path, data):
     raw = bytearray(Path(elf_path).read_bytes())
-    first = raw.find(MAGIC)
-    if first < 0 or raw.find(MAGIC, first + 1) >= 0:
-        raise SystemExit(f'flash_usage: expected exactly one usage table in {elf_path}')
+    try:
+        first = table_offset(raw, len(data))
+    except ValueError as error:
+        raise SystemExit(f'flash_usage: {error}: {elf_path}') from error
     if raw[first:first + len(data)] != data:
         raw[first:first + len(data)] = data
         Path(elf_path).write_bytes(raw)

@@ -21,7 +21,7 @@ typedef struct {
 #ifdef __GNUC__
 __attribute__((used, aligned(4)))
 #endif
-static const flash_usage_blob_t blob = {.magic = BLOB_MAGIC};
+static const flash_usage_blob_t m3_flash_usage_blob = {.magic = BLOB_MAGIC};
 
 #define PART_GROUP(id, group, en, ko, ja) M3_FLASH_GROUP_##group,
 static const uint8_t groups[M3_FLASH_PART_COUNT] = {M3_FLASH_PARTS(PART_GROUP)};
@@ -49,7 +49,7 @@ static const uint32_t preview_bytes[M3_FLASH_PART_COUNT] = {
 
 void m3_flash_usage_get(m3_flash_usage_t *out) {
     memset(out, 0, sizeof(*out));
-    const flash_usage_blob_t *source = &blob;
+    const flash_usage_blob_t *source = &m3_flash_usage_blob;
 #ifdef __GNUC__
     /* The initializer is all zero; hide it from constant folding so the patched bytes are read. */
     __asm__ volatile("" : "+r"(source));

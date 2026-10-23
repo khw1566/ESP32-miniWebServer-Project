@@ -102,11 +102,11 @@ for(const text of ['큰한글','日本語カレンダー','かなカナ','𠮟']
   assert.equal(buffer.data[y*stride+x],x<d.box_w?(src[b.gid.index+(bit>>3)]&(0x80>>(bit&7))?255:0):19);
  }
 }
-const ui=read('main/m3_ui.c');assert(!ui.includes('LV_LABEL_LONG_DOT'));assert(ui.includes('LV_LABEL_LONG_SCROLL_CIRCULAR'));
+const ui=read('main/m3_ui.c');assert(ui.includes('LV_LABEL_LONG_DOT'));assert(!ui.includes('LV_LABEL_LONG_SCROLL'));
 const label={text:'日本語の長いファイル名',resets:0},stable={strcmp:(a,b)=>a===b?0:1,lv_label_get_text:o=>o.text,lv_label_set_text:(o,t)=>{o.text=t;label.resets++;}};
 vm.createContext(stable);vm.runInContext('function set(obj,text){'+body(ui,'set_text')+'}',stable);
-for(let i=0;i<60;i++)stable.set(label,label.text);assert.equal(label.resets,0,'metrics refresh preserves marquee position');
+for(let i=0;i<60;i++)stable.set(label,label.text);assert.equal(label.resets,0,'metrics refresh does not rewrite truncated labels');
 stable.set(label,'次のファイル');assert.equal(label.resets,1);
 assert(ui.includes('T_LANG_KO, T_LANG_EN, T_LANG_JA'));assert(ui.includes('key_controls[8][64]'));
 assert(read('main/CMakeLists.txt').includes('"m3_font_large.c"'));assert(read('main/CMakeLists.txt').includes('"m3_kana.c"'));
-console.log('PASS: all Japanese UI selections/NVS restore, kana voiced/semivoiced/small forms, all large Hangul/CJK line bounds, actual scaled A8 pixels, title fallback and circular overflow policies.');
+console.log('PASS: all Japanese UI selections/NVS restore, kana voiced/semivoiced/small forms, all large Hangul/CJK line bounds, actual scaled A8 pixels, title fallback and ellipsis overflow policies.');

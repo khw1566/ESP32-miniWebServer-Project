@@ -46,10 +46,12 @@ const c={NULL:null,strlen:s=>Buffer.byteLength(s),strrchr:(s,ch)=>s.includes(ch)
 vm.createContext(c);
 vm.runInContext('function supported(name){'+body(core,'m3_reader_supported').replace('const char *ext','const ext')+'}',c);
 c.m3_reader_supported=c.supported;
-const defaults={version:1,font_px:22,theme:1,letter_space:0,line_space:8,margin:24,background:0,reserved:0};
+const defaults={version:1,font_px:22,theme:1,letter_space:0,line_space:8,margin:24,background:0,font_family:0};
+c.M3_READER_FONT_COUNT=3;
 vm.runInContext('function valid(s){'+body(core,'m3_reader_settings_valid').replaceAll('s->','s.')+'}',c);
 assert(c.valid(defaults));
-for(const [field,values] of Object.entries({version:[0,2],font_px:[0,15,37,255],theme:[4,255],letter_space:[7],line_space:[25],margin:[0,11,41],background:[3],reserved:[1]}))
+for(let family=0;family<3;family++)assert(c.valid({...defaults,font_family:family}));
+for(const [field,values] of Object.entries({version:[0,2],font_px:[0,15,37,255],theme:[4,255],letter_space:[7],line_space:[25],margin:[0,11,41],background:[3],font_family:[3,255]}))
  for(const value of values)assert(!c.valid({...defaults,[field]:value}),field+'='+value);
 for(const name of ['a.txt','책.TXT','notes.md','server.log'])assert(c.supported(name));
 for(const name of ['a.epub','a.pdf','a.txt.exe','a','a.png'])assert(!c.supported(name));
@@ -79,7 +81,7 @@ c.reader_snapshot={status:2,bytes:0};c.M3_READER_READY=2;c.M3_WIDTH=480;c.LV_TEX
 c.reader_text={};c.reader_position={};c.reader_seek={};c.reader_dirty=true;
 let document,progress=[];const decoder=new TextDecoder('utf8',{fatal:true});
 c.m3_reader_copy=(g,offset,out,cap)=>{let n=Math.min(document.length-offset,cap-1);while(n&&(document[offset+n]&0xc0)===0x80)n--;document.copy(out,0,offset,offset+n);out[n]=0;return n;};
-c.m3_reader_font=()=>({line_height:28});
+c.m3_reader_font=px=>({line_height:Math.ceil(34*px/24)});
 c.reader_boundary=(b,i,n)=>{while(i<n&&(b[i]&0xc0)===0x80)i++;return i;};
 c.lv_text_get_next_line=(b,font,space,width)=>{let bytes=0,count=0;for(const ch of decoder.decode(b.subarray(0,b.indexOf(0)))){bytes+=Buffer.byteLength(ch);if(ch==='\n'||++count>=Math.floor(width/(16+space)))break;}return bytes;};
 c.lv_label_set_text=(o,b)=>{o.value=decoder.decode(b.subarray(0,b.indexOf(0)));};
@@ -93,9 +95,19 @@ render=render.replace('(526 + reader_config.line_space) / (font->line_height + r
  'Math.trunc((526 + reader_config.line_space) / (font.line_height + reader_config.line_space))').replaceAll('font->','font.');
 vm.runInContext('function render(){'+render+'}',c);
 document=Buffer.from(('한글 문장과 English words are preserved.\n\n'+ '긴문장'.repeat(70)+'\n').repeat(45));c.reader_snapshot.bytes=document.length;
-let pages=0;
-while(c.reader_offset<document.length){const start=c.reader_offset;c.render();assert(c.reader_next>start&&c.reader_next<=document.length);decoder.decode(document.subarray(start,c.reader_next));assert.equal(progress.at(-1),start);c.reader_offset=c.reader_next;if(++pages>1000)throw Error('No bounded progress');}
-assert(pages>10);assert.equal(c.reader_position.value,'100%');
+for(const family of [0,1,2])for(const px of [16,22,24,36]){
+ c.reader_offset=0;let pages=0;
+ c.reader_config={...defaults,font_family:family,font_px:px,margin:px===16?40:12,letter_space:family===1?6:0,line_space:family===2?24:0};
+ while(c.reader_offset<document.length){
+  const start=c.reader_offset;c.render();
+  assert(c.reader_next>start&&c.reader_next<=document.length);
+  const consumed=decoder.decode(document.subarray(start,c.reader_next));
+  assert.equal(c.reader_text.value,consumed.replace(/\n+$/,''),'page payload preserves every mixed-text byte');
+  assert.equal(progress.at(-1),start);c.reader_offset=c.reader_next;
+  if(++pages>1000)throw Error('No bounded progress');
+ }
+ assert(pages>10);assert.equal(c.reader_position.value,'100%');
+}
 // Actual snapshot-copy body: reject stale generations and partial UTF-8 offsets.
 const copyContext={state:{status:2,generation:7,bytes:0},M3_READER_READY:2,M3_READER_WINDOW:8192,
  memcpy:(out,src,n)=>src.copy(out,0,0,n)};
@@ -110,32 +122,39 @@ for(let cap=2;cap<=sample.length+2;cap++){
 assert.equal(copyContext.copy(6,0,Buffer.alloc(16),16),0,'stale request cannot access replaced book');
 assert.equal(copyContext.copy(7,2,Buffer.alloc(16),16),0,'continuation-byte start rejected');
 copyContext.state.status=1;assert.equal(copyContext.copy(7,0,Buffer.alloc(16),16),0,'loading retires the old document');
-// Actual A8 font scaler, including source/target stride padding and signed offsets.
+// The renderer and paginator must both wrap. LVGL 9.2 CLIP sets expand=1.
+assert(body(ui,'build_reader').includes('lv_label_set_long_mode(reader_text, LV_LABEL_LONG_WRAP)'));
+assert(!/lv_label_set_long_mode\(reader_text, LV_LABEL_LONG_CLIP\)/.test(ui));
+assert(body(ui,'reader_configure_ui').includes('reader_config.font_family = segment_value(reader_family)'));
+// Execute the actual integer resampler on padded A8 rows, including one-pixel edges.
 const fontSource=read('main/m3_font_reader.c');
-const fontContext={pixels:36,NULL:null,LV_COLOR_FORMAT_A8:1,LV_RESULT_OK:0,
- base_glyph:(cp,next,out)=>{Object.assign(out,{box_w:3,box_h:2});return true;},
- lv_draw_buf_width_to_stride:w=>(w+3)&~3,
- lv_draw_buf_init:(out,w,h,cf,stride,data)=>{Object.assign(out,{data});return 0;},
- lv_font_get_glyph_bitmap:(glyph,out)=>{out.data.set([10,20,30,0,40,50,60,0]);return out;},
- lv_font_glyph_release_draw_data:()=>{}};
+const fontContext={};
 vm.createContext(fontContext);
 let scaled=body(fontSource,'scaled').replaceAll('(int)','')
- .replace('(value * pixels + 8) / 16','Math.trunc((value * pixels + 8) / 16)')
- .replace('((-value * pixels + 8) / 16)','(Math.trunc((-value * pixels + 8) / 16))');
-vm.runInContext('function scaled(value){'+scaled+'}',fontContext);
-assert.equal(fontContext.scaled(16),36);assert.equal(fontContext.scaled(-4),-9);
-let bitmap=body(fontSource,'bitmap').replace('lv_font_glyph_dsc_t base;','let base={};')
- .replace('_Alignas(64) uint8_t scratch[2048];','const scratch=new Uint8Array(2048);')
- .replace('lv_draw_buf_t source;','const source={};').replaceAll('sizeof(scratch)','scratch.length')
- .replaceAll('&base','base').replaceAll('&source','source').replaceAll('glyph->','glyph.').replaceAll('buffer->','buffer.')
- .replace(/\buint32_t\s+/g,'let ').replace(/\bunsigned\s+/g,'let ')
- .replace('uint8_t *target = buffer.data + y * stride','const target = buffer.data.subarray(y * stride)')
- .replace('const uint8_t *row = source.data + (y * base.box_h / glyph.box_h) * source_stride',
- 'const row = source.data.subarray(Math.trunc(y * base.box_h / glyph.box_h) * source_stride)')
- .replace('row[x * base.box_w / glyph.box_w]','row[Math.trunc(x * base.box_w / glyph.box_w)]');
-vm.runInContext('function bitmap(glyph,buffer){'+bitmap+'}',fontContext);
-const pixels={data:new Uint8Array(32)};assert(fontContext.bitmap({gid:{index:65},box_w:6,box_h:4},pixels));
-assert.deepEqual([...pixels.data],[10,10,20,20,30,30,0,0,10,10,20,20,30,30,0,0,40,40,50,50,60,60,0,0,40,40,50,50,60,60,0,0]);
+ .replaceAll('source_px / 2','Math.trunc(source_px / 2)')
+ .replace('(value * pixels + Math.trunc(source_px / 2)) / source_px','Math.trunc((value * pixels + Math.trunc(source_px / 2)) / source_px)')
+ .replace('((-value * pixels + Math.trunc(source_px / 2)) / source_px)', '(Math.trunc((-value * pixels + Math.trunc(source_px / 2)) / source_px))');
+vm.runInContext('function scaled(value,pixels,source_px){'+scaled+'}',fontContext);
+assert.equal(fontContext.scaled(24,36,24),36);assert.equal(fontContext.scaled(-4,36,24),-6);
+let interpolation=body(fontSource,'interpolate').replace(/\b(?:unsigned|int)\s+/g,'let ')
+ .replaceAll('(unsigned)','')
+ .replace('((2 * x + 1) * width * 128) / target_w','Math.trunc(((2 * x + 1) * width * 128) / target_w)')
+ .replace('((2 * y + 1) * height * 128) / target_h','Math.trunc(((2 * y + 1) * height * 128) / target_h)');
+vm.runInContext('function interpolate(data,stride,width,height,x,y,target_w,target_h){'+interpolation+'}',fontContext);
+const raster=[10,20,30,255,40,50,60,255];
+for(const width of [1,2,3,6,9])for(const height of [1,2,4,7]){
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+  const sx=Math.max(0,(x+.5)*3/width-.5),sy=Math.max(0,(y+.5)*2/height-.5);
+  const x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(2,x0+1),y1=Math.min(1,y0+1);
+  const fx=sx-x0,fy=sy-y0;
+  const expected=(raster[y0*4+x0]*(1-fx)+raster[y0*4+x1]*fx)*(1-fy)+(raster[y1*4+x0]*(1-fx)+raster[y1*4+x1]*fx)*fy;
+  assert(Math.abs(fontContext.interpolate(raster,4,3,2,x,y,width,height)-expected)<1,'smooth resampling ignores stride padding');
+  assert.equal(fontContext.interpolate([123,255,255,255],4,1,1,x,y,width,height),123);
+ }
+}
+const choose=body(fontSource,'font_at');
+assert(choose.includes('&fonts[family][pixels - 16]'),'sizes and families have stable font identities');
+assert(body(fontSource,'trim_atlases').includes('i == active_family || i == system_family'),'reader and system faces remain available together');
 assert(/MALLOC_CAP_SPIRAM \| MALLOC_CAP_8BIT/.test(core));
 assert(body(core,'load').includes('sd_media_admin_lock()')&&body(core,'load').includes('sd_media_admin_unlock()'));
 assert(body(core,'load').includes('fclose(file)')&&body(core,'publish').includes('free(old)'));

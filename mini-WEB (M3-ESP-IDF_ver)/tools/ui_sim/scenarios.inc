@@ -27,6 +27,14 @@ static void run_scenarios(const char *dir) {
         snprintf(label, sizeof(label), "%02u_%s", app, names[app]); SHOT(label);
     }
     show_app(APP_SYSTEM); lv_obj_scroll_to_view(sound_card, LV_ANIM_OFF); settle(200); SHOT("84_system_sounds");
+    lv_obj_scroll_to_view(font_preview, LV_ANIM_OFF); settle(200); SHOT("100_system_font_gothic_16");
+    segment_select(font_family_tabs,1); lv_slider_set_value(font_size_slider,20,LV_ANIM_OFF); typography_changed(NULL);
+    lv_obj_scroll_to_view(font_preview,LV_ANIM_OFF); settle(200); SHOT("101_system_font_bold_20");
+    segment_select(font_family_tabs,2); lv_slider_set_value(font_size_slider,24,LV_ANIM_OFF); typography_changed(NULL);
+    lv_obj_scroll_to_view(font_preview,LV_ANIM_OFF); settle(200); SHOT("102_system_font_myeongjo_24");
+    shade_set(true); settle(300); SHOT("103_service_stop_icons_font24"); shade_set(false);
+    segment_select(font_family_tabs,0); lv_slider_set_value(font_size_slider,16,LV_ANIM_OFF); typography_changed(NULL);
+    lv_obj_scroll_to_view(sound_card,LV_ANIM_OFF);
     accessibility_open(NULL); settle(200); SHOT("85_accessibility_voice");
     segment_select(guidance_mode, 1); guidance_changed(NULL); settle(200); SHOT("86_accessibility_tones");
     segment_select(guidance_mode, 0); guidance_changed(NULL); accessibility_open(NULL);
@@ -60,6 +68,8 @@ static void run_scenarios(const char *dir) {
     m3_music_page(1); update_metrics(NULL); lv_obj_scroll_to_view(music_library, LV_ANIM_OFF); settle(200); SHOT("45_music_page2");
     m3_audio_volume(40);
     show_app(APP_WIFI); settle(300); scroll_page(APP_WIFI, 560); SHOT("11_wifi_form");
+    lv_obj_scroll_to_view(wifi_saved_count, LV_ANIM_OFF); settle(200); SHOT("11b_wifi_saved_profiles");
+    scroll_page(APP_WIFI, 560);
     lv_obj_add_state(static_switch, LV_STATE_CHECKED); lv_obj_send_event(static_switch, LV_EVENT_VALUE_CHANGED, NULL);
     settle(100); scroll_page(APP_WIFI, 820); SHOT("12_wifi_static");
     focus(ssid_field); SHOT("13_keyboard_en");
@@ -217,6 +227,11 @@ static void run_scenarios(const char *dir) {
     settle(200); SHOT("95_reader_ruled");
     reader_settings_toggle(NULL); segment_select(reader_theme,3); segment_select(reader_background,1);
     reader_configure_ui(NULL); reader_settings_toggle(NULL); settle(200); SHOT("96_reader_green_paper");
+    reader_settings_toggle(NULL); segment_select(reader_family,1);
+    reader_configure_ui(NULL); reader_settings_toggle(NULL); settle(200); SHOT("96b_reader_gothic_bold");
+    reader_settings_toggle(NULL); segment_select(reader_family,2);
+    lv_slider_set_value(reader_sliders[0],36,LV_ANIM_OFF);
+    reader_configure_ui(NULL); reader_settings_toggle(NULL); settle(200); SHOT("96c_reader_myeongjo_36");
     sim_reader.status=M3_READER_ENCODING; reader_tick(); settle(200); SHOT("97_reader_encoding_error");
     show_app(APP_HOME);
     sim_playing = false; sim_player.active = false; ++sim_player.revision;

@@ -86,6 +86,7 @@ static void build_details(void) {
         lv_obj_t *head = line_row(item);
         part_names[part] = add_label(head, view_style.text, true);
         lv_label_set_long_mode(part_names[part], LV_LABEL_LONG_DOT);
+        lv_obj_set_height(part_names[part], lv_obj_get_style_text_font(part_names[part], LV_PART_MAIN)->line_height);
         char value[40]; format_share(value, sizeof(value), usage.part_bytes[part], usage.image_bytes);
         lv_label_set_text(add_label(head, view_style.muted, false), value);
         lv_obj_t *meter = lv_bar_create(item);

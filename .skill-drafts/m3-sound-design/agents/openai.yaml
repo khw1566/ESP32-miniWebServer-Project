@@ -1,0 +1,6 @@
+interface:
+  display_name: "M3 Sound Design"
+  short_description: "Design, preview and ship synthesized boot and effect sounds"
+  default_prompt: "Use $m3-sound-design to create or adjust M3 boot melodies and effect sound sets."
+policy:
+  allow_implicit_invocation: true

@@ -247,8 +247,8 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
     lv_obj_t *heading_text = bare(heading); grow(heading_text); lv_obj_set_height(heading_text, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(heading_text, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(heading_text, 6, 0);
     ytm_title = label(heading_text, tr(T_YTM_IDLE), TEXT); lv_obj_add_style(ytm_title, &st_title, 0);
-    lv_label_set_long_mode(ytm_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    ytm_artist = label(heading_text, "", MUTED); lv_label_set_long_mode(ytm_artist, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(ytm_title);
+    ytm_artist = label(heading_text, "", MUTED); label_ellipsis(ytm_artist);
     lv_obj_t *line = row(box);
     ytm_time = label(line, "0:00", MUTED); lv_obj_set_width(ytm_time, 64);
     ytm_seek = lv_slider_create(line); style_slider(ytm_seek); grow(ytm_seek);
@@ -266,16 +266,16 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
     ytm_next_song = icon_button(line, LV_SYMBOL_NEXT, ytm_step_event, (void *)(intptr_t)1); lv_obj_set_size(ytm_next_song, 64, 56);
     lv_obj_add_state(ytm_prev_song, LV_STATE_DISABLED); lv_obj_add_state(ytm_next_song, LV_STATE_DISABLED);
     line = row(box);
-    ytm_state = label(line, "", MUTED); grow(ytm_state); lv_label_set_long_mode(ytm_state, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ytm_state = label(line, "", MUTED); grow(ytm_state); label_ellipsis(ytm_state);
     ytm_wait = activity_create(line, ACTIVITY_DOTS, CYAN, T_NONE);
     static const m3_text_t modes[] = {T_YTM_AUTONEXT_OFF, T_YTM_AUTONEXT_ON};
     ytm_autonext = segmented(box, modes, NULL, 2, 1, ytm_autonext_changed);
     ytm_cache_info[0]=label(box,"",MUTED); ytm_cache_info[1]=label(box,"",MUTED);
-    for (unsigned i=0;i<2;++i) lv_label_set_long_mode(ytm_cache_info[i],LV_LABEL_LONG_SCROLL_CIRCULAR);
+    for (unsigned i=0;i<2;++i) label_ellipsis(ytm_cache_info[i]);
     line=row(box);
     ytm_save=grow(button(line,LV_SYMBOL_DOWNLOAD,T_TUBE_SAVE,BTN_SECONDARY,ytm_save_event,NULL));
     ytm_save_next=grow(button(line,LV_SYMBOL_DOWNLOAD,T_YTM_SAVE_NEXT,BTN_SECONDARY,ytm_save_event,(void *)(uintptr_t)1));
-    ytm_download_info=label(box,"",MUTED); lv_label_set_long_mode(ytm_download_info,LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ytm_download_info=label(box,"",MUTED); label_ellipsis(ytm_download_info);
     caption(box,T_YTM_CACHE_HINT);
     box = card(page, T_SEC_VOLUME); volume_row(box, 7, volume);
 
@@ -296,7 +296,7 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
         lv_obj_set_width(chip_text, LV_SIZE_CONTENT); lv_label_set_long_mode(chip_text, LV_LABEL_LONG_CLIP);
         lv_obj_center(chip_text);
     }
-    ytm_heading = label(page, "", TEXT); lv_label_set_long_mode(ytm_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ytm_heading = label(page, "", TEXT); label_ellipsis(ytm_heading);
     ytm_status = caption(page, T_YTM_EMPTY);
     for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) {
         ytm_row_t *item = &ytm_rows[i];
@@ -314,8 +314,8 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
         lv_obj_set_pos(item->canvas, -25, 0); lv_obj_set_style_transform_scale(item->canvas, 182, 0);
         lv_obj_t *texts = bare(item->button); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 3, 0);
-        item->title = label(texts, "", TEXT); lv_label_set_long_mode(item->title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        item->meta = label(texts, "", MUTED); lv_label_set_long_mode(item->meta, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        item->title = label(texts, "", TEXT); label_ellipsis(item->title);
+        item->meta = label(texts, "", MUTED); label_ellipsis(item->meta);
         lv_obj_add_flag(item->button, LV_OBJ_FLAG_HIDDEN);
     }
     ytm_pager = row(page);

@@ -17,6 +17,11 @@ typedef enum {
     M3_CUE_COUNT
 } m3_cue_t;
 typedef struct { unsigned cue, language, volume, channel; bool speech; } m3_feedback_job_t;
+/* Synthesized sound sets (tools/sound_packs.json). The choice is NVS m3_device/sound_pack. */
+enum { M3_WAVE_SINE, M3_WAVE_TRIANGLE, M3_WAVE_SQUARE, M3_WAVE_BELL };
+#define M3_SOUND_PACK_COUNT 5
+unsigned m3_feedback_pack(void);
+void m3_feedback_set_pack(unsigned pack);
 esp_err_t m3_feedback_init(void);
 bool m3_feedback_valid(const m3_feedback_settings_t *settings);
 void m3_feedback_get(m3_feedback_settings_t *settings);

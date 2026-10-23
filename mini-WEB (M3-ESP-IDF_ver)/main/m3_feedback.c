@@ -15,7 +15,7 @@
 
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_feedback_settings_t current = {1, 1, 45, 1, 35, 1, 55, 0};
-static unsigned revision;
+static unsigned revision, pack;
 static bool dirty;
 static int64_t next_save;
 static QueueHandle_t cues;
@@ -34,11 +34,22 @@ bool m3_feedback_update(const m3_feedback_settings_t *p) {
     if (memcmp(&current, p, sizeof(current))) { current = *p; ++revision; dirty = true; }
     portEXIT_CRITICAL(&lock); return true;
 }
+unsigned m3_feedback_pack(void) {
+    portENTER_CRITICAL(&lock); unsigned value = pack; portEXIT_CRITICAL(&lock); return value;
+}
+void m3_feedback_set_pack(unsigned value) {
+    if (value >= M3_SOUND_PACK_COUNT) return;
+    portENTER_CRITICAL(&lock);
+    if (pack != value) { pack = value; ++revision; dirty = true; }
+    portEXIT_CRITICAL(&lock);
+}
 esp_err_t m3_feedback_init(void) {
     nvs_handle_t nvs; m3_feedback_settings_t saved; size_t size = sizeof(saved);
     if (nvs_open("m3_device", NVS_READONLY, &nvs) == ESP_OK) {
         if (nvs_get_blob(nvs, "sound_settings", &saved, &size) == ESP_OK &&
             size == sizeof(saved) && m3_feedback_valid(&saved)) current = saved;
+        uint8_t selected; /* Separate key keeps the eight-byte sound_settings blob readable. */
+        if (nvs_get_u8(nvs, "sound_pack", &selected) == ESP_OK && selected < M3_SOUND_PACK_COUNT) pack = selected;
         nvs_close(nvs);
     }
     cues = xQueueCreate(4, sizeof(pending_t));
@@ -47,13 +58,14 @@ esp_err_t m3_feedback_init(void) {
 void m3_feedback_poll(void) {
     if (esp_timer_get_time() < next_save) return;
     next_save = esp_timer_get_time() + 2000000;
-    m3_feedback_settings_t p; bool pending; unsigned captured;
-    portENTER_CRITICAL(&lock); p = current; pending = dirty; captured = revision; portEXIT_CRITICAL(&lock);
+    m3_feedback_settings_t p; bool pending; unsigned captured, selected;
+    portENTER_CRITICAL(&lock); p = current; pending = dirty; captured = revision; selected = pack; portEXIT_CRITICAL(&lock);
     if (!pending) return;
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("m3_device", NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_set_blob(nvs, "sound_settings", &p, sizeof(p));
+        if (err == ESP_OK) err = nvs_set_u8(nvs, "sound_pack", (uint8_t)selected);
         if (err == ESP_OK) err = nvs_commit(nvs);
         nvs_close(nvs);
     }
@@ -91,37 +103,59 @@ bool m3_feedback_take(m3_feedback_job_t *job) {
 }
 bool m3_feedback_boot(m3_feedback_job_t *job) { return resolve(M3_CUE_BOOT, 0, job); }
 
-/* Short envelopes avoid clicks. The worker is the only owner of PCM and codec. */
-static bool note(float frequency, unsigned ms, const m3_audio_output_t *out) {
+typedef struct { uint16_t hz, ms; uint8_t wave, gain; } m3_tone_t;
+typedef struct { const m3_tone_t *notes; uint8_t count; } m3_tone_seq_t;
+typedef struct { m3_tone_seq_t boot, tap, confirm, error, setup; m3_tone_t app; uint16_t app_step; } m3_sound_pack_t;
+#include "m3_sound_packs.inc"
+
+/* One period sample for phase 0..1. Square is softened; bell adds an octave partial. */
+static float wave_sample(unsigned wave, float phase) {
+    if (wave == M3_WAVE_TRIANGLE) return 4.0f * fabsf(phase - 0.5f) - 1.0f;
+    if (wave == M3_WAVE_SQUARE) return phase < 0.5f ? 0.6f : -0.6f;
+    float base = sinf(6.28318530718f * phase);
+    if (wave == M3_WAVE_BELL) return 0.75f * base + 0.25f * sinf(12.5663706144f * phase);
+    return base;
+}
+/* Short envelopes avoid clicks. The worker is the only owner of PCM and codec.
+ * tools/generate_sound_packs.py and the m3-sound-design skill preview this exact synthesis. */
+static bool note(const m3_tone_t *tone, const m3_audio_output_t *out) {
     enum { RATE = 24000, BLOCK = 240 };
     int16_t pcm[BLOCK * 2];
-    unsigned total = RATE * ms / 1000;
+    unsigned total = RATE * tone->ms / 1000, edge = total / 4 < 240 ? total / 4 : 240;
+    float step = (float)tone->hz / RATE, phase = 0, amplitude = 90.0f * tone->gain;
     for (unsigned pos = 0; pos < total && !out->cancelled();) {
         unsigned frames = total - pos; if (frames > BLOCK) frames = BLOCK;
         for (unsigned i = 0; i < frames; ++i) {
             unsigned n = pos + i, distance = n < total - n ? n : total - n;
-            float envelope = distance < 240 ? distance / 240.0f : 1.0f;
-            int16_t value = (int16_t)(9000.0f * envelope * sinf(6.28318530718f * frequency * n / RATE));
+            float envelope = edge && distance < edge ? (float)distance / edge : 1.0f;
+            if (tone->wave == M3_WAVE_BELL) envelope *= expf(-3.0f * n / total);
+            int16_t value = tone->hz ? (int16_t)(amplitude * envelope * wave_sample(tone->wave, phase)) : 0;
             pcm[i * 2] = pcm[i * 2 + 1] = value;
+            phase += step; if (phase >= 1.0f) phase -= 1.0f;
         }
         if (!out->write(pcm, frames * sizeof(int16_t) * 2)) return false;
         pos += frames;
     }
     return !out->cancelled();
 }
+static bool sequence(const m3_tone_seq_t *seq, const m3_audio_output_t *out) {
+    bool ok = true;
+    for (unsigned i = 0; i < seq->count && ok; ++i) ok = note(&seq->notes[i], out);
+    return ok;
+}
 static bool tones(unsigned cue, const m3_audio_output_t *out) {
     if (!out->begin(24000)) return false;
+    const m3_sound_pack_t *set = &sound_packs[m3_feedback_pack()];
     bool ok;
-    if (cue == M3_CUE_BOOT) {
-        const float melody[] = {523.251f, 659.255f, 783.991f, 1046.502f, 987.767f, 1046.502f};
-        const unsigned duration[] = {140, 140, 180, 240, 120, 400};
-        ok = true;
-        for (unsigned i = 0; i < 6 && ok; ++i) ok = note(melody[i], duration[i], out);
-    } else if (cue == M3_CUE_TAP) ok = note(880, 35, out);
-    else if (cue == M3_CUE_ERROR || cue == M3_CUE_WIFI_FAILED) ok = note(330, 110, out) && note(220, 180, out);
-    else if (cue == M3_CUE_WIFI_SETUP) ok = note(440, 110, out) && note(660, 110, out) && note(440, 160, out);
-    else if (cue >= M3_CUE_APP_HOME) ok = note(600 + 35 * (cue - M3_CUE_APP_HOME), 90, out);
-    else ok = note(659.255f, 90, out) && note(987.767f, 150, out);
+    if (cue == M3_CUE_BOOT) ok = sequence(&set->boot, out);
+    else if (cue == M3_CUE_TAP) ok = sequence(&set->tap, out);
+    else if (cue == M3_CUE_ERROR || cue == M3_CUE_WIFI_FAILED) ok = sequence(&set->error, out);
+    else if (cue == M3_CUE_WIFI_SETUP) ok = sequence(&set->setup, out);
+    else if (cue >= M3_CUE_APP_HOME) {
+        m3_tone_t tone = set->app;
+        tone.hz = (uint16_t)(tone.hz + set->app_step * (cue - M3_CUE_APP_HOME));
+        ok = note(&tone, out);
+    } else ok = sequence(&set->confirm, out);
     return ok && out->drain();
 }
 /* 0: unavailable before opening codec; -1: output failed; 1: completed. */

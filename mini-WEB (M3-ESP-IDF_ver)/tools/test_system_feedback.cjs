@@ -7,20 +7,20 @@ function body(name,text=source){const m=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\
 const defaults=()=>({version:1,boot_enabled:1,boot_volume:45,effects_enabled:1,effects_volume:35,guidance_enabled:1,guidance_volume:55,guidance_mode:0});
 function context(){
  const c={current:defaults(),revision:0,dirty:false,next_save:0,now:0,cues:[],ready:true,playing:false,volume:40,headless:false,restarting:false,
-  ESP_OK:0,NVS_READWRITE:1,pdTRUE:1,M3_CUE_BOOT:0,M3_CUE_TAP:1,M3_CUE_SAVED:6,M3_CUE_COUNT:26,NULL:null,m3_i18n_language:()=>0,
+  ESP_OK:0,NVS_READWRITE:1,pdTRUE:1,M3_CUE_BOOT:0,M3_CUE_TAP:1,M3_CUE_SAVED:6,M3_CUE_COUNT:26,M3_SOUND_PACK_COUNT:5,NULL:null,m3_i18n_language:()=>0,
   fail:false,stored:null,writes:0,warnings:0,lock:{},
   portENTER_CRITICAL:()=>{},portEXIT_CRITICAL:()=>{},esp_timer_get_time:()=>c.now,
   memcmp:(a,b)=>JSON.stringify(a)===JSON.stringify(b)?0:1,
   m3_preferences_restarting:()=>c.restarting,m3_preferences_web_active:()=>c.headless,
   m3_audio_state:out=>Object.assign(out,{ready:c.ready,playing:c.playing,volume:c.volume}),
   nvs_open:()=>0,nvs_set_blob:(_h,key,p)=>{assert.equal(key,'sound_settings');c.writes++;c.candidate={...p};return c.fail?1:0;},
-  nvs_commit:()=>{if(c.fail)return 1;c.stored={...c.candidate};return 0;},nvs_close:()=>{},
+  nvs_set_u8:(_h,key,v)=>{assert.equal(key,'sound_pack');c.candidate_pack=v;return 0;},nvs_commit:()=>{if(c.fail)return 1;c.stored={...c.candidate};c.stored_pack=c.candidate_pack;return 0;},pack:0,nvs_close:()=>{},
   ESP_LOGW:()=>c.warnings++,esp_err_to_name:()=>'',
   xQueueSend:(q,p)=>{if(q.length>=4)return 0;q.push({...p});return 1;},
   xQueueReceive:(q,p)=>{if(!q.length)return 0;Object.assign(p,q.shift());return 1;},xQueueReset:q=>q.length=0};
  function translate(text){return text.replaceAll('->','.').replace(/\b(?:unsigned|bool|esp_err_t|int64_t) (\w+)/g,'let $1')
   .replaceAll('2000000','2000000').replaceAll('&lock','lock').replaceAll('&p','p').replaceAll('&state','state')
-  .replaceAll('&current','current').replaceAll('&nvs','nvs').replace('sizeof(current)','8').replace('sizeof(p)','8')
+  .replaceAll('&current','current').replaceAll('&nvs','nvs').replace('sizeof(current)','8').replace('(uint8_t)selected','selected').replace('sizeof(p)','8')
   .replace('nvs_handle_t nvs;','let nvs={};').replace('m3_feedback_settings_t p;','let p={};')
   .replace('m3_audio_state_t state;','let state={};').replace('pending_t p;','let p={};')
   .replace('*out = current','Object.assign(out,current)').replace('current = *p','current = {...p}')
@@ -29,7 +29,7 @@ function context(){
    'Object.assign(job,{cue,language,volume,channel,speech:channel==2&&!p.guidance_mode});');}
  vm.createContext(c);
  for(const [name,args] of [['m3_feedback_valid','p'],['m3_feedback_get','out'],['m3_feedback_update','p'],['m3_feedback_poll',''],
-  ['resolve','cue,language,job'],['m3_feedback_emit','cue,language'],['m3_feedback_take','job'],['m3_feedback_clear','']]){
+  ['resolve','cue,language,job'],['m3_feedback_emit','cue,language'],['m3_feedback_take','job'],['m3_feedback_clear',''],['m3_feedback_pack',''],['m3_feedback_set_pack','value']]){
   vm.runInContext('function '+name+'('+args+'){'+translate(body(name))+'}',c);
  }
  return c;
@@ -47,6 +47,8 @@ c.current.boot_enabled=0;assert(!c.resolve(0,0,job));
 c=context();assert(c.m3_feedback_update({...defaults(),boot_volume:10}));c.m3_feedback_poll();assert.equal(c.stored.boot_volume,10);assert(!c.dirty);
 c.m3_feedback_update({...defaults(),guidance_mode:1});c.fail=true;c.now=2000000;c.m3_feedback_poll();assert(c.dirty);assert.equal(c.stored.guidance_mode,0);
 c.fail=false;c.now=4000000;c.m3_feedback_poll();assert(!c.dirty);assert.equal(c.stored.guidance_mode,1);
+c=context();c.m3_feedback_set_pack(9);assert.equal(c.m3_feedback_pack(),0,'unknown sound set is ignored');
+c.m3_feedback_set_pack(3);assert(c.dirty);c.m3_feedback_poll();assert.equal(c.stored_pack,3,'sound set persists with the settings write');assert(!c.dirty);
 c=context();for(const flag of ['headless','restarting','playing']){c[flag]=true;c.m3_feedback_emit(3,0);assert.equal(c.cues.length,0);c[flag]=false;}
 c.volume=0;c.m3_feedback_emit(3,0);assert.equal(c.cues.length,0);c.volume=40;
 c.m3_feedback_emit(26,0);c.m3_feedback_emit(3,3);assert.equal(c.cues.length,0);

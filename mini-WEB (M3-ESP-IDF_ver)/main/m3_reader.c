@@ -1,4 +1,5 @@
 #include "m3_reader.h"
+#include "m3_reader_font.h"
 #include "m3_memory.h"
 #include "m3_utf8.h"
 #include "sd_media.h"
@@ -42,7 +43,7 @@ bool m3_reader_path_valid(const char *path) {
 bool m3_reader_settings_valid(const m3_reader_settings_t *s) {
     return s && s->version == 1 && s->font_px >= 16 && s->font_px <= 36 && s->theme <= 3 &&
         s->letter_space <= 6 && s->line_space <= 24 && s->margin >= 12 && s->margin <= 40 &&
-        s->background <= 2 && s->reserved == 0;
+        s->background <= 2 && s->font_family < M3_READER_FONT_COUNT;
 }
 bool m3_reader_normalize(char *text, size_t bytes, size_t *length) {
     if (!text || !bytes || memchr(text, 0, bytes)) return false;

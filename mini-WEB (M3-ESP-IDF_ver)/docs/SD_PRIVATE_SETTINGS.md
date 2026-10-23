@@ -42,12 +42,34 @@ Windows에서 파일 확장자가 `.json.txt`가 되지 않도록 확인합니�
  "ip":"192.168.1.50","gateway":"192.168.1.1","netmask":"255.255.255.0","dns":"1.1.1.1"}
 ```
 
-예전 `version:1, networks:[...], last_ssid` 형식도 읽습니다. 화면 또는 웹 Wi-Fi
-설정에서 저장하면 최신 선택 하나를 위 단일 프로필 JSON으로 기록합니다. 이전
-파일은 `.bak`에 남깁니다. 저장 실패 시 성공이라고 표시하지 않고, 기존 실행 중
-프로필을 유지합니다. 부팅 때 JSON을 읽은 뒤 RAM의 설정 스냅샷으로 자동 연결·
-고정 IP·재시도·저장 비밀번호 재사용을 처리합니다. SD 파일을 PC에서 바꾼 경우
-카드를 넣고 재부팅하세요. 설정 AP 동작과 명시적 설정 모드 선택은 유지합니다.
+Wi-Fi는 SSID별로 최대 **32개**를 저장합니다. 위 단일 프로필 JSON도 읽으며,
+화면 또는 웹에서 저장할 때 다음 목록 형식으로 전환하여 다른 항목을 보존합니다.
+
+```json
+{"version":1,"last_ssid":"Home-Fixture","networks":[
+  {"ssid":"Home-Fixture","password":"example-password","static":false},
+  {"ssid":"Office-Fixture","password":"another-password","static":false}
+]}
+```
+
+같은 SSID를 저장하면 암호와 IP 설정을 해당 항목에 갱신합니다. 32개가 찬
+경우 새 SSID는 저장 실패로 처리하며 기존 항목을 자동 삭제하지 않습니다.
+Wi-Fi 앱의 **저장된 Wi-Fi**에서 저장 수와 전체 목록을 확인하고, 항목을 눌러
+저장된 설정으로 연결하거나 휴지통 버튼으로 삭제할 수 있습니다. 주변 검색
+목록에도 저장된 네트워크를 표시합니다. 암호 원문은 화면 상태에 포함하지 않습니다.
+
+부팅과 연결 끊김 후 자동 재시도는 주변 SSID를 먼저 검색하고, 저장된 항목 중
+검색된 네트워크를 RSSI가 높은 순서로 시도합니다. 가장 강한 후보가 실패하면
+다음 후보로 넘어갑니다. `last_ssid`와 저장 순서는 자동 연결 우선순위가 아닙니다.
+검색하지 못한 SSID와 숨김 SSID는 자동 연결하지 않으며, 명시적으로 고른 SSID도
+검색에서 확인한 후 연결합니다. 네트워크마다 저장된 DHCP/고정 IP 설정을 적용합니다.
+연결이 정상인 동안에는 더 강한 네트워크로 강제 전환하지 않습니다.
+
+실패하면 설정 핫스팟으로 돌아오고 약 60초 후 다시 검색합니다. 설정 AP에
+접속한 클라이언트가 있거나 사용자가 설정 핫스팟을 직접 선택한 경우에는
+자동 전환하지 않습니다. 자동 검색·연결 과정은 저장 파일을 다시 쓰지 않습니다.
+이전 파일은 `.bak`에 남기며 저장 실패 시 기존 파일과 실행 설정을 유지합니다.
+SD 파일을 PC에서 바꾼 경우 카드를 넣고 재부팅하세요.
 
 ## 웹 관리자와 AI 어시스턴트
 
@@ -101,6 +123,6 @@ python -X utf8 tools/copy_m3_sd_settings.py E:/ --replace-keys --wifi-source "�
 
 저장소 루트의 `node tools/test_m3_json_runtime.cjs`, `python -X utf8 tools/test_m3_sd_settings.py`,
 `node tools/test_network_setup.cjs` 및 M3의 `test_sd_wifi_recovery.cjs`,
-`test_touch_apps.cjs`, `test_ai_key.cjs`, `test_ai_studio.cjs`, `test_azure_speech.cjs`로
+  `test_wifi_profiles.cjs`, `test_touch_apps.cjs`, `test_ai_key.cjs`, `test_ai_studio.cjs`, `test_azure_speech.cjs`로
 호스트 코드·모의 동작을 검사합니다. 빌드·플래시는 사용자가 실행하며 실제 카드,
 Wi-Fi 접속, 제공자 인증 성공은 별도로 확인해야 합니다.

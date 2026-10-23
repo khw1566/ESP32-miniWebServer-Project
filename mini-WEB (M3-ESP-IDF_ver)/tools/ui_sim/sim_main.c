@@ -224,7 +224,13 @@ void m3_feedback_get(m3_feedback_settings_t *out) { *out = sim_feedback; }
 bool m3_feedback_update(const m3_feedback_settings_t *p) { sim_feedback = *p; return true; }
 void m3_feedback_clear(void) {}
 void m3_feedback_emit(unsigned cue, unsigned language) { (void)cue; (void)language; }
+static unsigned sim_sound_pack;
+unsigned m3_feedback_pack(void) { return sim_sound_pack; }
+void m3_feedback_set_pack(unsigned pack) { if (pack < M3_SOUND_PACK_COUNT) sim_sound_pack = pack; }
 static m3_preferences_t sim_preferences = {1,100,30,1,0,40,40,0};
+static m3_typography_t sim_typography = {1,0,16,0};
+void m3_typography_get(m3_typography_t *out) { *out = sim_typography; }
+bool m3_typography_update(const m3_typography_t *p) { sim_typography = *p; return true; }
 static bool sim_screen_on = true, sim_touch_down;
 static unsigned sim_restart_count;
 static void sim_touch_read(lv_indev_t *input, lv_indev_data_t *data) {
@@ -313,7 +319,14 @@ void m3_runtime_state(m3_runtime_state_t *out) {
     for (int i = 0; i < 4; ++i) {
         snprintf(out->networks[i].ssid, sizeof(out->networks[i].ssid), "%s", names[i]);
         out->networks[i].rssi = (int8_t)rssi[i]; out->networks[i].authmode = i == 2 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+        out->networks[i].saved = i == 0 || i == 2;
     }
+    out->saved_wifi_count = 3;
+    snprintf(out->saved_wifi[0].ssid, sizeof(out->saved_wifi[0].ssid), "%s", names[0]);
+    out->saved_wifi[0].secured = true;
+    snprintf(out->saved_wifi[1].ssid, sizeof(out->saved_wifi[1].ssid), "%s", names[2]);
+    snprintf(out->saved_wifi[2].ssid, sizeof(out->saved_wifi[2].ssid), "Saved-Office-Offline");
+    out->saved_wifi[2].secured = true;
     snprintf(out->settings.ssid, sizeof(out->settings.ssid), "KT_GiGA_5G_Home");
     out->wifi_password_saved = true;
     snprintf(out->settings.netmask, sizeof(out->settings.netmask), "255.255.255.0");

@@ -3,7 +3,7 @@
 #include "src/misc/lv_text_private.h" /* Installed LVGL 9.2.2: byte-based line wrapping. */
 static lv_obj_t *reader_surface, *reader_canvas, *reader_text, *reader_toolbar, *reader_footer;
 static lv_obj_t *reader_title, *reader_position, *reader_notice, *reader_options, *reader_seek;
-static lv_obj_t *reader_sliders[4], *reader_values[4], *reader_theme, *reader_background, *reader_lines[32];
+static lv_obj_t *reader_sliders[4], *reader_values[4], *reader_theme, *reader_background, *reader_family, *reader_lines[32];
 static m3_reader_settings_t reader_config;
 static m3_reader_state_t reader_snapshot;
 static M3_PSRAM_BSS char reader_window[M3_READER_WINDOW];
@@ -42,14 +42,14 @@ static void reader_skin(void) {
     unsigned theme = reader_config.theme;
     lv_obj_set_style_bg_color(reader_surface, lv_color_hex(paper[theme]), 0);
     set_ink(reader_text, ink[theme]); set_ink(reader_title, ink[theme]); set_ink(reader_position, ink[theme]);
-    lv_obj_set_style_text_font(reader_text, m3_reader_font(reader_config.font_px), 0);
+    lv_obj_set_style_text_font(reader_text, m3_reader_font(reader_config.font_px, reader_config.font_family), 0);
     lv_obj_set_style_text_letter_space(reader_text, reader_config.letter_space, 0);
     lv_obj_set_style_text_line_space(reader_text, reader_config.line_space, 0);
     lv_obj_set_pos(reader_canvas, reader_config.margin, 62);
     lv_obj_set_size(reader_canvas, M3_WIDTH - 2 * reader_config.margin, 526);
     lv_obj_set_width(reader_text, M3_WIDTH - 2 * reader_config.margin);
     lv_obj_set_height(reader_text, 526);
-    const lv_font_t *font = m3_reader_font(reader_config.font_px);
+    const lv_font_t *font = m3_reader_font(reader_config.font_px, reader_config.font_family);
     for (unsigned i = 0; i < 32; ++i) {
         unsigned pitch = reader_config.background == 2 ? font->line_height + reader_config.line_space : 16;
         unsigned y = reader_config.background == 2 ? (i + 1) * pitch - 4 : i * pitch;
@@ -65,7 +65,7 @@ static void reader_render(void) {
     if (reader_snapshot.status != M3_READER_READY) return;
     size_t length = m3_reader_copy(reader_generation, reader_offset, reader_window, sizeof(reader_window));
     if (!length) return;
-    const lv_font_t *font = m3_reader_font(reader_config.font_px);
+    const lv_font_t *font = m3_reader_font(reader_config.font_px, reader_config.font_family);
     unsigned lines = (526u + reader_config.line_space) / (font->line_height + reader_config.line_space);
     unsigned used = 0;
     for (unsigned i = 0; i < lines && used < length; ++i) {
@@ -95,7 +95,7 @@ static unsigned reader_previous(void) {
     unsigned end = reader_offset - begin;
     if (end > size) return reader_offset;
     reader_window[end] = 0;
-    const lv_font_t *font = m3_reader_font(reader_config.font_px);
+    const lv_font_t *font = m3_reader_font(reader_config.font_px, reader_config.font_family);
     unsigned low = 0, high = end;
     while (low < high) {
         unsigned middle = low + (high - low) / 2;
@@ -173,6 +173,7 @@ static void reader_configure_ui(lv_event_t *event) {
     reader_config.line_space = lv_slider_get_value(reader_sliders[2]);
     reader_config.margin = lv_slider_get_value(reader_sliders[3]);
     reader_config.theme = segment_value(reader_theme); reader_config.background = segment_value(reader_background);
+    reader_config.font_family = segment_value(reader_family);
     if (!m3_reader_configure(&reader_config)) return;
     for (unsigned i = 0; i < 4; ++i) {
         char value[16]; snprintf(value, sizeof(value), "%ld px", (long)lv_slider_get_value(reader_sliders[i]));
@@ -231,13 +232,14 @@ static void build_reader(lv_obj_t *page) {
     lv_obj_add_event_cb(reader_canvas, reader_touch, LV_EVENT_ALL, NULL);
     for (unsigned i = 0; i < 32; ++i) reader_lines[i] = icon_part(reader_canvas, 0, 0, 440, 1, 0);
     reader_text = label(reader_canvas, "", TEXT); lv_obj_remove_flag(reader_text, LV_OBJ_FLAG_CLICKABLE);
-    lv_label_set_long_mode(reader_text, LV_LABEL_LONG_CLIP);
+    /* CLIP sets LV_TEXT_FLAG_EXPAND internally and disables wrapping in LVGL 9.2. */
+    lv_label_set_long_mode(reader_text, LV_LABEL_LONG_WRAP);
     reader_notice = label(reader_surface, tr(T_READER_HINT), MUTED);
     lv_obj_set_pos(reader_notice, 28, 100); lv_obj_set_size(reader_notice, 424, LV_SIZE_CONTENT);
     lv_obj_set_style_text_align(reader_notice, LV_TEXT_ALIGN_CENTER, 0);
     reader_toolbar = bare(reader_surface); lv_obj_set_pos(reader_toolbar, 16, 6); lv_obj_set_size(reader_toolbar, 448, 48);
     reader_title = label(reader_toolbar, "", TEXT); lv_obj_set_pos(reader_title, 0, 13); lv_obj_set_width(reader_title, 330);
-    lv_label_set_long_mode(reader_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(reader_title);
     lv_obj_t *open = icon_button(reader_toolbar, LV_SYMBOL_DIRECTORY, reader_browse, NULL);
     lv_obj_set_pos(open, 340, 2); lv_obj_set_size(open, 44, 44);
     lv_obj_t *settings_button = icon_button(reader_toolbar, LV_SYMBOL_SETTINGS, reader_settings_toggle, NULL);
@@ -256,6 +258,9 @@ static void build_reader(lv_obj_t *page) {
     static const m3_text_t themes[] = {T_READER_DAY, T_READER_SEPIA, T_READER_NIGHT, T_READER_GREEN};
     static const m3_text_t backgrounds[] = {T_READER_PLAIN, T_READER_PAPER, T_READER_RULED};
     m3_reader_settings(&reader_config);
+    static const m3_text_t families[] = {T_READER_GOTHIC, T_READER_GOTHIC_BOLD, T_READER_MYEONGJO};
+    caption(box, T_READER_FACE);
+    reader_family = segmented(box, families, NULL, 3, reader_config.font_family, reader_configure_ui);
     caption(box, T_READER_THEME); reader_theme = segmented(box, themes, NULL, 4, reader_config.theme, reader_configure_ui);
     caption(box, T_READER_BG); reader_background = segmented(box, backgrounds, NULL, 3, reader_config.background, reader_configure_ui);
     static const m3_text_t ids[] = {T_READER_FONT, T_READER_LETTER, T_READER_LINE, T_READER_MARGIN};

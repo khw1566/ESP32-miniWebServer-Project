@@ -41,7 +41,7 @@ const u={screen_blanked:false,screen_waking:false,screen_release_at:0,screen_inp
  lv_indev_get_next:input=>input?null:u.input,lv_indev_get_type:()=>1,lv_indev_get_display:()=>1,
  m3_board_display:()=>1,m3_board_touch_ready:()=>u.touch,m3_screen_wake_reset:out=>Object.assign(out,reset()),
  lv_obj_move_to_index:()=>{},lv_obj_remove_flag:obj=>obj.hidden=false,lv_obj_add_flag:obj=>obj.hidden=true,
- m3_board_set_screen_on:on=>{u.power.push(on);return on?u.wakeError:u.offError;},set_text:(obj,t)=>obj.text=t,tr:x=>x,
+ m3_board_set_screen_on:on=>{u.power.push(on);return on?u.wakeError:u.offError;},set_text:(obj,t)=>obj.text=t,tr:x=>x,theme_wallpaper_sync:()=>{},
  lv_tick_get:()=>u.now,lv_indev_get_state:()=>u.pressed?1:0,lv_indev_get_point:(_in,p)=>Object.assign(p,u.point),
  m3_screen_wake_sample:(state,mode,now,down,x,y)=>c.sample(state,mode,now>>>0,down,x,y)};
 vm.createContext(u);

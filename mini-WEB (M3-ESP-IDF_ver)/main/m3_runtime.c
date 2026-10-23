@@ -159,13 +159,15 @@ bool m3_runtime_browse(bool sd, const char *folder, unsigned offset) {
     return xQueueOverwrite(browse_queue, &request) == pdPASS;
 }
 bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings) {
-    if (!wifi_queue || action < M3_WIFI_SCAN || action > M3_WIFI_CONNECT_SAVED ||
-        ((action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED) && !network_settings_valid(settings))) return false;
+    if (!wifi_queue || action < M3_WIFI_SCAN || action > M3_WIFI_FORGET_PROFILE ||
+        ((action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED || action == M3_WIFI_USE_PROFILE ||
+          action == M3_WIFI_FORGET_PROFILE) && !network_settings_valid(settings))) return false;
     portENTER_CRITICAL(&state_lock); bool ready = state.initialized && state.wifi_ready; portEXIT_CRITICAL(&state_lock);
     bool expected = false;
     if (!ready || !atomic_compare_exchange_strong(&wifi_pending, &expected, true)) return false;
     wifi_request_t request = {.action = action};
-    if (settings && (action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED)) request.settings = *settings;
+    if (settings && (action == M3_WIFI_CONNECT || action == M3_WIFI_CONNECT_SAVED ||
+        action == M3_WIFI_USE_PROFILE || action == M3_WIFI_FORGET_PROFILE)) request.settings = *settings;
     bool sent = xQueueSend(wifi_queue, &request, 0) == pdPASS;
     memset(&request, 0, sizeof(request));
     if (!sent) atomic_store(&wifi_pending, false);
@@ -182,7 +184,7 @@ static bool restore_wifi_password(network_settings_t *settings) {
 }
 static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
     snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
-        request->action == M3_WIFI_SCAN ? "Searching nearby Wi-Fi..." :
+        request->action == M3_WIFI_SCAN || request->retry ? "Searching nearby Wi-Fi..." :
         (request->action == M3_WIFI_CONNECT || request->action == M3_WIFI_CONNECT_SAVED) ? "Saving and connecting (up to 15 seconds)..." :
         request->action == M3_WIFI_IPV6 ? "Requesting IPv6 router discovery..." : "Starting setup hotspot...");
     publish(next);
@@ -190,26 +192,39 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
     if (request->action == M3_WIFI_SCAN) {
         int count = network_scan_wifi(next->networks, M3_WIFI_RESULTS);
         next->scan_count = count > 0 ? count : 0;
-        ++next->scan_revision;
         snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
             count < 0 ? "Scan failed. Enter SSID manually or retry." :
             count == 0 ? "No visible networks. Enter SSID manually." : "Tap a network, enter its password, then connect.");
+    } else if (request->action == M3_WIFI_FORGET_PROFILE) {
+        result = m3_sd_wifi_forget(request->settings.ssid);
+        snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
+            result == ESP_OK ? "Saved Wi-Fi removed." : "Could not remove saved Wi-Fi.");
+        network_settings_load(&next->settings);
+        next->wifi_password_saved = next->settings.pass[0] != 0;
+        memset(next->settings.pass, 0, sizeof(next->settings.pass));
+        ++next->settings_revision;
     } else if (request->action == M3_WIFI_IPV6) {
         result = network_retry_ipv6();
         snprintf(next->wifi_message, sizeof(next->wifi_message), "%s",
             result == ESP_OK ? "IPv6 router discovery requested." : "IPv6 discovery unavailable; connect Wi-Fi first.");
     } else {
-        if (request->action == M3_WIFI_CONNECT || request->action == M3_WIFI_CONNECT_SAVED) {
+        if (request->action == M3_WIFI_CONNECT || request->action == M3_WIFI_CONNECT_SAVED || request->action == M3_WIFI_USE_PROFILE) {
             setup_requested = false;
-            result = request->action == M3_WIFI_CONNECT_SAVED && !restore_wifi_password(&request->settings)
-                ? ESP_ERR_INVALID_STATE : request->retry ? ESP_OK : network_save_configuration(&request->settings);
+            result = request->retry ? ESP_OK : request->action == M3_WIFI_USE_PROFILE ?
+                (m3_sd_wifi_find(request->settings.ssid, &request->settings) ? ESP_OK : ESP_ERR_NOT_FOUND) :
+                request->action == M3_WIFI_CONNECT_SAVED && !restore_wifi_password(&request->settings)
+                ? ESP_ERR_INVALID_STATE : network_save_configuration(&request->settings);
             if (result == ESP_OK) {
                 next->wifi_password_saved = request->settings.pass[0] != 0;
                 next->settings = request->settings;
                 memset(next->settings.pass, 0, sizeof(next->settings.pass));
                 ++next->settings_revision;
                 dns_server_stop();
-                result = network_connect_sta(request->settings.ssid, request->settings.pass);
+                result = request->retry ? network_connect_saved() : network_connect_sta(request->settings.ssid, request->settings.pass);
+                network_settings_load(&next->settings);
+                next->wifi_password_saved = next->settings.pass[0] != 0;
+                memset(next->settings.pass, 0, sizeof(next->settings.pass));
+                ++next->settings_revision;
                 if (result != ESP_OK) {
                     esp_err_t fallback = network_start_softap();
                     if (fallback == ESP_OK) dns_server_start();
@@ -217,7 +232,10 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
                         fallback == ESP_OK ? "Connection failed. Setup hotspot restored; check password/IP." :
                         "Connection and setup hotspot failed. Inspect serial log.");
                 } else snprintf(next->wifi_message, sizeof(next->wifi_message), "Connected. Settings saved for next boot.");
-            } else snprintf(next->wifi_message, sizeof(next->wifi_message), "Save failed: %s", esp_err_to_name(result));
+            } else if (result == ESP_ERR_NO_MEM && next->saved_wifi_count >= M3_WIFI_PROFILE_LIMIT &&
+                !m3_sd_wifi_known(request->settings.ssid))
+                snprintf(next->wifi_message, sizeof(next->wifi_message), "Saved Wi-Fi is full. Remove a network first.");
+            else snprintf(next->wifi_message, sizeof(next->wifi_message), "Save failed: %s", esp_err_to_name(result));
         } else {
             setup_requested = true;
             result = network_start_softap();
@@ -230,10 +248,14 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
             if (!domain_paused) cloud_relay_start();
         }
     }
-    if (request->action != M3_WIFI_SCAN && request->action != M3_WIFI_IPV6)
+    if (request->action != M3_WIFI_SCAN && request->action != M3_WIFI_IPV6 && request->action != M3_WIFI_FORGET_PROFILE)
         m3_feedback_emit(result == ESP_OK ? (network_get_mode() == NET_MODE_STA_CONNECTED ? M3_CUE_WIFI_CONNECTED : M3_CUE_WIFI_SETUP) : M3_CUE_WIFI_FAILED, m3_i18n_language());
     memset(request, 0, sizeof(*request));
     next_wifi_retry = esp_timer_get_time() + 60000000LL;
+    next->saved_wifi_count = m3_sd_wifi_profiles(next->saved_wifi, M3_WIFI_PROFILE_LIMIT);
+    for (int i = 0; i < next->scan_count; ++i) next->networks[i].saved =
+        m3_sd_wifi_matches(next->networks[i].ssid, next->networks[i].authmode == WIFI_AUTH_OPEN);
+    ++next->scan_revision;
     ++next->wifi_revision;
     /* Publish completion before releasing the admission gate. */
     publish(next);
@@ -242,11 +264,13 @@ static void wifi_execute(m3_runtime_state_t *next, wifi_request_t *request) {
 /* A failed boot/manual attempt must not permanently disable saved Wi-Fi.
  * Keep the setup portal between attempts; explicit setup mode opts out. */
 static void retry_saved_wifi(m3_runtime_state_t *next) {
-    if (setup_requested || !next->wifi_ready || network_get_mode() != NET_MODE_AP_CAPTIVE ||
-        esp_timer_get_time() < next_wifi_retry || network_setup_has_clients()) return;
+    if (setup_requested || !next->wifi_ready ||
+        (network_get_mode() != NET_MODE_AP_CAPTIVE && !network_recovery_pending()) ||
+        esp_timer_get_time() < next_wifi_retry ||
+        (network_get_mode() == NET_MODE_AP_CAPTIVE && network_setup_has_clients())) return;
     next_wifi_retry = esp_timer_get_time() + 60000000LL;
     wifi_request_t request = {.action = M3_WIFI_CONNECT, .retry = true};
-    if (!network_settings_load(&request.settings)) return;
+    if (!m3_sd_wifi_profiles(NULL, 0)) return;
     bool expected = false;
     if (atomic_compare_exchange_strong(&wifi_pending, &expected, true)) wifi_execute(next, &request);
     memset(&request, 0, sizeof(request));
@@ -281,11 +305,9 @@ static void services(void *unused) {
     next.wifi_ready = net == ESP_OK;
     bool saved_wifi = false, connected = false;
     if (net == ESP_OK) {
-        char ssid[64] = {0}, pass[64] = {0};
-        saved_wifi = !setup_requested && network_has_saved_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
+        saved_wifi = !setup_requested && m3_sd_wifi_profiles(NULL, 0) > 0;
         if (saved_wifi) m3_boot_splash_step(M3_BOOT_CONNECT);
-        connected = saved_wifi && network_connect_sta(ssid, pass) == ESP_OK;
-        memset(pass, 0, sizeof(pass));
+        connected = saved_wifi && network_connect_saved() == ESP_OK;
         if (!connected) {
             net = network_start_softap();
             if (net == ESP_OK) dns_server_start();
@@ -305,6 +327,7 @@ static void services(void *unused) {
     memset(next.settings.pass, 0, sizeof(next.settings.pass));
     next_wifi_retry = esp_timer_get_time() + 60000000LL;
     next.settings_revision = 1;
+    next.saved_wifi_count = m3_sd_wifi_profiles(next.saved_wifi, M3_WIFI_PROFILE_LIMIT);
     snprintf(next.wifi_message, sizeof(next.wifi_message), "%s", connected ? "Connected. Settings saved for next boot." :
         saved_wifi ? "Connection failed. Setup hotspot restored; check password/IP." :
         "Enter Wi-Fi details here, or use the setup hotspot.");
@@ -328,6 +351,7 @@ static void services(void *unused) {
             atomic_store(&mutation_pending, false);
         }
         m3_preferences_poll();
+        m3_typography_poll();
         m3_power_poll(&next.power);
         m3_feedback_poll();
         log_core_load(&next);

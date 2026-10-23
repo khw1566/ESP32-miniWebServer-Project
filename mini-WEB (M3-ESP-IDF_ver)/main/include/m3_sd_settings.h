@@ -1,5 +1,13 @@
 #pragma once
 #include "network_settings.h"
+#define M3_WIFI_PROFILE_LIMIT 32
+typedef struct { char ssid[33]; bool secured; } m3_wifi_profile_info_t;
+/* Cached metadata only: no passwords or SD I/O in UI snapshots. */
+unsigned m3_sd_wifi_profiles(m3_wifi_profile_info_t *out, unsigned capacity);
+bool m3_sd_wifi_known(const char *ssid);
+bool m3_sd_wifi_matches(const char *ssid, bool open);
+bool m3_sd_wifi_activate(const char *ssid);
+esp_err_t m3_sd_wifi_forget(const char *ssid);
 /* Called once by the service task after SD mount, before network startup. */
 void m3_sd_settings_init(void);
 const char *m3_sd_gemini_key(void);
