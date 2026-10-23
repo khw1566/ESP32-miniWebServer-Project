@@ -43,22 +43,33 @@
 #include <stdlib.h>
 #include <limits.h>
 
-/* Palette. CYAN/MAGENTA are the theme accents chosen in Settings (m3_theme_ui.inc);
- * everything else is neutral. They are variables, so static tables cannot use them. */
+/* Palette. The theme style (m3_theme.c) sets the neutral roles and the accents CYAN/MAGENTA;
+ * ON_WALL inks follow the home wallpaper. They are variables, so static tables cannot use them. */
 static uint32_t theme_primary = M3_THEME_PRIMARY, theme_accent = M3_THEME_ACCENT, theme_on_accent = 0x00272b;
+static uint32_t theme_on_wall = 0xf7f9fc, theme_on_wall_muted = 0xbfcad8;
+static m3_palette_t ui_palette = {0x0a0e14, 0x151b25, 0x202938, 0x2b3647, 0xe9eef5, 0x8c99ab, 0x0e131b,
+    0x0d121a, 0x2a3445, 0x18202c, 0xc3cede, 0x3a1d27, 0xff9aa8};
 #define CYAN theme_primary
 #define MAGENTA theme_accent
-#define INK 0x0a0e14
-#define SURFACE 0x151b25
-#define SURFACE_HI 0x202938
-#define LINE 0x2b3647
-#define TEXT 0xe9eef5
-#define MUTED 0x8c99ab
+#define INK ui_palette.ink
+#define SURFACE ui_palette.surface
+#define SURFACE_HI ui_palette.surface_hi
+#define LINE ui_palette.line
+#define TEXT ui_palette.text
+#define MUTED ui_palette.muted
+#define KEY_BG ui_palette.key_bg
+#define KEY_ITEM ui_palette.key_item
+#define KEY_CHECKED ui_palette.key_checked
+#define KEY_TEXT ui_palette.key_text
+#define DANGER_BG ui_palette.danger_bg
+#define DANGER_TEXT ui_palette.danger_text
+#define ON_WALL theme_on_wall
+#define ON_WALL_MUTED theme_on_wall_muted
 #define ON_ACCENT theme_on_accent
 #define GREEN 0x34d399
 #define AMBER 0xfbbf24
 #define RED 0xf87171
-#define FIELD 0x0e131b
+#define FIELD ui_palette.field
 extern const lv_font_t m3_font_korean, m3_font_title, m3_font_clock;
 #define FONT_TITLE (&m3_font_title)
 #define FONT_ICON (&lv_font_montserrat_28)
@@ -246,7 +257,7 @@ static void styles_init(void) {
     lv_style_init(&st_primary_pressed);
     lv_style_set_bg_color(&st_primary_pressed, lv_color_hex(0x00b4bd));
     lv_style_init(&st_danger);
-    lv_style_set_bg_color(&st_danger, lv_color_hex(0x3a1d27)); lv_style_set_text_color(&st_danger, lv_color_hex(0xff9aa8));
+    lv_style_set_bg_color(&st_danger, lv_color_hex(DANGER_BG)); lv_style_set_text_color(&st_danger, lv_color_hex(DANGER_TEXT));
     lv_style_init(&st_disabled);
     lv_style_set_opa(&st_disabled, LV_OPA_40);
 
@@ -1327,7 +1338,7 @@ static void tts_speed_changed(lv_event_t *event) { (void)event; tts_speed_label(
 
 /* ---------- Games. ---------- */
 static uint32_t tile_color(uint8_t power) {
-    static const uint32_t colors[] = {SURFACE_HI, 0x2e3a4d, 0x3b4a61, 0xf59e0b, 0xf97316, 0xef4444, 0xdc2626,
+    const uint32_t colors[] = {SURFACE_HI, 0x2e3a4d, 0x3b4a61, 0xf59e0b, 0xf97316, 0xef4444, 0xdc2626,
         0xeab308, 0xfacc15, 0x22c55e, 0x06b6d4, 0xa855f7};
     return power < sizeof(colors) / sizeof(colors[0]) ? colors[power] : MAGENTA;
 }
@@ -2582,7 +2593,7 @@ static void home_apps(lv_obj_t *home, unsigned first, unsigned count, int top) {
         lv_obj_add_flag(icon, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
         lv_obj_add_event_cb(icon, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)app_icons[i].app);
         draw_app_icon(icon, i);
-        lv_obj_t *name = text(home, app_names[app_icons[i].app], TEXT);
+        lv_obj_t *name = text(home, app_names[app_icons[i].app], ON_WALL);
         lv_obj_set_pos(name, x - 18, y + 84); lv_obj_set_width(name, 112);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
         label_ellipsis(name);
@@ -2596,18 +2607,18 @@ static void build_home_main(lv_obj_t *home) {
     lv_obj_t *foreground = bare(home); lv_obj_set_size(foreground, 480, 660);
     lv_obj_set_pos(foreground, 0, 0); lv_obj_add_flag(foreground, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
     home = foreground;
-    home_clock = label(home, "--:--", 0xffffff); lv_obj_set_pos(home_clock, 0, 34);
+    home_clock = label(home, "--:--", ON_WALL); lv_obj_set_pos(home_clock, 0, 34);
     lv_obj_set_style_text_align(home_clock, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(home_clock, &m3_font_clock, 0);
-    home_date = label(home, "", 0xc8d2e0); lv_obj_set_pos(home_date, 0, 120);
+    home_date = label(home, "", ON_WALL_MUTED); lv_obj_set_pos(home_date, 0, 120);
     lv_obj_set_style_text_align(home_date, LV_TEXT_ALIGN_CENTER, 0);
     /* Glass status card: network state and now playing; tap for Wi-Fi details. */
     lv_obj_t *status_card = lv_button_create(home); lv_obj_remove_style_all(status_card);
     lv_obj_set_pos(status_card, 20, 166); lv_obj_set_size(status_card, 440, 84);
-    lv_obj_set_style_bg_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_style_bg_color(status_card, lv_color_hex(ON_WALL), 0); lv_obj_set_style_bg_opa(status_card, LV_OPA_10, 0);
     lv_obj_set_style_bg_opa(status_card, LV_OPA_20, LV_STATE_PRESSED);
     lv_obj_set_style_radius(status_card, 22, 0);
-    lv_obj_set_style_border_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_border_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(status_card, lv_color_hex(ON_WALL), 0); lv_obj_set_style_border_opa(status_card, LV_OPA_10, 0);
     lv_obj_set_style_border_width(status_card, 1, 0);
     lv_obj_add_event_cb(status_card, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WIFI);
     lv_obj_t *badge = bare(status_card); lv_obj_set_pos(badge, 16, 16); lv_obj_set_size(badge, 52, 52);
@@ -2615,11 +2626,11 @@ static void build_home_main(lv_obj_t *home) {
     lv_obj_set_style_bg_color(badge, lv_color_hex(0x0b1220), 0); lv_obj_set_style_bg_opa(badge, LV_OPA_60, 0);
     home_net_icon = lv_label_create(badge); lv_label_set_text(home_net_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(home_net_icon, &lv_font_montserrat_20, 0); lv_obj_center(home_net_icon);
-    home_net = label(status_card, "", TEXT); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
+    home_net = label(status_card, "", ON_WALL); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
     label_ellipsis(home_net);
-    home_detail = label(status_card, "", 0xaab6c6); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
+    home_detail = label(status_card, "", ON_WALL_MUTED); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
     label_ellipsis(home_detail);
-    lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, 0xaab6c6); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
+    lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, ON_WALL_MUTED); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -16, 0);
     home_apps(home, 0, HOME_PRIMARY_APPS, 296);
 }
@@ -2683,11 +2694,11 @@ static void update_calendar(void) {
         set_text(lv_obj_get_child(calendar_cells[i], 0), day ? text : "");
         lv_obj_set_style_bg_opa(calendar_cells[i], today ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         set_bg(calendar_cells[i], CYAN);
-        set_ink(lv_obj_get_child(calendar_cells[i], 0), today ? ON_ACCENT : i % 7 == 0 ? MAGENTA : i % 7 == 6 ? CYAN : TEXT);
+        set_ink(lv_obj_get_child(calendar_cells[i], 0), today ? ON_ACCENT : i % 7 == 0 ? MAGENTA : i % 7 == 6 ? CYAN : ON_WALL);
     }
 }
 static void build_home_calendar(lv_obj_t *tile) {
-    lv_obj_t *heading = text(tile, T_CAL_TITLE, TEXT); lv_obj_set_pos(heading, 24, 22);
+    lv_obj_t *heading = text(tile, T_CAL_TITLE, ON_WALL); lv_obj_set_pos(heading, 24, 22);
     lv_obj_set_width(heading, 432);
     label_ellipsis(heading);
     lv_obj_add_style(heading, &st_title, 0);
@@ -2695,10 +2706,10 @@ static void build_home_calendar(lv_obj_t *tile) {
     lv_obj_set_pos(previous, 24, 72); lv_obj_set_size(previous, 44, 44);
     lv_obj_t *next = icon_button(tile, LV_SYMBOL_RIGHT, calendar_move, (void *)(intptr_t)1);
     lv_obj_set_pos(next, 412, 72); lv_obj_set_size(next, 44, 44);
-    calendar_heading = label(tile, "-- / --", TEXT); lv_obj_set_pos(calendar_heading, 76, 84); lv_obj_set_width(calendar_heading, 328);
+    calendar_heading = label(tile, "-- / --", ON_WALL); lv_obj_set_pos(calendar_heading, 76, 84); lv_obj_set_width(calendar_heading, 328);
     lv_obj_set_style_text_align(calendar_heading, LV_TEXT_ALIGN_CENTER, 0);
     for (unsigned i = 0; i < 7; ++i) {
-        calendar_weekdays[i] = label(tile, "", i == 0 ? MAGENTA : i == 6 ? CYAN : MUTED);
+        calendar_weekdays[i] = label(tile, "", i == 0 ? MAGENTA : i == 6 ? CYAN : ON_WALL_MUTED);
         lv_obj_set_pos(calendar_weekdays[i], 26 + i * 62, 152); lv_obj_set_width(calendar_weekdays[i], 56);
         lv_obj_set_style_text_align(calendar_weekdays[i], LV_TEXT_ALIGN_CENTER, 0);
     }
@@ -2706,12 +2717,12 @@ static void build_home_calendar(lv_obj_t *tile) {
         calendar_cells[i] = bare(tile); lv_obj_set_size(calendar_cells[i], 54, 48);
         lv_obj_set_pos(calendar_cells[i], 27 + (i % 7) * 62, 188 + (i / 7) * 55);
         lv_obj_set_style_radius(calendar_cells[i], 18, 0);
-        lv_obj_t *day = label(calendar_cells[i], "", TEXT); lv_obj_set_width(day, 54);
+        lv_obj_t *day = label(calendar_cells[i], "", ON_WALL); lv_obj_set_width(day, 54);
         lv_obj_set_style_text_align(day, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(day);
     }
     lv_obj_t *today = button(tile, NULL, T_CAL_TODAY, BTN_PRIMARY, calendar_move, NULL);
     lv_obj_set_pos(today, 150, 552); lv_obj_set_size(today, 180, 44);
-    calendar_hint = label(tile, tr(T_CAL_WAIT), MUTED); lv_obj_set_pos(calendar_hint, 20, 618); lv_obj_set_width(calendar_hint, 440);
+    calendar_hint = label(tile, tr(T_CAL_WAIT), ON_WALL_MUTED); lv_obj_set_pos(calendar_hint, 20, 618); lv_obj_set_width(calendar_hint, 440);
     lv_obj_set_style_text_align(calendar_hint, LV_TEXT_ALIGN_CENTER, 0);
 }
 static void photo_step(lv_event_t *event) { m3_photos_step((int)(intptr_t)lv_event_get_user_data(event)); }
@@ -2741,7 +2752,7 @@ static void update_photos(void) {
     else { lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(photo_empty, LV_OBJ_FLAG_HIDDEN); }
 }
 static void build_home_photos(lv_obj_t *tile) {
-    lv_obj_t *heading = text(tile, T_PHOTO_TITLE, TEXT); lv_obj_set_pos(heading, 24, 14);
+    lv_obj_t *heading = text(tile, T_PHOTO_TITLE, ON_WALL); lv_obj_set_pos(heading, 24, 14);
     lv_obj_set_width(heading, 432);
     label_ellipsis(heading);
     lv_obj_add_style(heading, &st_title, 0);
@@ -2749,11 +2760,11 @@ static void build_home_photos(lv_obj_t *tile) {
     lv_obj_set_size(photo_canvas, M3_PHOTO_W, M3_PHOTO_H);
     lv_obj_remove_flag(photo_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN);
-    photo_empty = label(tile, tr(T_PHOTO_EMPTY), MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
+    photo_empty = label(tile, tr(T_PHOTO_EMPTY), ON_WALL_MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
     lv_obj_set_style_text_align(photo_empty, LV_TEXT_ALIGN_CENTER, 0);
-    photo_name = label(tile, "", TEXT); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
+    photo_name = label(tile, "", ON_WALL); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
     label_ellipsis(photo_name);
-    photo_info = label(tile, tr(T_PHOTO_HINT), MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
+    photo_info = label(tile, tr(T_PHOTO_HINT), ON_WALL_MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
     label_ellipsis(photo_info);
     lv_obj_t *previous = button(tile, LV_SYMBOL_PREV, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)-1);
     lv_obj_set_pos(previous, 24, 614); lv_obj_set_size(previous, 64, 40);
@@ -2800,7 +2811,7 @@ static void build_home(lv_obj_t *home) {
         lv_obj_t *mark = bare(home_dots[i]); lv_obj_set_size(mark, 8, 6);
         lv_obj_set_style_radius(mark, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, 0);
     }
-    home_page_name = label(home, "", MUTED); lv_obj_set_pos(home_page_name, 0, 694);
+    home_page_name = label(home, "", ON_WALL_MUTED); lv_obj_set_pos(home_page_name, 0, 694);
     lv_obj_set_style_text_align(home_page_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_event_cb(home_tiles, home_tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
     lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
@@ -3665,15 +3676,15 @@ static void build_voice_panel(lv_obj_t *screen) {
     lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
 }
 static void style_keyboard(void) {
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x0d121a), 0); lv_obj_set_style_bg_opa(keyboard, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_BG), 0); lv_obj_set_style_bg_opa(keyboard, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(keyboard, 0, 0); lv_obj_set_style_radius(keyboard, 0, 0);
     lv_obj_set_style_pad_all(keyboard, 6, 0); lv_obj_set_style_pad_gap(keyboard, 6, 0);
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x2a3445), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_ITEM), LV_PART_ITEMS);
     lv_obj_set_style_text_color(keyboard, lv_color_hex(TEXT), LV_PART_ITEMS);
     lv_obj_set_style_radius(keyboard, 8, LV_PART_ITEMS); lv_obj_set_style_border_width(keyboard, 0, LV_PART_ITEMS);
     lv_obj_set_style_shadow_width(keyboard, 0, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x18202c), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(keyboard, lv_color_hex(0xc3cede), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_CHECKED), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(KEY_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(keyboard, lv_color_hex(CYAN), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_text_color(keyboard, lv_color_hex(ON_ACCENT), LV_PART_ITEMS | LV_STATE_PRESSED);
 }
@@ -3697,7 +3708,7 @@ esp_err_t m3_ui_start(void) {
     m3_theme_load(&ui_theme); theme_resolve();
     styles_init(); theme_styles();
     lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
-    lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), true, &m3_font_korean);
+    lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), theme_dark(), &m3_font_korean);
     lv_display_set_theme(m3_board_display(), theme);
     lv_obj_set_style_bg_color(screen, lv_color_hex(INK), 0);
     lv_obj_set_style_text_font(screen, m3_system_font(ui_typography.pixels, ui_typography.family), 0);
