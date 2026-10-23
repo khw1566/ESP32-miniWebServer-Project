@@ -14,7 +14,8 @@ for(const [name,args] of [['bits','b,count'],['ue','b'],['m3_mp4_avcc_sample','d
  .replace('uint8_t rbsp[256];','var rbsp=new Uint8Array(256);')
  .replace('bits_t b = {.data = rbsp, .bytes = length};','var b={data:rbsp,bytes:length,bit:0,failed:false};')
  .replaceAll('&b','b').replaceAll('*width','dimensions.width').replaceAll('*height','dimensions.height')
- .replace('const uint8_t *u = data + width * height, *v = u + width * height / 4;', 'var u=data.subarray(width*height),v=u.subarray(width*height/4);');
+ .replace('const uint8_t *u = data + width * height, *v = u + width * height / 4;', 'var u=data.subarray(width*height),v=u.subarray(width*height/4);')
+ .replace('uint16_t columns[M3_PHOTO_W];','var columns=new Uint16Array(M3_PHOTO_W);').replace('columns[x] = x * width / w','columns[x] = Math.floor(x * width / w)');
  vm.runInContext('function '+name+'('+args+'){'+js(code)+'}',ctx);
 }
 const ue=n=>{let x=(n+1).toString(2);return '0'.repeat(x.length-1)+x;};
@@ -22,10 +23,10 @@ function sps({width=320,height=240,profile=66,flags=0x40,refs=1,progressive=1,cr
  const bits=[profile.toString(2).padStart(8,'0'),flags.toString(2).padStart(8,'0'),'00011110',ue(0),ue(0),ue(0),ue(0),ue(refs),'0',ue(Math.ceil(width/16)-1),ue(Math.ceil(height/16)-1),''+progressive,'1',crop?'1':'0',...(crop?[ue(0),ue(0),ue(0),ue((Math.ceil(height/16)*16-height)/2)]:[]),'0','1'].join('');
  const padded=bits.padEnd(Math.ceil(bits.length/8)*8,'0');return Buffer.from([0x67,...padded.match(/.{8}/g).map(x=>parseInt(x,2))]);
 }
-for(const options of [{},{width:640,height:480},{width:480,height:272},{width:320,height:238,crop:true}]){
+for(const options of [{},{width:640,height:480},{width:480,height:272},{width:320,height:238,crop:true},{width:1280,height:720},{width:1920,height:1088}]){
  const b=sps(options),d={};assert(ctx.m3_mp4_sps_valid(b,b.length,d));assert.equal(d.width,options.width||320);assert.equal(d.height,options.height||240);
 }
-for(const options of [{profile:100},{flags:0},{width:656},{height:496},{refs:5},{progressive:0}]){const b=sps(options);assert(!ctx.m3_mp4_sps_valid(b,b.length,{}),JSON.stringify(options));}
+for(const options of [{profile:100},{flags:0},{width:1936},{height:1104},{refs:5},{progressive:0}]){const b=sps(options);assert(!ctx.m3_mp4_sps_valid(b,b.length,{}),JSON.stringify(options));}
 assert(!ctx.m3_mp4_sps_valid(Buffer.from([0x67,66,64,30,0]),5,{}),'truncated SPS rejected');
 const good=Buffer.from([0,0,0,2,0x65,0xff,0,0,0,1,9]);assert(ctx.m3_mp4_avcc_sample(good,good.length,4));
 assert.deepEqual([...good],[0,0,0,1,0x65,0xff,0,0,0,1,9]);

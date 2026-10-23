@@ -2,6 +2,7 @@
 #include "m3_photos.h"
 #include "m3_audio.h"
 #include "m3_mp4.h"
+#include "m3_gif.h"
 #include "m3_memory.h"
 #include "m3_utf8.h"
 #include "sd_media.h"
@@ -37,7 +38,7 @@ static void status(m3_gallery_status_t value) {
 bool m3_gallery_supported(const char *name) {
     const char *ext = name ? strrchr(name, '.') : NULL;
     return ext && (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".bmp") ||
-        !strcasecmp(ext, ".png") || !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi") || !strcasecmp(ext, ".mp4"));
+        !strcasecmp(ext, ".png") || !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi") || !strcasecmp(ext, ".mp4") || !strcasecmp(ext, ".gif"));
 }
 bool m3_gallery_video(const char *name) {
     const char *ext = name ? strrchr(name, '.') : NULL;
@@ -138,6 +139,38 @@ static size_t next_jpeg(FILE *file, uint8_t *buffer, unsigned job, bool (*valid)
     }
     return 0;
 }
+/* Animated GIFs loop until closed; a single-frame GIF stays visible like a still image. */
+static void gif_run(const char *relative, unsigned job) {
+    portENTER_CRITICAL(&lock); state.mp4 = false; state.video = true; state.frames = 0; portEXIT_CRITICAL(&lock);
+    m3_gif_t *gif = NULL;
+    m3_gif_result_t result = m3_gif_open(relative, job, current, &gif);
+    while (result == M3_GIF_OK && current(job)) {
+        if (atomic_load(&paused)) { vTaskDelay(pdMS_TO_TICKS(40)); continue; }
+        int64_t frame_started = esp_timer_get_time();
+        int slot = claim(); if (slot < 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        if (!slots[slot].data) slots[slot].data = heap_caps_malloc(M3_PHOTO_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        unsigned delay = 100;
+        result = slots[slot].data ? m3_gif_frame(gif, slots[slot].data, &delay) : M3_GIF_MEMORY;
+        bool ok = result == M3_GIF_OK || result == M3_GIF_END;
+        portENTER_CRITICAL(&lock);
+        slots[slot].owner = ok && current(job) ? 2 : 0;
+        if (slots[slot].owner == 2) slots[slot].generation = job;
+        if (current(job)) {
+            if (ok) { ++state.frames; state.status = M3_GALLERY_READY; if (result == M3_GIF_END) state.video = false; }
+            else state.status = result == M3_GIF_MEMORY ? M3_GALLERY_MEMORY : result == M3_GIF_STORAGE ? M3_GALLERY_STORAGE : M3_GALLERY_BAD_FORMAT;
+            ++state.revision;
+        }
+        portEXIT_CRITICAL(&lock);
+        int64_t until = frame_started + (int64_t)delay * 1000;
+        while (result == M3_GIF_OK && current(job) && esp_timer_get_time() < until) {
+            int64_t remaining = until - esp_timer_get_time();
+            vTaskDelay(pdMS_TO_TICKS(remaining > 20000 ? 20 : remaining > 1000 ? (unsigned)(remaining / 1000) : 1));
+        }
+    }
+    if (result != M3_GIF_OK && result != M3_GIF_END && result != M3_GIF_STOPPED && current(job))
+        status(result == M3_GIF_MEMORY ? M3_GALLERY_MEMORY : result == M3_GIF_STORAGE ? M3_GALLERY_STORAGE : M3_GALLERY_BAD_FORMAT);
+    m3_gif_close(gif);
+}
 #include "m3_gallery_index.inc"
 static void worker(void *unused) {
     (void)unused;
@@ -163,6 +196,7 @@ static void worker(void *unused) {
             }
             continue;
         }
+        if (!strcasecmp(ext, ".gif")) { gif_run(request.path, request.generation); continue; }
         bool video = !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi");
         portENTER_CRITICAL(&lock); state.mp4 = false; state.video = video; state.frames = 0; portEXIT_CRITICAL(&lock);
         if (!sd_media_admin_lock()) { status(M3_GALLERY_STORAGE); continue; }

@@ -10,7 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { VIDEO_BYTES = 256 * 1024, AUDIO_BYTES = 8192, PCM_BYTES = 8192 };
+enum { VIDEO_BYTES = 1024 * 1024, AUDIO_BYTES = 8192, PCM_BYTES = 8192 };
+/* The P4 has no H.264 decode block, so high resolutions decode below real time.
+ * Late pictures still refresh the screen at a bounded rate, and a large lag
+ * resynchronises at the newest sync sample instead of decoding every P frame. */
+enum { LATE_US = 100000, STALE_FRAME_US = 250000, RESYNC_US = 400000 };
 typedef struct {
     m3_mp4_demux_t *demux;
     m3_mp4_info_t info;
@@ -22,7 +26,7 @@ typedef struct {
     atomic_bool stop, video_done;
     atomic_int video_result;
     portMUX_TYPE clock_lock; /* This structure and its task stacks stay in internal RAM. */
-    int64_t origin, pause_at, paused_us;
+    int64_t origin, pause_at, paused_us, shown_us;
     bool clock_paused;
 } player_t;
 static bool alive(player_t *p) {
@@ -60,7 +64,9 @@ static m3_mp4_result_t decode(player_t *p, uint8_t *data, unsigned bytes, int64_
             esp_h264_resolution_t size = {0};
             if (esp_h264_dec_get_resolution(p->parameters, &size) != ESP_H264_ERR_OK || size.width != p->info.width || size.height != p->info.height) return M3_MP4_VIDEO_ERROR;
             /* Decode reference frames even when late, but omit their display. */
-            if (pts >= 0 && wait_time(p, pts) && clock_us(p) - pts < 100000) {
+            int64_t now = pts >= 0 && wait_time(p, pts) ? clock_us(p) : -1;
+            if (now >= 0 && (now - pts < LATE_US || now - p->shown_us >= STALE_FRAME_US)) {
+                p->shown_us = now;
                 int slot = -1; uint8_t *canvas = p->view->acquire(p->job, &slot);
                 if (!canvas && slot == -2) return M3_MP4_MEMORY;
                 if (canvas) {
@@ -82,7 +88,13 @@ static void video_worker(void *argument) {
     static const uint8_t delimiter[6] = {0,0,0,1,9,0xf0};
     for (unsigned index = 0; buffer && index < p->info.video_samples && alive(p); ++index) {
         m3_mp4_sample_t sample;
-        if (!m3_mp4_demux_sample(p->demux, true, index, &sample) || !m3_mp4_demux_read(p->demux, &sample, buffer, VIDEO_BYTES)) { result = M3_MP4_STORAGE; break; }
+        if (!m3_mp4_demux_sample(p->demux, true, index, &sample)) { result = M3_MP4_STORAGE; break; }
+        int64_t now = clock_us(p);
+        if (index && now - sample.pts_us > RESYNC_US) {
+            unsigned key = m3_mp4_demux_keyframe(p->demux, index, now);
+            if (key != index && !m3_mp4_demux_sample(p->demux, true, index = key, &sample)) { result = M3_MP4_STORAGE; break; }
+        }
+        if (!m3_mp4_demux_read(p->demux, &sample, buffer, VIDEO_BYTES)) { result = M3_MP4_STORAGE; break; }
         if (!m3_mp4_avcc_sample(buffer, sample.bytes, p->info.nal_length)) { result = M3_MP4_FORMAT; break; }
         memcpy(buffer + sample.bytes, delimiter, sizeof(delimiter));
         result = decode(p, buffer, sample.bytes + sizeof(delimiter), sample.pts_us, true, &pictures);

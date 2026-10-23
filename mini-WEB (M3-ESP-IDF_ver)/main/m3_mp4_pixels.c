@@ -41,7 +41,7 @@ bool m3_mp4_sps_valid(const uint8_t *data, size_t bytes, unsigned *width, unsign
     }
     bits_t b = {.data = rbsp, .bytes = length};
     if (bits(&b, 8) != 66 || !(bits(&b, 8) & 0x40)) return false;
-    if (bits(&b, 8) > 31 || ue(&b) > 31 || ue(&b) > 12) return false;
+    if (bits(&b, 8) > 42 || ue(&b) > 31 || ue(&b) > 12) return false; /* level <= 4.2 */
     unsigned order = ue(&b);
     if (order == 0) { if (ue(&b) > 12) return false; }
     else if (order == 1) {
@@ -52,7 +52,7 @@ bool m3_mp4_sps_valid(const uint8_t *data, size_t bytes, unsigned *width, unsign
     if (ue(&b) > 4) return false;
     bits(&b, 1);
     unsigned mbw = ue(&b), mbh = ue(&b);
-    if (mbw >= 40 || mbh >= 30 || !bits(&b, 1)) return false; /* <=640x480, progressive */
+    if (mbw >= 120 || mbh >= 68 || !bits(&b, 1)) return false; /* <=1920x1088, progressive */
     bits(&b, 1);
     unsigned left = 0, right = 0, top = 0, bottom = 0;
     if (bits(&b, 1)) { left = ue(&b); right = ue(&b); top = ue(&b); bottom = ue(&b); }
@@ -63,24 +63,30 @@ bool m3_mp4_sps_valid(const uint8_t *data, size_t bytes, unsigned *width, unsign
 }
 static unsigned clamp(int value) { return value < 0 ? 0 : value > 255 ? 255 : (unsigned)value; }
 bool m3_mp4_i420_fit(const uint8_t *data, size_t bytes, unsigned width, unsigned height, uint8_t *canvas) {
-    if (!data || !canvas || width < 16 || height < 16 || width > 640 || height > 480 || (width & 1) || (height & 1) ||
+    if (!data || !canvas || width < 16 || height < 16 || width > 1920 || height > 1088 || (width & 1) || (height & 1) ||
         bytes < (size_t)width * height * 3 / 2) return false;
     const uint8_t *u = data + width * height, *v = u + width * height / 4;
     unsigned w = M3_PHOTO_W, h = (uint64_t)height * w / width;
     if (h > M3_PHOTO_H) { h = M3_PHOTO_H; w = (uint64_t)width * h / height; }
     if (!w || !h) return false;
     memset(canvas, 0, M3_PHOTO_BYTES);
-    for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
-        unsigned sx = x * width / w, sy = y * height / h;
-        int yy = (int)data[sy * width + sx] - 16;
-        int uu = (int)u[(sy / 2) * (width / 2) + sx / 2] - 128;
-        int vv = (int)v[(sy / 2) * (width / 2) + sx / 2] - 128;
-        unsigned r = clamp((298 * yy + 409 * vv + 128) >> 8);
-        unsigned g = clamp((298 * yy - 100 * uu - 208 * vv + 128) >> 8);
-        unsigned blue = clamp((298 * yy + 516 * uu + 128) >> 8);
-        uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (blue >> 3);
-        size_t offset = ((y + (M3_PHOTO_H - h) / 2) * M3_PHOTO_W + x + (M3_PHOTO_W - w) / 2) * 2;
-        canvas[offset] = pixel; canvas[offset + 1] = pixel >> 8;
+    /* Nearest-neighbour columns are computed once per frame, not per pixel. */
+    uint16_t columns[M3_PHOTO_W];
+    for (unsigned x = 0; x < w; ++x) columns[x] = x * width / w;
+    for (unsigned y = 0; y < h; ++y) {
+        unsigned sy = y * height / h, line = sy * width, chroma = (sy / 2) * (width / 2);
+        size_t row = ((y + (M3_PHOTO_H - h) / 2) * M3_PHOTO_W + (M3_PHOTO_W - w) / 2) * 2;
+        for (unsigned x = 0; x < w; ++x) {
+            unsigned sx = columns[x];
+            int yy = 298 * ((int)data[line + sx] - 16);
+            int uu = (int)u[chroma + sx / 2] - 128;
+            int vv = (int)v[chroma + sx / 2] - 128;
+            unsigned r = clamp((yy + 409 * vv + 128) >> 8);
+            unsigned g = clamp((yy - 100 * uu - 208 * vv + 128) >> 8);
+            unsigned blue = clamp((yy + 516 * uu + 128) >> 8);
+            uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (blue >> 3);
+            canvas[row + x * 2] = pixel; canvas[row + x * 2 + 1] = pixel >> 8;
+        }
     }
     return true;
 }

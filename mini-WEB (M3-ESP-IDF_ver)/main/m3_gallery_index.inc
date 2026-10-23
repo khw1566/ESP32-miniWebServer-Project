@@ -132,6 +132,13 @@ done:
     if (file) fclose(file);
     free(input); return ok;
 }
+static bool library_gif(const char *relative, unsigned job, uint8_t *canvas) {
+    m3_gif_t *gif = NULL;
+    m3_gif_result_t result = m3_gif_open(relative, job, library_current, &gif);
+    if (result == M3_GIF_OK) result = m3_gif_frame(gif, canvas, NULL);
+    m3_gif_close(gif);
+    return result == M3_GIF_OK || result == M3_GIF_END;
+}
 static void thumbnail_scale(const uint8_t *canvas, uint8_t *out) {
     /* A square crop from the already aspect-fitted canvas preserves pixel proportions. */
     unsigned edge = M3_PHOTO_W < M3_PHOTO_H ? M3_PHOTO_W : M3_PHOTO_H;
@@ -154,7 +161,8 @@ static void gallery_library_run(unsigned page, unsigned job) {
     if (library_next.shown && !canvas) { library_next.status = M3_GALLERY_MEMORY; library_publish(job); return; }
     for (unsigned i = 0; i < library_next.shown && library_current(job); ++i) {
         const char *path = library_next.items[i].path, *ext = strrchr(path, '.');
-        bool ok = m3_gallery_supported(path) && (!strcasecmp(ext, ".mp4") ? m3_mp4_thumbnail(path, job, library_current, canvas) == M3_MP4_OK : library_image(path, job, canvas));
+        bool ok = m3_gallery_supported(path) && (!strcasecmp(ext, ".mp4") ? m3_mp4_thumbnail(path, job, library_current, canvas) == M3_MP4_OK :
+            !strcasecmp(ext, ".gif") ? library_gif(path, job, canvas) : library_image(path, job, canvas));
         if (!library_current(job)) break;
         library_next.done_mask |= 1u << i;
         if (!ok) { library_next.error_mask |= 1u << i; library_publish(job); continue; }

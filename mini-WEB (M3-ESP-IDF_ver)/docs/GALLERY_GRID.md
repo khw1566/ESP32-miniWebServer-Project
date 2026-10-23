@@ -7,11 +7,12 @@
 3열로 표시한다. 이전·다음 페이지와 새로고침을 제공한다. 정렬은 SD의
 디렉터리 탐색 순서이며, 파일을 추가·삭제했으면 새로고침한다.
 
-직접 미리보기를 디코딩하는 이미지는 JPG/JPEG/BMP/PNG다. MJPG/MJPEG 및 MJPEG 코덱 AVI는 첫 JPEG
-프레임을 추출한다. MP4는 기존 H.264 Constrained Baseline(최대 640×480),
+직접 미리보기를 디코딩하는 이미지는 JPG/JPEG/BMP/PNG/GIF다. GIF는 첫 프레임을 사용한다.
+MJPG/MJPEG 및 MJPEG 코덱 AVI는 첫 JPEG
+프레임을 추출한다. MP4는 H.264 Constrained Baseline(최대 1920×1080),
 AAC-LC 제한을 유지하며 첫 디코딩된 영상 프레임을 사용한다. 썸네일 생성은
 오디오·재생 시계·영상 재생 작업을 시작하지 않는다. 미리보기에 실패한 파일도
-목록에는 남기고 오류 아이콘을 표시한다. GIF/HEIC/WebP/TIFF·MOV/WebM 등 알려진
+목록에는 남기고 오류 아이콘을 표시한다. HEIC/WebP/TIFF·MOV/WebM 등 알려진
 이미지·동영상 형식도 목록에 포함하지만 디코더가 없는 형식은 오류 표시로 남긴다. 이 경우 기존
 `tools/prepare_gallery.py` 변환 도구로 지원 형식으로 바꾼다.
 

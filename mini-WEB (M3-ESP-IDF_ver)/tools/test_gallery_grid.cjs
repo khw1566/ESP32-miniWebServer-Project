@@ -17,10 +17,10 @@ valid=valid.replace(/'(?:\\.|[^'\\])'/g,x=>String(x==="'\\\\'"?92:x.charCodeAt(1
 vm.runInContext('function valid(path){'+valid+'}',c);
 for(const p of ['/photo.JPG','/앨범/旅行.png','/a..b.jpg'])assert(c.valid(p));
 for(const p of ['photo.jpg','/../a.jpg','/.private/a.png','/a/.cache/p.jpg','/a//b.jpg','/a\\b.jpg','/a:b.jpg','/a/','/a\nb.jpg','/'+ 'x'.repeat(255)])assert(!c.valid(p),p);
-for(const n of ['a.JPG','b.jpeg','c.png','d.bmp','a.MP4','a.avi','a.mjpeg','a.mjpg'])assert(c.m3_gallery_supported(n));
+for(const n of ['a.JPG','b.jpeg','c.png','d.bmp','a.MP4','a.avi','a.mjpeg','a.mjpg','a.GIF','b.gif'])assert(c.m3_gallery_supported(n));
 for(const n of ['a.txt','a.mp3','a.wav','a.lua','a.json','a.mp4.part','a.png.exe'])assert(!c.m3_gallery_supported(n));
 assert(c.m3_gallery_video('a.MP4')&&!c.m3_gallery_video('b.png'));
-for(const name of ['photo.webp','photo.gif','photo.heic','clip.mov','clip.webm'])assert(c.m3_gallery_media(name)&&!c.m3_gallery_supported(name));
+for(const name of ['photo.webp','photo.heic','clip.mov','clip.webm'])assert(c.m3_gallery_media(name)&&!c.m3_gallery_supported(name));
 // Scan all nested media, ignoring nonmedia/hidden entries, with no per-directory or catalog-count cap.
 const files={ '/sdcard':{dir:['first.jpg','sound.mp3','.private','nested','empty.png','notes.txt','phone.webp','animation.gif']},
  '/sdcard/.private':{dir:['secret.jpg']},'/sdcard/nested':{dir:['movie.MP4',...Array.from({length:20},(_,i)=>'image'+i+'.png'),'nested2']},
