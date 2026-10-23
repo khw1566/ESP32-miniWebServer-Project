@@ -3,6 +3,7 @@ from pathlib import Path
 import importlib.util
 import re
 from PIL import Image, ImageDraw, ImageFont
+from font_pack import read_bitmap
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('cjk', ROOT / 'tools/generate_cjk_font.py')
@@ -19,12 +20,12 @@ def main():
     source = (ROOT / 'main/m3_font_cjk.c').read_text(encoding='utf-8')
     points = array(source, 'codepoints') + array(source, 'upper_codepoints')
     offsets = array(source, 'offsets')
-    bitmap = bytes(array(source, 'bitmap'))
+    bitmap = read_bitmap(source)
     original = cjk.source_glyphs()
     for i, cp in enumerate(points):
         assert bitmap[offsets[i]*16:offsets[i+1]*16] == original[cp], hex(cp)
     glyphs = {cp: bitmap[offsets[i]*16:offsets[i+1]*16] for i, cp in enumerate(points)}
-    kb = bytes(array((ROOT / 'main/m3_font_korean.c').read_text(encoding='utf-8'), 'bitmap'))
+    kb = read_bitmap((ROOT / 'main/m3_font_korean.c').read_text(encoding='utf-8'))
     nanum = ImageFont.truetype(str(ROOT / 'third_party/nanum-gothic/NanumGothic-Regular.ttf'), 16)
     image = Image.new('RGB', (480, 440), '#0a0e14')
     draw = ImageDraw.Draw(image)

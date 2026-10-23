@@ -66,7 +66,8 @@ for(let chunk=1;chunk<=wire.length;chunk++){
 }
 const manifest=JSON.parse(read('tts_data/manifest.json'));
 for(const [name,info] of Object.entries(manifest)){
- const bytes=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data',name));assert.equal(bytes.length,info.size);
+ let bytes=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data',name));
+ if(name.startsWith('lang/'))bytes=Buffer.from(bytes.toString('latin1').replaceAll('\r\n','\n'),'latin1'); // CRLF checkout, as the generatorassert.equal(bytes.length,info.size);
  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),info.sha256);
 }
 const phondata=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data/phondata'));

@@ -10,6 +10,8 @@ import hashlib
 import json
 import unicodedata
 
+import font_pack
+
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'third_party/unifont'
 SOURCE = ASSETS / 'unifont_jp-17.0.05.hex.gz'
@@ -60,11 +62,11 @@ def main():
     assert offsets[-1] < 65536
     lines = ['/* Generated M3 CJK subset from GNU Unifont JP 17.0.05 (SIL OFL 1.1).',
              ' * Copyright notices and license: third_party/unifont/NOTICE.md and OFL-1.1.txt. */',
-             '#include "m3_font_bitmap.h"', 'static const uint8_t bitmap[] = {']
-    lines += ['    ' + ','.join(f'0x{x:02x}' for x in bitmap[i:i+24]) + ',' for i in range(0, len(bitmap), 24)]
+             '#include "m3_font_bitmap.h"']
+    lines += font_pack.c_lines(bitmap)
     bmp = [cp for cp in points if cp <= 0xFFFF]
     upper = [cp for cp in points if cp > 0xFFFF]
-    lines += ['};', 'static const uint16_t codepoints[] = {']
+    lines += ['static const uint16_t codepoints[] = {']
     lines += ['    ' + ','.join(f'0x{x:x}' for x in bmp[i:i+12]) + ',' for i in range(0, len(bmp), 12)]
     lines += ['};', 'static const uint32_t upper_codepoints[] = {',
               '    ' + ','.join(f'0x{x:x}' for x in upper), '};']
@@ -98,7 +100,7 @@ def main():
 }
 const lv_font_t m3_font_cjk = {
     .get_glyph_dsc=describe, .get_glyph_bitmap=m3_font_bitmap,
-    .line_height=20, .base_line=4, .dsc=bitmap, .fallback=&lv_font_montserrat_16
+    .line_height=20, .base_line=4, .dsc=&bitmap, .fallback=&lv_font_montserrat_16
 };''', '']
     (ROOT / 'main/m3_font_cjk.c').write_text('\n'.join(lines), encoding='utf-8')
     manifest = {'source': 'https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/' + SOURCE.name,

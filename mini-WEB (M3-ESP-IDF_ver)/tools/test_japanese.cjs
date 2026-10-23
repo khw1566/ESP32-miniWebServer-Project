@@ -66,8 +66,9 @@ assert.equal(decode(output),ja.statuses['Radio stream ended / network timeout'],
 status.language=1;assert.equal(status.translate(input,output,256),input);
 
 function array(src,name){return new RegExp('\\b'+name+'\\[\\] = \\{([\\s\\S]*?)\\};').exec(src)[1].split(',').map(x=>x.trim()).filter(Boolean).map(Number);}
+function fontBitmap(src){return /\bbitmap_packed\[\] = \{/.test(src)?require('zlib').inflateSync(Buffer.from(array(src,'bitmap_packed'))):array(src,'bitmap');}
 const korean=read('main/m3_font_korean.c'),cjk=read('main/m3_font_cjk.c'),large=read('main/m3_font_large.c');
-const kb=Uint8Array.from(array(korean,'bitmap')),cb=Uint8Array.from(array(cjk,'bitmap')),
+const kb=Uint8Array.from(fontBitmap(korean)),cb=Uint8Array.from(fontBitmap(cjk)),
  cps=[...array(cjk,'codepoints'),...array(cjk,'upper_codepoints')],offsets=array(cjk,'offsets'),index=new Map(cps.map((cp,i)=>[cp,i]));
 const smallFonts={korean:{dsc:kb},cjk:{dsc:cb},latin:{}};
 function base(cp,out){let i;
@@ -89,7 +90,7 @@ for(const cp of [...cps,...Array.from({length:11172},(_,i)=>i+0xAC00)]){const d=
 assert(!font.describe(65,{gid:{}}),'ASCII uses Montserrat 20');
 const draw={...font,lv_draw_buf_width_to_stride:w=>(w+3)&~3,LV_COLOR_FORMAT_A8:8};vm.createContext(draw);
 let bitmapBody=types(body(large,'bitmap')).replace('lv_font_glyph_dsc_t base;','let base={};').replaceAll('&base','base')
- .replace('const uint8_t *source = (const uint8_t *)base.resolved_font->dsc + base.gid.index;','let source=base.resolved_font.dsc.subarray(base.gid.index);')
+ .replace('const uint8_t *data = m3_font_blob_data(base.resolved_font);\n    if (!data) return null;\n    const uint8_t *source = data + base.gid.index;','let source=base.resolved_font.dsc.subarray(base.gid.index);')
  .replace('uint8_t *target = buffer->data;','let target=buffer.data;').replaceAll('glyph->','glyph.').replaceAll('buffer->','buffer.')
  .replaceAll('y * base.box_h / glyph.box_h','Math.floor(y * base.box_h / glyph.box_h)').replaceAll('x * base.box_w / glyph.box_w','Math.floor(x * base.box_w / glyph.box_w)')
  .replace('0x80u','0x80').replace('target += stride','target=target.subarray(stride)');

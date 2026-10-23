@@ -1,5 +1,6 @@
 #include "m3_audio_apps.h"
 #include "esp_vfs.h"
+#include "m3_inflate.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -8,9 +9,10 @@
 #include <string.h>
 #include <stdio.h>
 
-typedef struct { const char *path; const unsigned char *data; size_t size; } voice_asset_t;
+/* data is zlib-packed (packed bytes); size is the inflated file size eSpeak sees. */
+typedef struct { const char *path; const unsigned char *data; size_t size, packed; } voice_asset_t;
 #include "m3_tts_assets.inc"
-typedef struct { bool used; const voice_asset_t *asset; size_t offset; } voice_fd_t;
+typedef struct { bool used; const voice_asset_t *asset; uint8_t *data; size_t offset; } voice_fd_t;
 static voice_fd_t descriptors[8];
 static bool mounted;
 static const char *const directories[] = {"", "/espeak-ng-data", "/espeak-ng-data/lang", "/espeak-ng-data/lang/gmw", "/espeak-ng-data/voices"};
@@ -34,7 +36,10 @@ static int voice_open(const char *path, int flags, int mode) {
     const voice_asset_t *asset = find_asset(path);
     if (!asset) { errno = ENOENT; return -1; }
     for (unsigned i = 0; i < 8; ++i) if (!descriptors[i].used) {
-        descriptors[i] = (voice_fd_t){.used = true, .asset = asset}; return (int)i;
+        /* Inflated into PSRAM only while open; eSpeak copies what it keeps. */
+        uint8_t *data = m3_inflate(asset->data, asset->packed, asset->size);
+        if (!data) { errno = ENOMEM; return -1; }
+        descriptors[i] = (voice_fd_t){.used = true, .asset = asset, .data = data}; return (int)i;
     }
     errno = EMFILE; return -1;
 }
@@ -46,7 +51,7 @@ static ssize_t voice_read(int fd, void *data, size_t count) {
     voice_fd_t *file = get_fd(fd); if (!file) return -1;
     size_t left = file->offset < file->asset->size ? file->asset->size - file->offset : 0;
     if (count > left) count = left;
-    if (count) memcpy(data, file->asset->data + file->offset, count);
+    if (count) memcpy(data, file->data + file->offset, count);
     file->offset += count; return (ssize_t)count;
 }
 static off_t voice_seek(int fd, off_t offset, int whence) {
@@ -56,7 +61,10 @@ static off_t voice_seek(int fd, off_t offset, int whence) {
     if (position < 0 || position > INT32_MAX) { errno = EINVAL; return -1; }
     file->offset = (size_t)position; return (off_t)position;
 }
-static int voice_close(int fd) { voice_fd_t *file = get_fd(fd); if (!file) return -1; file->used = false; return 0; }
+static int voice_close(int fd) {
+    voice_fd_t *file = get_fd(fd); if (!file) return -1;
+    free(file->data); *file = (voice_fd_t){0}; return 0;
+}
 static int voice_fstat(int fd, struct stat *out) { voice_fd_t *file = get_fd(fd); return file ? voice_stat(file->asset->path, out) : -1; }
 static DIR *voice_opendir(const char *path) {
     struct stat st;
