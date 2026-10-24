@@ -11,7 +11,7 @@
 #include "m3_preferences.h"
 #include "m3_feedback.h"
 #include "m3_tube.h"
-#include "m3_tube_config.h"
+#include "m3_relay.h"
 #include "m3_music.h"
 #include "m3_gallery.h"
 #include "m3_memory.h"
@@ -128,7 +128,9 @@ bool m3_audio_radio_preset(const char *station, unsigned profile) {
     for (const char *p = station; *p; ++p)
         if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-')) return false;
     char url[513];
-    int n = snprintf(url, sizeof(url), "%s/api/radio?station=%s&profile=%s", M3_TUBE_URL, station, profiles[profile]);
+    m3_relay_profile_t relay;
+    if (!m3_relay_current(&relay)) return false;
+    int n = snprintf(url, sizeof(url), "%s/api/radio?station=%s&profile=%s", relay.url, station, profiles[profile]);
     return n > 0 && (size_t)n < sizeof(url) && m3_audio_radio(url, false);
 }
 bool m3_audio_mp4(const char *relative, unsigned gallery_job) {

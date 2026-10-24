@@ -153,7 +153,7 @@ class RelayWindow : Form {
         string[] names = { "시작", "중지", "재시작", "공개 상태", "폴더 열기", "설정 파일", "종료" };
         for (int i = 0; i < buttons.Length; i++) { buttons[i].Text = names[i]; buttons[i].Size = new Size(92, 35); actions.Controls.Add(buttons[i]); }
         layout.Controls.Add(actions);
-        AutoStart.Text = "Windows 시작 시 자동 실행    |    창을 닫으면 트레이에서 계속 실행됩니다.";
+        AutoStart.Text = "Windows 시작 시 자동 실행    |    최소화하거나 닫으면 트레이에서 계속 실행됩니다.";
         AutoStart.Dock = DockStyle.Fill; layout.Controls.Add(AutoStart);
         TabControl tabs = new TabControl { Dock = DockStyle.Fill };
         TextBox[] logs = { RelayLog, TunnelLog }; string[] titles = { "중계 서버 로그", "Cloudflare 터널 로그" };
@@ -163,7 +163,20 @@ class RelayWindow : Form {
             logs[i].Font = new Font("Consolas", 10); page.Controls.Add(logs[i]); tabs.TabPages.Add(page);
         }
         layout.Controls.Add(tabs);
-        FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!Quitting) { e.Cancel = true; Hide(); } };
+        Resize += delegate { if (WindowState == FormWindowState.Minimized) HideToTray(); };
+        FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!Quitting) { e.Cancel = true; HideToTray(); } };
+    }
+    public void HideToTray() {
+        Hide();
+        // Reset the native minimized state while hidden, before taskbar handle recreation.
+        WindowState = FormWindowState.Normal;
+        ShowInTaskbar = false;
+    }
+    public void RestoreFromTray() {
+        WindowState = FormWindowState.Normal;
+        ShowInTaskbar = true;
+        Show();
+        Activate();
     }
     public void UpdateStatus(string title, string server, string tunnel, string readiness, string storage, bool wanted) {
         summary.Text = title; services.Text = "중계 서버: " + server + "    |    터널: " + tunnel;
@@ -369,7 +382,7 @@ class RelayContext : ApplicationContext {
     static void OpenLog(string path) { if (File.Exists(path)) Open("notepad.exe", "\"" + path + "\""); }
     static void Open(string file, string arguments) { try { Process.Start(file, arguments); } catch (Exception) { } }
     void Fail(string message) { MessageBox.Show(message, "M3 유튜브 중계", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-    void OpenWindow() { window.Show(); window.WindowState = FormWindowState.Normal; window.Activate(); }
+    void OpenWindow() { window.RestoreFromTray(); }
     static string ServiceText(Service service) {
         return (service.Running ? "실행 중" : service.Wanted ? "시작 대기" : "중지") + " (자동 재시작 " + service.Restarts + "회)";
     }

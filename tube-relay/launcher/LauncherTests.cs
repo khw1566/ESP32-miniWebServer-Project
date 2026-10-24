@@ -31,10 +31,21 @@ static class LauncherTests {
                 int calls = 0; window.StopButton.Click += delegate { calls++; }; window.StopButton.PerformClick();
                 Check(calls == 1, "stop action binding");
                 window.UpdateLogs("relay fixture", "tunnel fixture"); Check(window.RelayLog.Text == "relay fixture", "log display");
-                window.Show(); window.Close(); Check(!window.Visible && !window.IsDisposed, "close should hide to tray");
+                service.Start();
+                for (int i = 0; i < 3; i++) {
+                    window.WindowState = FormWindowState.Minimized; Application.DoEvents();
+                    Check(!window.Visible && !window.ShowInTaskbar && !window.IsDisposed, "minimize should hide to tray");
+                    Check(service.Wanted && service.Running, "minimize stopped the service");
+                    window.RestoreFromTray(); Application.DoEvents();
+                    Check(window.Visible && window.ShowInTaskbar && window.WindowState == FormWindowState.Normal, "tray restore failed");
+                }
+                window.Close(); Check(!window.Visible && !window.ShowInTaskbar && !window.IsDisposed, "close should hide to tray");
+                window.RestoreFromTray(); Application.DoEvents();
+                Check(window.Visible && window.ShowInTaskbar, "restore after close failed");
                 window.Quitting = true; window.Close();
+                Check(window.IsDisposed, "quit should dispose the window");
             }
-            Console.WriteLine("PASS: start, stop, restart, crash recovery, stopped supervision, GUI actions/logs and close-to-tray.");
+            Console.WriteLine("PASS: start, stop, restart, crash recovery, stopped supervision, GUI actions/logs, minimize/close-to-tray, restore and quit.");
             return 0;
         } catch (Exception error) { Console.Error.WriteLine(error); return 1; }
         finally { service.Stop(); }

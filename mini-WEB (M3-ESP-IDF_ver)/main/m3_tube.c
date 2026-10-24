@@ -1,7 +1,7 @@
 #include "m3_memory.h"
 #include "m3_wifi_performance.h"
 #include "m3_tube.h"
-#include "m3_tube_config.h"
+#include "m3_relay.h"
 #include "network_manager.h"
 #include "https_memory.h"
 #include "esp_http_client.h"
@@ -51,7 +51,7 @@ enum {
 enum { PACKET_INFO = 1, PACKET_VIDEO, PACKET_AUDIO, PACKET_END, PACKET_WAIT };
 
 bool m3_tube_configured(void) {
-    return strlen(M3_TUBE_TOKEN) >= 24 && (!strncmp(M3_TUBE_URL, "https://", 8) || !strncmp(M3_TUBE_URL, "http://", 7));
+    return m3_relay_count() != 0;
 }
 static void url_encode(const char *in, char *out, size_t size) {
     static const char hex[] = "0123456789ABCDEF";
@@ -136,7 +136,14 @@ static esp_err_t sink_event(esp_http_client_event_t *event) {
 static int http_get(esp_http_client_handle_t client, sink_t *sink, uint8_t *data, size_t capacity, const char *url) {
     sink->data = data; sink->capacity = capacity; sink->length = 0; sink->overflow = false;
     esp_http_client_set_url(client, url);
-    if (esp_http_client_perform(client) != ESP_OK) return -1;
+    esp_err_t result = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG, "HTTP request failed: %s, status=%d", esp_err_to_name(result), status);
+        /* IDF can return ESP_ERR_NOT_SUPPORTED for a token-based 401 without
+         * WWW-Authenticate. Preserve that response for the token error UI. */
+        return status == 401 ? 401 : -1;
+    }
     return sink->overflow ? -2 : esp_http_client_get_status_code(client);
 }
 static void server_probe_execute(void) {
@@ -147,15 +154,18 @@ static void server_probe_execute(void) {
     if (!m3_tube_configured()) { message = "YouTube relay is not configured"; goto done; }
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { message = "Connect Wi-Fi first"; goto done; }
     if (!lease_tls(100, &owned)) { message = "Server check waiting for HTTPS"; goto done; }
+    m3_relay_profile_t relay;
+    if (!m3_relay_select(&relay)) { message = "Relay connection failed"; goto done; }
+    char url[M3_RELAY_URL_SIZE + 16]; snprintf(url, sizeof(url), "%s/api/status", relay.url);
     uint8_t data[512]; sink_t sink = {0};
-    esp_http_client_config_t config = {.url = M3_TUBE_URL "/api/status", .timeout_ms = 5000,
-        .buffer_size = 1024, .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = sink_event, .user_data = &sink};
+    esp_http_client_config_t config = {.url = url, .timeout_ms = 5000,
+        .buffer_size = 1024, .crt_bundle_attach = esp_crt_bundle_attach, .disable_auto_redirect = true, .event_handler = sink_event, .user_data = &sink};
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) { message = "Relay connection failed"; goto done; }
-    esp_http_client_set_header(client, "x-m3-token", M3_TUBE_TOKEN);
-    status = http_get(client, &sink, data, sizeof(data) - 1, M3_TUBE_URL "/api/status");
+    esp_http_client_set_header(client, "x-m3-token", relay.token);
+    status = http_get(client, &sink, data, sizeof(data) - 1, url);
     esp_http_client_cleanup(client);
-    message = status == 401 ? "Relay token rejected; rerun setup and rebuild" :
+    message = status == 401 ? "Relay token rejected; check SD relay settings" :
         status == 404 ? "Update PC relay for quality and downloads" :
         status == 530 || status == 502 || status == 503 ? "PC server or tunnel is offline" : "Relay connection failed";
     if (status == 200) {
@@ -218,23 +228,29 @@ static void list_execute(const list_request_t *request) {
     if (!m3_tube_configured()) { list_status(target, M3_TUBE_LIST_ERROR, "YouTube relay is not configured"); return; }
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { list_status(target, M3_TUBE_LIST_ERROR, "Connect Wi-Fi first"); return; }
     if (!lease_tls(1500, &owned)) { list_status(target, M3_TUBE_LIST_ERROR, "HTTPS busy; stop radio or video and retry"); return; }
+    m3_relay_profile_t relay;
+    if (!m3_relay_select(&relay)) {
+        if (owned) https_memory_exclusive_end();
+        list_status(target, M3_TUBE_LIST_ERROR, "Relay connection failed"); return;
+    }
+    snprintf(url, sizeof(url), "%s/healthz", relay.url);
     esp_http_client_config_t config = {
-        .url = M3_TUBE_URL "/healthz", .timeout_ms = 30000, .buffer_size = 4096, .keep_alive_enable = true,
+        .url = url, .timeout_ms = 30000, .buffer_size = 4096, .keep_alive_enable = true,
         .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = sink_event, .user_data = &sink,
-        .user_agent = "Mini-WebServer-M3/1.2",
+        .user_agent = "Mini-WebServer-M3/1.2", .disable_auto_redirect = true,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) { list_status(target, M3_TUBE_LIST_ERROR, "Relay connection failed"); goto done; }
-    esp_http_client_set_header(client, "x-m3-token", M3_TUBE_TOKEN);
+    esp_http_client_set_header(client, "x-m3-token", relay.token);
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     url_encode(request->text, encoded, sizeof(encoded));
-    int url_size = snprintf(url, sizeof(url), "%s/api/%s?%s=%s&page=%u%s", M3_TUBE_URL, request->channel ? "channel" : "search",
+    int url_size = snprintf(url, sizeof(url), "%s/api/%s?%s=%s&page=%u%s", relay.url, request->channel ? "channel" : "search",
         request->channel ? "id" : "q", encoded, request->page, request->music ? "&music=1" : "");
     if (url_size < 0 || (size_t)url_size >= sizeof(url)) { list_status(target, M3_TUBE_LIST_ERROR, "Relay search failed; try again"); goto done; }
     int status = http_get(client, &sink, json_buffer, JSON_LIMIT - 1, url);
     if (status != 200) {
         ESP_LOGW(TAG, "listing HTTP %d", status);
-        list_status(target, M3_TUBE_LIST_ERROR, status == 401 ? "Relay token rejected; rerun setup and rebuild" :
+        list_status(target, M3_TUBE_LIST_ERROR, status == 401 ? "Relay token rejected; check SD relay settings" :
             status < 0 ? "Relay connection failed" : "Relay search failed; try again");
         goto done;
     }
@@ -258,7 +274,7 @@ static void list_execute(const list_request_t *request) {
     for (unsigned i = 0; i < count; ++i) {
         if (uxQueueMessagesWaiting(list_requests)) break; /* A newer request replaces this listing. */
         int url_length = snprintf(url, sizeof(url), "%s/api/thumb?id=%.11s&w=%d&h=%d",
-            M3_TUBE_URL, items[i].id, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H);
+            relay.url, items[i].id, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H);
         if (url_length < 0 || (size_t)url_length >= sizeof(url)) continue;
         if (http_get(client, &sink, set + i * THUMB_BYTES, THUMB_BYTES, url) != 200 || sink.length != THUMB_BYTES) continue;
         xSemaphoreTake(list_lock, portMAX_DELAY); target->thumbs |= 1u << i; xSemaphoreGive(list_lock);
@@ -510,8 +526,10 @@ void m3_tube_run(const char *id, unsigned start_seconds, bool audio_only, const 
     }
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { error = "Connect Wi-Fi first"; goto done; }
     if (!audio_only && !frames_ready()) { error = "Video decoder memory unavailable"; goto done; }
-    leased = !strncmp(M3_TUBE_URL, "https://", 8) ? lease_tls(1500, &lease_owned) : true;
+    leased = lease_tls(1500, &lease_owned);
     if (!leased) { error = "HTTPS busy; stop radio or video and retry"; goto done; }
+    m3_relay_profile_t relay;
+    if (!m3_relay_select(&relay)) { error = "Relay connection failed"; goto done; }
     ps_changed = m3_wifi_performance_acquire();
     rx.storage = heap_caps_malloc(RING_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     rx.chunk = heap_caps_malloc(READ_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -519,19 +537,19 @@ void m3_tube_run(const char *id, unsigned start_seconds, bool audio_only, const 
     info = heap_caps_malloc(INFO_LIMIT + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!rx.storage || !rx.chunk || !pcm || !info) { error = "Video buffer allocation failed"; goto done; }
     rx.stream = xStreamBufferCreateStatic(RING_BYTES + 1, 1, rx.storage, &rx.control);
-    char url[256]; snprintf(url, sizeof(url), "%s/api/play?id=%s&t=%u%s&quality=%s", M3_TUBE_URL, id, start_seconds,
+    char url[320]; snprintf(url, sizeof(url), "%s/api/play?id=%s&t=%u%s&quality=%s", relay.url, id, start_seconds,
         audio_only ? "&audio=1" : "", quality_name(quality));
     esp_http_client_config_t config = {
-        .url = url, .timeout_ms = 15000, .buffer_size = 4096, .crt_bundle_attach = esp_crt_bundle_attach,
+        .url = url, .timeout_ms = 15000, .buffer_size = 4096, .crt_bundle_attach = esp_crt_bundle_attach, .disable_auto_redirect = true,
         .user_agent = "Mini-WebServer-M3/1.2",
     };
     http = esp_http_client_init(&config);
     if (!http) goto done;
-    esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN);
+    esp_http_client_set_header(http, "x-m3-token", relay.token);
     esp_http_client_set_header(http, "Accept-Encoding", "identity");
     if (out->cancelled() || esp_http_client_open(http, 0) != ESP_OK || esp_http_client_fetch_headers(http) < 0) goto done;
     int status = esp_http_client_get_status_code(http);
-    if (status != 200) { error = status == 401 ? "Relay token rejected; rerun setup and rebuild" : "Relay could not play this video"; goto done; }
+    if (status != 200) { error = status == 401 ? "Relay token rejected; check SD relay settings" : "Relay could not play this video"; goto done; }
     esp_http_client_set_timeout_ms(http, 250);
     rx.http = http;
     if (xTaskCreatePinnedToCore(tube_receive, "m3_tube_rx", 8192, &rx, 5, NULL, 0) != pdPASS) { error = "Video task allocation failed"; goto done; }

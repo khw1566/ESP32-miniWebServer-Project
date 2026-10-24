@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "servers": [
+    {"url": "https://relay-a.example", "token": "REPLACE_WITH_SERVER_A_TOKEN"},
+    {"url": "https://relay-b.example", "token": "REPLACE_WITH_SERVER_B_TOKEN"}
+  ]
+}

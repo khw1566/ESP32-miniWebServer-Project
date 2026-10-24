@@ -5,18 +5,18 @@ function body(name,text=source){const m=new RegExp('\\b'+name+'\\([^;]*?\\)\\s*\
 function translate(code){return code.replace(/\/\*[\s\S]*?\*\//g,'').replace('(void)unused;','').replaceAll('->','.')
  .replace(/\((?:unsigned|uint64_t|int64_t|size_t|char \*)\)/g,'')
  .replace(/\b(?:const )?(?:music_slot_t|uint8_t|char) \*/g,'var ')
- .replace(/\b(?:unsigned|bool|int64_t|uint64_t|size_t|int|FILE \*|esp_http_client_handle_t |esp_audio_simple_dec_handle_t )\s*/g,'var ')
+ .replace(/\b(?:m3_relay_profile_t|unsigned|bool|int64_t|uint64_t|size_t|int|FILE \*|esp_http_client_handle_t |esp_audio_simple_dec_handle_t )\s*/g,'var ')
  .replace(/\((?:unsigned|uint64_t|int64_t|size_t|char \*)\)/g,'').replace(/\b(\d+)LL\b/g,'$1')
  .replace(/sizeof\([^)]*\)/g,'192').replace(/\.(\w+)\s*=/g,(m,n)=>m) // Struct initializers below only.
  .replace(/=\s*\{([^{}]*)\}/g,(_m,v)=>'={'+(v.trim()==='0'?'':v.replace(/\.(\w+)\s*=/g,'$1:'))+'}')
  .replace(/&(?:music_lock|player_lock|service_lock)/g,'null').replaceAll('&music_slots','music_slots').replace('atomic_load(&paused)','paused')
  .replaceAll('music_save_id[0]=0','music_save_id=""').replaceAll('music_wanted[1][0]=0','music_wanted[1]=""')
- .replace(/&(?:raw|frame|info|config)\b/g,m=>m.slice(1))
+ .replace(/&(?:raw|frame|info|config|relay)\b/g,m=>m.slice(1))
  .replace(/snprintf\((error|\w+(?:\.\w+|\[\d\])?),\s*(?:192|error_size),\s*([^;]+)\);/g,(_m,target,args)=>`${target==='error'?'error.value':target}=format(${args});`)
  .replace(/memcpy\((\w+\.\w+),([^,]+),192\);/g,'$1=$2;')
  .replaceAll('slot.data+position','slot.data.subarray(position)').replaceAll('slot.data+bytes','slot.data.subarray(bytes)')
  .replaceAll('pcm+skip*4','pcm.subarray(skip*4)');}
-const blank=()=>({id:'',data:null,state:0,refs:0,bytes:0,total:0,duration:2,message:'',title:'Song',channel:'Artist',channel_id:'',job:''});
+const blank=()=>({id:'',data:null,state:0,refs:0,bytes:0,total:0,duration:2,message:'',title:'Song',channel:'Artist',channel_id:'',job:'',relay:{url:'https://fixture',token:'fixture-only'}});
 const c={Buffer,NULL:null,MUSIC_EMPTY:0,MUSIC_LOADING:1,MUSIC_READY:2,MUSIC_FAILED:3,MUSIC_DECODE_BYTES:32768,
  music_slots:[blank(),blank()],music_wanted:['',''],music_save_id:'',music_save_title:'',music_lock:{},
  portMAX_DELAY:0,ESP_AUDIO_ERR_OK:0,ESP_AUDIO_SIMPLE_DEC_TYPE_MP3:1,MALLOC_CAP_SPIRAM:1,MALLOC_CAP_8BIT:2,
@@ -102,7 +102,7 @@ saving='try{'+saving.slice(0,end).replaceAll('goto done;','throw FINISH;')+'}cat
 install('music_save','id,title',saving);
 Object.assign(c,{ESP_OK:0,NET_MODE_STA_CONNECTED:1,ESP_ERR_HTTP_EAGAIN:11,EEXIST:17,errno:0,O_WRONLY:1,O_CREAT:2,O_EXCL:4,
  SD_MEDIA_ROOT:'/sdcard',M3_TUBE_URL:'http://fixture',M3_TUBE_TOKEN:'fixture-only',esp_crt_bundle_attach:()=>{},
- network_get_mode:()=>1,leaseOK:true,sd_media_admin_lock:()=>!c.failLock,sd_media_admin_unlock:()=>c.unlocks++,sd_media_changed:()=>c.changed++,
+ m3_relay_select:r=>{Object.assign(r,{url:'https://fixture',token:'fixture-only'});return true;},network_get_mode:()=>1,leaseOK:true,sd_media_admin_lock:()=>!c.failLock,sd_media_admin_unlock:()=>c.unlocks++,sd_media_changed:()=>c.changed++,
  mkdir:()=>0,stat:()=>c.existing?0:-1,unlink:name=>c.files.delete(name),open:name=>{c.files.set(name,Buffer.alloc(0));return {name};},
  fdopen:fd=>fd,close:()=>{},fclose:()=>0,fileno:f=>f,fflush:()=>c.failSync?-1:0,fsync:()=>0,
  fwrite:(data,_one,n,file)=>{if(c.failWrite)return 0;c.files.set(file.name,Buffer.concat([c.files.get(file.name),data.subarray(0,n)]));if(c.cancelWriting)c.cancelSave=true;return n;},

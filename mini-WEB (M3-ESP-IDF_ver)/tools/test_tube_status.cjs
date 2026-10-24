@@ -4,9 +4,9 @@ const source=fs.readFileSync(path.join(__dirname,'../main/m3_tube.c'),'utf8');
 function body(name){const m=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\{').exec(source);assert(m,name);let i=m.index+m[0].length,start=i,depth=1;while(depth){if(source[i]==='{')depth++;if(source[i]==='}')depth--;i++;}return source.slice(start,i-1);}
 let probe=body('server_probe_execute');const end=probe.indexOf('\ndone:');
 probe='try {\n'+probe.slice(0,end)+'\n} catch(e) {if(e!==FINISH) throw e;}\n'+probe.slice(end+6);
-probe=probe.replace(/\b(?:bool |int |int64_t |const char \*|esp_http_client_handle_t |const cJSON \*|cJSON \*)(\w+)/g,'var $1')
+probe=probe.replace('m3_relay_profile_t relay;','var relay={};').replace('char url[M3_RELAY_URL_SIZE + 16]; snprintf(url, sizeof(url), "%s/api/status", relay.url);','var url="https://fixture/api/status";').replaceAll('&relay','relay').replace(/\b(?:bool |int |int64_t |const char \*|esp_http_client_handle_t |const cJSON \*|cJSON \*)(\w+)/g,'var $1')
  .replace('uint8_t data[512]; sink_t sink = {0};','var data=Buffer.alloc(512),sink={};')
- .replace('esp_http_client_config_t config =','var config=').replace(/\.(url|timeout_ms|buffer_size|crt_bundle_attach|event_handler|user_data) =/g,'$1:')
+ .replace('esp_http_client_config_t config =','var config=').replace(/\.(url|timeout_ms|buffer_size|crt_bundle_attach|event_handler|user_data|disable_auto_redirect) =/g,'$1:')
  .replace(/sizeof\([^)]*\)/g,'512').replaceAll('M3_TUBE_URL "','M3_TUBE_URL + "').replaceAll('&config','config').replaceAll('&sink','sink')
  .replace('(char *)data','data').replace('lease_tls(100, &owned)','(owned=lease_ok)').replaceAll('goto done;','throw FINISH;')
  .replaceAll('->','.').replaceAll('portENTER_CRITICAL(&service_lock);','').replaceAll('portEXIT_CRITICAL(&service_lock);','')
@@ -15,7 +15,7 @@ const valid={service:'m3-tube-relay',protocol:2,ok:true};
 function run(status=200,data=valid,options={}){
  const c={Buffer,FINISH:{},NULL:null,M3_TUBE_URL:'https://fixture',M3_TUBE_TOKEN:'fixture-only',NET_MODE_STA_CONNECTED:1,
   server_state:{ready:true},server_checked:0,lease_ok:!options.busy,released:0,authenticated:false,
-  m3_tube_configured:()=>!options.unconfigured,network_get_mode:()=>options.wifi?0:1,
+  m3_relay_select:r=>{Object.assign(r,{url:'https://fixture',token:'fixture-only'});return !options.noRelay;},m3_tube_configured:()=>!options.unconfigured,network_get_mode:()=>options.wifi?0:1,
   esp_crt_bundle_attach:()=>{},sink_event:()=>{},esp_http_client_init:()=>({}),esp_http_client_cleanup:()=>{},
   esp_http_client_set_header:(_h,key,value)=>{assert.equal(key,'x-m3-token');assert.equal(value,'fixture-only');c.authenticated=true;},
   http_get:(_h,sink,out)=>{const text=typeof data==='string'?data:JSON.stringify(data);sink.length=out.write(text);return status;},

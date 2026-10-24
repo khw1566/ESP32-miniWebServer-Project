@@ -4,6 +4,7 @@ enum { MUSIC_CACHE_BYTES = 8 * 1024 * 1024, MUSIC_CACHE_RESERVE = 4 * 1024 * 102
 enum { MUSIC_EMPTY, MUSIC_LOADING, MUSIC_READY, MUSIC_FAILED };
 typedef struct {
     char id[12], message[96], title[160], channel[64], channel_id[25], job[33]; uint8_t *data;
+    m3_relay_profile_t relay;
     unsigned state, refs, bytes, total, duration;
 } music_slot_t;
 static M3_PSRAM_BSS music_slot_t music_slots[2];
@@ -72,17 +73,20 @@ static void music_load(music_slot_t *slot) {
     bool owned = false, pc_ready = false; uint8_t *data = NULL, *buffer = NULL; unsigned total = 0, bytes = 0, duration = 0;
     esp_http_client_handle_t http = NULL;
     char url[320], job[33] = ""; sink_t sink = {0};
+    m3_relay_profile_t relay = {0};
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { error = "Connect Wi-Fi first"; goto done; }
     if (!lease_tls(1500,&owned)) { error = "HTTPS busy; stop radio or video and retry"; goto done; }
+    if (!m3_relay_select(&relay)) { error = "Relay connection failed"; goto done; }
     buffer = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buffer) { error = "Music PSRAM allocation failed"; goto done; }
-    esp_http_client_config_t config = {.url=M3_TUBE_URL "/api/music",.timeout_ms=5000,.buffer_size=4096,
+    snprintf(url, sizeof(url), "%s/api/music", relay.url);
+    esp_http_client_config_t config = {.url=url,.timeout_ms=5000,.buffer_size=4096,.disable_auto_redirect=true,
         .crt_bundle_attach=esp_crt_bundle_attach,.event_handler=sink_event,.user_data=&sink};
     http = esp_http_client_init(&config); if (!http) goto done;
-    esp_http_client_set_header(http,"x-m3-token",M3_TUBE_TOKEN);
+    esp_http_client_set_header(http,"x-m3-token",relay.token);
     esp_http_client_set_header(http,"Accept-Encoding","identity");
     esp_http_client_set_header(http,"Content-Length","0");
-    snprintf(url,sizeof(url),"%s/api/music?id=%.11s",M3_TUBE_URL,slot->id);
+    snprintf(url,sizeof(url),"%s/api/music?id=%.11s",relay.url,slot->id);
     int status; int64_t admission_deadline=esp_timer_get_time()+30000000;
     do {
         status=download_json(http,&sink,buffer,url,HTTP_METHOD_POST);
@@ -90,18 +94,18 @@ static void music_load(music_slot_t *slot) {
         vTaskDelay(pdMS_TO_TICKS(500));
     } while (esp_timer_get_time()<admission_deadline);
     if (status != 202) { error = status == 404 ? "Update PC relay for music cache" : status == 401 ?
-        "Relay token rejected; rerun setup and rebuild" : "Music cache download failed"; goto done; }
+        "Relay token rejected; check SD relay settings" : "Music cache download failed"; goto done; }
     buffer[sink.length] = 0; cJSON *root = cJSON_Parse((char *)buffer);
     const cJSON *value = root ? cJSON_GetObjectItem(root,"job") : NULL;
     if (cJSON_IsString(value) && strlen(value->valuestring)==32 && strspn(value->valuestring,"0123456789abcdef")==32)
         snprintf(job,sizeof(job),"%s",value->valuestring);
     cJSON_Delete(root); if (!job[0]) goto done;
-    xSemaphoreTake(music_lock,portMAX_DELAY); memcpy(slot->job,job,sizeof(job)); xSemaphoreGive(music_lock);
+    xSemaphoreTake(music_lock,portMAX_DELAY); memcpy(slot->job,job,sizeof(job)); slot->relay=relay; xSemaphoreGive(music_lock);
     esp_http_client_delete_header(http,"Content-Length");
     int64_t deadline = esp_timer_get_time() + 330LL * 1000000;
     bool ready = false;
     while (music_needed(slot->id) && esp_timer_get_time() < deadline) {
-        snprintf(url,sizeof(url),"%s/api/music/status?job=%s",M3_TUBE_URL,job);
+        snprintf(url,sizeof(url),"%s/api/music/status?job=%s",relay.url,job);
         status = download_json(http,&sink,buffer,url,HTTP_METHOD_GET); if (status != 200) goto done;
         buffer[sink.length]=0; root=cJSON_Parse((char *)buffer); value=root?cJSON_GetObjectItem(root,"state"):NULL;
         ready=cJSON_IsString(value) && !strcmp(value->valuestring,"ready");
@@ -129,7 +133,7 @@ static void music_load(music_slot_t *slot) {
     data=heap_caps_malloc(total,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!data) { error="Music PSRAM allocation failed"; goto done; }
     sink.data=NULL; esp_http_client_set_method(http,HTTP_METHOD_GET);
-    snprintf(url,sizeof(url),"%s/api/music/file?job=%s",M3_TUBE_URL,job); esp_http_client_set_url(http,url);
+    snprintf(url,sizeof(url),"%s/api/music/file?job=%s",relay.url,job); esp_http_client_set_url(http,url);
     if (esp_http_client_open(http,0)!=ESP_OK || esp_http_client_fetch_headers(http)<0 || esp_http_client_get_status_code(http)!=200 ||
         esp_http_client_get_content_length(http)!=(int64_t)total) goto done;
     esp_http_client_set_timeout_ms(http,500);
@@ -153,7 +157,7 @@ done:
     if (http) {
         esp_http_client_close(http);
         if (job[0] && !pc_ready && !music_needed(slot->id)) {
-            snprintf(url,sizeof(url),"%s/api/music/status?job=%s",M3_TUBE_URL,job);
+            snprintf(url,sizeof(url),"%s/api/music/status?job=%s",relay.url,job);
             download_json(http,&sink,buffer,url,HTTP_METHOD_DELETE);
         }
         esp_http_client_cleanup(http);
@@ -168,6 +172,7 @@ static void music_save(const char *id, const char *title) {
     unsigned bytes=0,total=slot?slot->total:0;
     const char *error="Music cache download failed";
     char name[64],final[160],partial[168],job[33]="",url[320];
+    m3_relay_profile_t relay = {0};
     uint8_t *buffer=NULL; esp_http_client_handle_t http=NULL; bool owned=false;
     snprintf(name,sizeof(name),"%.30s%s%.11s.mp3",title,title[0]?"_":"",id);
     snprintf(final,sizeof(final),SD_MEDIA_ROOT "/media/YouTube Music/%s",name); snprintf(partial,sizeof(partial),"%s.part",final);
@@ -175,15 +180,15 @@ static void music_save(const char *id, const char *title) {
     if (!slot) {
         /* A long song or low PSRAM must still be downloadable to SD. */
         xSemaphoreTake(music_lock,portMAX_DELAY);
-        for (unsigned i=0;i<2;++i) if (!strcmp(music_slots[i].id,id)) { memcpy(job,music_slots[i].job,sizeof(job)); total=music_slots[i].total; }
+        for (unsigned i=0;i<2;++i) if (!strcmp(music_slots[i].id,id)) { memcpy(job,music_slots[i].job,sizeof(job)); total=music_slots[i].total; relay=music_slots[i].relay; }
         xSemaphoreGive(music_lock);
         if (!job[0] || total<128 || total>10*1024*1024) goto done;
         if (network_get_mode()!=NET_MODE_STA_CONNECTED || !lease_tls(1500,&owned)) { error="Relay connection failed"; goto done; }
         buffer=heap_caps_malloc(16384,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT); if (!buffer) { error="Music PSRAM allocation failed"; goto done; }
-        snprintf(url,sizeof(url),"%s/api/music/file?job=%s",M3_TUBE_URL,job);
-        esp_http_client_config_t config={.url=url,.timeout_ms=5000,.buffer_size=4096,.crt_bundle_attach=esp_crt_bundle_attach};
+        snprintf(url,sizeof(url),"%s/api/music/file?job=%s",relay.url,job);
+        esp_http_client_config_t config={.url=url,.timeout_ms=5000,.buffer_size=4096,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true};
         http=esp_http_client_init(&config); if (!http) goto done;
-        esp_http_client_set_header(http,"x-m3-token",M3_TUBE_TOKEN); esp_http_client_set_header(http,"Accept-Encoding","identity");
+        esp_http_client_set_header(http,"x-m3-token",relay.token); esp_http_client_set_header(http,"Accept-Encoding","identity");
         if (esp_http_client_open(http,0)!=ESP_OK || esp_http_client_fetch_headers(http)<0 || esp_http_client_get_status_code(http)!=200 ||
             esp_http_client_get_content_length(http)!=(int64_t)total) goto done;
         esp_http_client_set_timeout_ms(http,500);

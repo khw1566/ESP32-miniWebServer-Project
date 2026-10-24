@@ -97,7 +97,8 @@ Object.assign(geometry,{NULL:null,LV_PCT:n=>({percent:n}),bare:p=>node(p,'layer'
  lv_obj_set_size:(o,width,height)=>Object.assign(o.style,{width,height}),lv_obj_set_width:(o,width)=>o.style.width=width});
 let construction=common(construct).replace(/lv_obj_t \*/g,'var ').replace('gallery_tile_t *item = &gallery_tiles[i]','var item=gallery_tiles[i]')
  .replace('(void *)(uintptr_t)','').replace(/\(void \*\)\(intptr_t\)/g,'').replace('i / 3','Math.floor(i / 3)');
-vm.createContext(geometry);vm.runInContext('function construct(page,volume){'+construction+'}',geometry);
+Object.assign(geometry,{LV_LABEL_LONG_DOT:0,LV_PART_MAIN:0,lv_label_set_long_mode:(o,mode)=>o.style.long_mode=mode,lv_obj_get_style_text_font:()=>({line_height:16}),lv_obj_set_height:(o,height)=>Object.assign(o.style,{height})});
+vm.createContext(geometry);vm.runInContext('function label_ellipsis(obj){'+common(body(read('main/m3_ui.c'),'label_ellipsis'))+'}',geometry);vm.runInContext('function construct(page,volume){'+construction+'}',geometry);
 const viewport={style:{width:480,height:656},children:[]},page=node(viewport,'page');geometry.construct(page,40);
 function dimension(o,key){const n=o.style[key]??100;return typeof n==='number'?n:dimension(o.parent,key)*n.percent/100;}
 assert.equal(dimension(page,'width'),480);assert.equal(dimension(page,'height'),656);

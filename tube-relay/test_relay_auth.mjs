@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { acceptedTokens, tokenAuthorized } from './relay_auth.mjs';
+import { provision, relayUrl } from './setup.mjs';
+const old='fake-legacy-token-for-tests-only';
+const a='fake-token-a-for-host-tests-only';
+const b='fake-token-b-for-host-tests-only';
+const tokens=acceptedTokens({token:old,tokens:[a,b]});
+for(const token of [old,a,b])assert(tokenAuthorized(token,tokens));
+for(const token of ['',undefined,'wrong-token',a+'x'])assert(!tokenAuthorized(token,tokens));
+assert.throws(()=>acceptedTokens({tokens:['short']}));
+for(const url of ['http://example.test','https://user:pass@example.test','https://example.test/path','https://example.test/?query=1'])assert.throws(()=>relayUrl(url));
+const fixtureRoot=fileURLToPath(new URL('./results/',import.meta.url));fs.mkdirSync(fixtureRoot,{recursive:true});
+const temp=fs.mkdtempSync(path.join(fixtureRoot,'m3-relay-fixture-'));
+try{
+ const root=path.join(temp,'tube-relay');fs.mkdirSync(root);
+ fs.writeFileSync(path.join(root,'config.json'),JSON.stringify({token:old,publicUrl:'https://relay-a.example'}));
+ const sd=path.join(temp,'sd');fs.mkdirSync(path.join(sd,'.private'),{recursive:true});
+ const retained={url:'https://relay-b.example',token:b};
+ fs.writeFileSync(path.join(sd,'.private/relays.json'),JSON.stringify({version:1,servers:[retained]}));
+ fs.writeFileSync(path.join(sd,'.private/wifi.json'),'wifi-fixture-preserved');
+ const result=provision(root,{sdRoot:sd});
+ const config=JSON.parse(fs.readFileSync(path.join(root,'config.json')));
+ assert.equal(config.token,old);assert.equal(config.tokens.length,3);assert.equal(new Set(config.tokens).size,3);
+ const installed=JSON.parse(fs.readFileSync(path.join(sd,'.private/relays.json')));
+ assert.equal(installed.servers.length,4);assert.deepEqual(installed.servers.at(-1),retained);
+ assert.equal(fs.readFileSync(path.join(sd,'.private/wifi.json'),'utf8'),'wifi-fixture-preserved');
+ const snapshot=fs.readFileSync(path.join(root,'config.json'),'utf8');
+ provision(root);assert.equal(fs.readFileSync(path.join(root,'config.json'),'utf8'),snapshot,'idempotent token generation');
+ assert(!fs.existsSync(path.join(temp,'mini-WEB (M3-ESP-IDF_ver)/main/include/m3_tube_private.h')),'no firmware secret header');
+ const before=fs.readFileSync(path.join(sd,'.private/relays.json'),'utf8');
+ assert.throws(()=>provision(root,{url:'http://bad.example',sdRoot:sd}));
+ assert.equal(fs.readFileSync(path.join(sd,'.private/relays.json'),'utf8'),before);
+ console.log('PASS: multiple tokens, rejection, HTTPS origin validation, idempotent setup, SD merge/backup, Wi-Fi preservation, no embedded secret header.');
+}finally{assert(path.resolve(temp).startsWith(path.resolve(fixtureRoot)+path.sep));fs.rmSync(temp,{recursive:true,force:true});}

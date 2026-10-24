@@ -47,9 +47,20 @@
 **/m3_tube_private.h
 /mini-WEB (M3-ESP-IDF_ver)/results/
 /mini-WEB (M3-ESP-IDF_ver)/sdkconfig
+/mini-WEB (M4-ESP-IDF_ver)/sdkconfig
+/mini-WEB (M4-ESP-IDF_ver)/results/
+/mini-WEB (M4-ESP-IDF_ver)/firmware-output/
+/mini-WEB (M4-ESP-IDF_ver)/tools/ui_sim/*_preview.png
 /mini-WEB (M3-ESP-IDF_ver)/tools/ui_sim/*_preview.png
 
 **/m3_azure_private.h
+**/m4_gemini_private.h
+**/m4_tube_private.h
+**/m4_azure_private.h
 
 # Publish the supplied CAD archive; private SD settings remain excluded.
 !/CAD Models/M3_v3-20261018T132920Z-1-001.zip
+
+# Relay setup retains private recovery copies beside the local configuration.
+/tube-relay/config.json.bak
+/tube-relay/config.json.tmp

@@ -120,7 +120,7 @@ const cleanup=source.slice(source.lastIndexOf('\ndone:'));
 assert(cleanup.indexOf('atomic_store(&rx.stop, true)')<cleanup.indexOf('while (decoder_started'));
 assert(cleanup.indexOf('while (decoder_started')<cleanup.indexOf('esp_audio_simple_dec_close'));
 assert(source.includes('esp_http_client_set_timeout_ms(http, 250)'));
-assert(source.includes('if (ps_changed) esp_wifi_set_ps(previous_ps)'));
+assert(source.includes('if (ps_changed) m3_wifi_performance_release()'));
 assert(source.includes('rx=%lu B/s'));
 const sink=source.slice(source.indexOf('int64_t last_status = 0, last_stats'));
 assert(sink.includes('xStreamBufferReceive(dec.stream, output'));

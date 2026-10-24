@@ -306,6 +306,7 @@ static void services(void *unused) {
     bool saved_wifi = false, connected = false;
     if (net == ESP_OK) {
         saved_wifi = !setup_requested && m3_sd_wifi_profiles(NULL, 0) > 0;
+        ESP_LOGI("M3", "Boot Wi-Fi: SD profiles=%u, explicit setup=%d", m3_sd_wifi_profiles(NULL, 0), setup_requested);
         if (saved_wifi) m3_boot_splash_step(M3_BOOT_CONNECT);
         connected = saved_wifi && network_connect_saved() == ESP_OK;
         if (!connected) {

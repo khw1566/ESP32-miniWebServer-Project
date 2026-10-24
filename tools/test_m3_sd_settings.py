@@ -2,14 +2,57 @@
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
-from copy_m3_sd_settings import install, install_wifi
+from copy_m3_sd_settings import install, install_wifi, install_relays
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / 'mini-WEB (M3-ESP-IDF_ver)/main'
 
 
 class SettingsTests(unittest.TestCase):
+    def test_relays_only_cli_preserves_api_keys_and_wifi(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root = Path(temp); sd = root / 'sd'; private = sd / '.private'
+            private.mkdir(parents=True)
+            api = private / 'api_keys.json'; api.write_bytes(b'preserve-api-fixture')
+            wifi = private / 'wifi.json'; wifi.write_bytes(b'preserve-wifi-fixture')
+            source = root / 'relays.json'
+            source.write_text(json.dumps(dict(version=1, servers=[dict(url='https://relay.example', token='fake-fixture-token-for-tests-only')])))
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/copy_m3_sd_settings.py'), str(sd),
+                                     '--relays-only', '--relay-source', str(source), '--source', str(api)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(api.read_bytes(), b'preserve-api-fixture')
+            self.assertEqual(wifi.read_bytes(), b'preserve-wifi-fixture')
+            self.assertTrue((private / 'relays.json').exists())
+
+    def test_relay_copy_merges_servers_normalizes_utf16_and_preserves_wifi(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root = Path(temp); sd = root / 'sd'; sd.mkdir()
+            source = root / 'relays.json'
+            a = dict(url='https://relay-a.example', token='fake-token-a-' * 3)
+            b = dict(url='https://relay-b.example', token='fake-token-b-' * 3)
+            source.write_text(json.dumps(dict(version=1, servers=[a])), encoding='utf-16')
+            target = install_relays(source, sd)
+            wifi = target.with_name('wifi.json'); wifi.write_bytes(b'preserved-wifi')
+            source.write_text(json.dumps(dict(version=1, servers=[b])))
+            install_relays(source, sd)
+            self.assertEqual(json.loads(target.read_text())['servers'], [b, a])
+            self.assertEqual(wifi.read_bytes(), b'preserved-wifi')
+            before = target.read_bytes()
+            for url in ('http://relay.example', 'https://user:pass@relay.example', 'https://relay.example/path'):
+                source.write_text(json.dumps(dict(version=1, servers=[dict(a, url=url)])))
+                with self.assertRaises(ValueError):
+                    install_relays(source, sd)
+                self.assertEqual(target.read_bytes(), before)
+            target.write_bytes(b'broken')
+            source.write_text(json.dumps(dict(version=1, servers=[a])))
+            with self.assertRaises(ValueError):
+                install_relays(source, sd)
+            self.assertEqual(target.read_bytes(), b'broken')
+
     def test_copy_preserves_wifi_and_refuses_accidental_key_replacement(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
             root = Path(temp)
@@ -65,10 +108,10 @@ class SettingsTests(unittest.TestCase):
         self.assertIn('m3_sd_settings.c', (MAIN / 'CMakeLists.txt').read_text())
 
     def test_wifi_save_hook_is_opt_in_and_shared_copies_stay_synchronized(self):
-        common = (ROOT / 'tools/firmware_common/network_settings.inc').read_bytes()
+        common = (ROOT / 'tools/firmware_common/network_settings.inc').read_text(encoding='utf-8')
         for p in ROOT.glob('mini-WEB*/main/network_settings.inc'):
-            self.assertEqual(common, p.read_bytes())
-        text = common.decode()
+            self.assertEqual(common, p.read_text(encoding='utf-8'))
+        text = common
         self.assertLess(text.index('nvs_commit(h)'), text.index('NETWORK_SETTINGS_SAVED_HOOK(&clean)'))
         self.assertIn('#define NETWORK_SETTINGS_SAVE_HOOK m3_sd_wifi_store',
                       (MAIN / 'network_manager.c').read_text(encoding='utf-8'))

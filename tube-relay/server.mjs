@@ -12,6 +12,7 @@ import { MusicCache } from './music_cache.mjs';
 import { YouTubeMusic } from './ytmusic.mjs';
 import { VideoCache } from './video_cache.mjs';
 import { RadioRelay } from './radio.mjs';
+import { acceptedTokens, tokenAuthorized } from './relay_auth.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = process.env.M3_TUBE_CONFIG || path.join(ROOT, 'config.json');
@@ -24,10 +25,9 @@ const config = {
   ...(fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {}),
 };
 if (process.env.M3_TUBE_TOKEN) config.token = process.env.M3_TUBE_TOKEN;
-if (!config.token || config.token.length < 24) {
-  console.error('config.json has no token. Run: node setup.mjs');
-  process.exit(1);
-}
+let tokens;
+try { tokens = acceptedTokens(config); }
+catch { console.error('Invalid relay tokens. Run: node setup.mjs'); process.exit(1); }
 const CACHE = path.join(CACHE_ROOT, 'thumb');
 fs.mkdirSync(CACHE, { recursive: true });
 const log = (...args) => console.log(new Date().toISOString().slice(11, 19), ...args);
@@ -337,15 +337,17 @@ function json(res, status, body) {
   res.end(data);
 }
 function authorized(req) {
-  const given = Buffer.from(String(req.headers['x-m3-token'] || ''));
-  const expected = Buffer.from(config.token);
-  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  return tokenAuthorized(req.headers['x-m3-token'], tokens);
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://relay');
   try {
     if (url.pathname === '/healthz') return json(res, 200, { ok: true, service: 'm3-tube-relay', protocol: 2 });
-    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    if (!authorized(req)) {
+      // Log only the route, never credentials or query text, for device diagnostics.
+      log(`authentication rejected: ${req.method} ${url.pathname}`);
+      return json(res, 401, { error: 'unauthorized' });
+    }
     if (url.pathname === '/api/radio') {
       if (req.method !== 'GET') return json(res, 405, { error: 'GET required' });
       return await radioRelay.serve(req, res, url.searchParams.get('station'), url.searchParams.get('profile') || 'balanced');

@@ -18,7 +18,7 @@ node verify-radio.mjs --live
 첫 명령은 합성 오디오와 실제 FFmpeg 검사이며, 두 번째는 공개 방송 10곳에서
 2초 분량을 변환합니다. 이는 보드의 실제 음성 출력·장시간 재생 검증과 구분됩니다.
 
-M3 보드(ESP32-P4)가 유튜브를 검색하고 재생할 수 있도록 이 PC가 중계합니다. 보드는 `https://tube.audreaming.com`에만 접속하고, 이 주소는 Cloudflare Tunnel로 PC의 `127.0.0.1:8790`에 연결됩니다. 공유기 포트포워딩이나 공인 IP는 필요 없습니다.
+M3 보드(ESP32-P4)가 유튜브를 검색하고 재생할 수 있도록 PC가 중계합니다. SD의 `.private/relays.json`에 최대 8개 HTTPS 주소·토큰 조합을 저장하고, 인증 및 도구 상태가 정상인 서버를 자동 선택합니다. 현재 PC의 `https://tube.audreaming.com`은 Cloudflare Tunnel로 `127.0.0.1:8790`에 연결됩니다. 공유기 포트포워딩이나 공인 IP는 필요 없습니다.
 
 ```
 M3 보드 --HTTPS--> tube.audreaming.com (Cloudflare) --Tunnel--> PC: server.mjs --> yt-dlp / ffmpeg --> YouTube
@@ -44,11 +44,15 @@ M3 보드 --HTTPS--> tube.audreaming.com (Cloudflare) --Tunnel--> PC: server.mjs
 
 ```powershell
 cd tube-relay
-node setup.mjs            # 토큰 생성, config.json 및 보드 헤더 m3_tube_private.h 작성
+node setup.mjs --tokens 3 # 토큰 3개 생성, config.json 및 SD 설치용 relays.json 작성
 .\setup-tunnel.ps1        # Cloudflare Tunnel "m3-tube"와 DNS tube.audreaming.com 생성
 ```
 
-두 단계는 2026-10-13에 이미 수행했습니다. 터널 ID는 `257b5195-6a52-4076-a4b9-5605616da61d`입니다. 그 다음 M3 펌웨어를 빌드·설치합니다. 토큰이 `m3_tube_private.h`로 펌웨어에 들어갑니다.
+현재 PC의 터널은 이미 설정되어 있습니다. 새 펌웨어는 토큰을 내장하지 않고 SD에서만 읽습니다. `setup.mjs`는 기본적으로 기존 토큰을 보존하고 추가 토큰 3개를 생성하며, 반복 실행 시 같은 토큰을 유지합니다. 명시적인 `--rotate`는 기존 토큰을 교체하므로 SD 설정도 함께 갱신해야 합니다.
+
+SD가 PC에 연결되어 있다면 실제 카드 경로로 `node setup.mjs --sd-root E:/`를 실행하면 `.private/relays.json`에 자동 저장합니다. 다른 서버의 기존 항목과 Wi-Fi·API 키는 보존합니다. 카드가 기기에 들어 있다면 먼저 로컬 `mini-WEB (M3-ESP-IDF_ver)/sd_private/.private/relays.json`이 생성됩니다. 저장소 루트에서 기존 `python -X utf8 tools/copy_m3_sd_settings.py E:/ --relays-only`를 실행하면 중계 설정만 자동 복사됩니다.
+
+서로 다른 PC는 각자의 HTTPS 주소로 `node setup.mjs https://별도-서버-주소 --sd-root E:/`를 실행합니다. 카드의 서버 목록이 병합되며, 각 서버는 자신의 `config.json`에 등록된 토큰만 승인합니다. 여러 토큰을 만든 것만으로 PC 서버 수가 늘어나지는 않습니다. 인증 실패·서버 중단·프로토콜 불일치 시 다음 후보를 검사합니다. 마지막 성공 서버를 다음 요청에서 먼저 검사합니다. 음악·영상 작업 ID와 다운로드는 시작한 서버의 주소·토큰 사본을 계속 사용하며, 진행 중 서버가 종료되면 작업을 다시 시작해야 합니다.
 
 ## 사용할 때마다: `M3TubeRelay.exe`
 
@@ -59,7 +63,7 @@ node setup.mjs            # 토큰 생성, config.json 및 보드 헤더 m3_tube
 - **로그**: 중계 서버와 터널의 최근 로그를 탭에서 확인합니다. 표시·새 로그 기록 시 현재 인증 토큰은 가립니다.
 - **설정 파일 / 폴더 열기 / 공개 상태**: 기존 설정 파일을 메모장으로 열거나 폴더·공개 상태 페이지를 엽니다. 설정 파일에는 인증 토큰이 있으므로 공유하지 마세요. 설정 변경은 중지 후 시작하거나 재시작해야 반영됩니다. 주소·토큰을 바꾸면 보드 설정도 맞춰야 합니다.
 - **Windows 시작 시 자동 실행**: 현재 사용자의 시작 프로그램 설정을 관리합니다. 기본값을 강제로 변경하지 않습니다.
-- 창의 **X**는 트레이로 숨깁니다. 트레이 아이콘을 더블클릭하면 관리 창이 다시 열립니다. 완전히 끝내려면 **종료**를 누릅니다.
+- 창의 **최소화(−)** 또는 **X**를 누르면 작업 표시줄의 창 버튼은 사라지고 알림 영역의 트레이 아이콘만 남습니다. 중계 서버와 터널은 계속 실행됩니다. 트레이 아이콘을 더블클릭하거나 우클릭 → **관리 창 열기**를 선택하면 창이 복원됩니다. 완전히 끝내려면 **종료**를 누릅니다.
 - 기존 `start.ps1`과 동시에 실행하지 마세요. 같은 실행기 중복 실행은 차단하고, 이미 실행 중인 로컬 중계 서버도 감지합니다.
 - 설정 파일이나 필수 도구가 없으면 관리 창에서 오류를 안내합니다. 토큰이나 DNS를 자동으로 새로 만들지 않습니다. 처음 설정은 위의 준비 절차를 사용하세요.
 
@@ -76,7 +80,7 @@ GUI 동작 검사는 `.\launcher\test-launcher.ps1`, 화면 배치 검사는 `M3
 검색 실패와 함께 공개 주소가 HTTP 530을 반환하면 터널 연결을 확인하세요.
 `cloudflared.log`에 `open C:\Users\khw\Desktop\Mini` 같은 오류가 나오면 공백이 있는 설정 경로가 잘린 것입니다. `start.ps1`은 `--config` 경로를 따옴표로 감싸 전달해야 합니다. 수정된 실행기로 다시 시작하면 되며, 이 수정에는 펌웨어 재설치가 필요하지 않습니다.
 
-토큰을 바꾸려면 `node setup.mjs --rotate`를 실행한 뒤 펌웨어를 다시 빌드합니다.
+토큰을 바꾸려면 `node setup.mjs --rotate`로 SD JSON을 갱신하고 중계서버를 재시작합니다. SD 설정을 설치한 뒤 M3를 재부팅하면 적용되며, 이후 토큰 교체에는 펌웨어 재빌드가 필요 없습니다.
 
 ## 확인 결과와 한계
 

@@ -9,6 +9,20 @@ function body(name,source=tube){
  for(;depth;end++){if(source[end]==='{')depth++;if(source[end]==='}')depth--;}
  return source.slice(start,end-1);
 }
+// IDF may fail perform() while still exposing the relay's HTTP 401. Keep that
+// status for the token-rejected UI instead of reporting a connection failure.
+const getContext={ESP_OK:0,TAG:'fixture',result:0,status:200,overflow:false,sink:{overflow:false},client:{},data:[],capacity:16,url:'fixture',
+ esp_http_client_set_url:()=>{},esp_http_client_perform:()=>{getContext.sink.overflow=getContext.overflow;return getContext.result;},
+ esp_http_client_get_status_code:()=>getContext.status,esp_err_to_name:()=> 'fixture',ESP_LOGW:()=>{}};
+vm.createContext(getContext);
+vm.runInContext('function get(){'+body('http_get').replace(/esp_err_t result =/,'const result =').replace(/int status =/,'const status =').replaceAll('sink->','sink.')+'}',getContext);
+assert.equal(getContext.get(),200,'successful response');
+getContext.result=-1;getContext.status=401;
+assert.equal(getContext.get(),401,'preserve rejected token despite IDF perform error');
+getContext.status=200;assert.equal(getContext.get(),-1,'partial response remains a transport error');
+getContext.status=0;assert.equal(getContext.get(),-1,'connection failure remains an error');
+getContext.result=0;getContext.status=200;getContext.overflow=true;
+assert.equal(getContext.get(),-2,'overflow remains an error');
 const define=name=>Number(new RegExp('#define '+name+' (\\d+)').exec(header)[1]);
 const enumValue=name=>Number(new RegExp('\\b'+name+' = ([^,]+?)[,\\n]').exec(tube)[1].replace(/\s*\*\s*/g,'*').split('*').reduce((a,b)=>a*Number(b),1));
 
@@ -74,8 +88,8 @@ for(const prefix of ['LOW','STANDARD']){
 }
 assert(enumValue('RING_BYTES')>=4*enumValue('VIDEO_REBUFFER_BYTES'));
 assert(server.includes("'/api/thumb'")&&server.includes("'rgb565le'")&&define('M3_TUBE_THUMB_W')===160&&define('M3_TUBE_THUMB_H')===90);
-assert(tube.includes('esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN)'));
-assert(server.includes("req.headers['x-m3-token']")&&server.includes('crypto.timingSafeEqual'));
+assert(tube.includes('esp_http_client_set_header(http, "x-m3-token", relay.token)'));
+assert(server.includes("req.headers['x-m3-token']")&&fs.readFileSync(path.join(root,'..','tube-relay','relay_auth.mjs'),'utf8').includes('crypto.timingSafeEqual'));
 assert(server.includes("mediaServer.listen(config.mediaPort, '127.0.0.1')"),'range proxy stays on loopback');
 // Ownership: playback runs on the audio worker, nothing in the service calls LVGL, the token stays private.
 assert(audio.includes('m3_tube_run(request.name, request.speed, request.aac, &output)'));

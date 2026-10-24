@@ -6,12 +6,12 @@ let worker=body('download_worker');
 const split=worker.indexOf('\ndone:');assert(split>0);
 worker='try {\n'+worker.slice(0,split)+'\n} catch (e) { if (e !== FINISH) throw e; }\n'+worker.slice(split+6);
 // C locals belong to the function, so hoist them outside the simulated goto block.
-worker=worker.replace(/\b(?:const char \*|FILE \*|esp_http_client_handle_t |uint8_t \*|bool |uint32_t |int64_t |int |unsigned |cJSON \*|const cJSON \*)(\w+)/g,'var $1')
+worker=worker.replace('m3_relay_profile_t relay = {0};','var relay={};').replaceAll('&relay','relay').replace(/\b(?:const char \*|FILE \*|esp_http_client_handle_t |uint8_t \*|bool |uint32_t |int64_t |int |unsigned |cJSON \*|const cJSON \*)(\w+)/g,'var $1')
  .replace('(void)unused;','')
  .replace('char url[320], job[33] = "", filename[64], final[160], partial[168];','var url="", job="", filename="", final="", partial="";')
  .replace('sink_t sink = {0};','var sink = {};').replace('struct stat existing;','var existing={};')
  .replace('uint64_t capacity, free_bytes;','var capacity=0, free_bytes=0;')
- .replace('esp_http_client_config_t config =','var config =').replace(/\.(url|timeout_ms|buffer_size|crt_bundle_attach|event_handler|user_data) =/g,'$1:')
+ .replace('esp_http_client_config_t config =','var config =').replace(/\.(url|timeout_ms|buffer_size|crt_bundle_attach|event_handler|user_data|disable_auto_redirect) =/g,'$1:')
  .replaceAll('M3_TUBE_URL "','M3_TUBE_URL + "').replaceAll('SD_MEDIA_ROOT M3_TUBE_DOWNLOAD_FOLDER','SD_MEDIA_ROOT + M3_TUBE_DOWNLOAD_FOLDER')
  .replaceAll('M3_TUBE_DOWNLOAD_FOLDER "','M3_TUBE_DOWNLOAD_FOLDER + "')
  .replace(/sizeof\([^)]*\)/g,'1024').replace(/\((?:char \*|uint32_t|uint64_t|size_t|unsigned)\)/g,'')
@@ -31,7 +31,7 @@ function environment(fail={}){
   lease_ok:!fail.lease,fat_result:fail.fat?-1:0,freeSpace:fail.space?1:100000000,now:1,deletedJobs:0,unlocked:0,leasedEnd:0,changed:0,
   closed:0,renamed:0,freed:0,taskDeleted:0,cancel:false,reads:0,polls:0,writes:0,
   format:(fmt,...args)=>{let i=0;return fmt.replace(/%(?:\.(\d+))?([sud])/g,(_m,n,t)=>{const v=args[i++];return t==='s'?(n?String(v).slice(0,Number(n)):String(v)):String(v);});},
-  quality_name:()=> 'low',sd_media_ready:()=>!fail.noSd,network_get_mode:()=>fail.wifi?0:1,
+  m3_relay_select:r=>{Object.assign(r,{url:'https://fixture',token:'fixture-only'});return !fail.noRelay;},quality_name:()=> 'low',sd_media_ready:()=>!fail.noSd,network_get_mode:()=>fail.wifi?0:1,
   heap_caps_malloc:()=>fail.memory?null:Buffer.alloc(8192),free:()=>c.freed++,
   esp_timer_get_time:()=>c.now,pdMS_TO_TICKS:x=>x,vTaskDelay:()=>{c.now+=100000;if(fail.cancelPrep)c.cancel=true;},
   download_stopped:()=>c.cancel,esp_crt_bundle_attach:()=>{},sink_event:()=>{},

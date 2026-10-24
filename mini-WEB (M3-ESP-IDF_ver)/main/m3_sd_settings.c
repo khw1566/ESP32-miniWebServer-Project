@@ -1,4 +1,5 @@
 #include "m3_sd_settings.h"
+#include "m3_relay.h"
 #include "network_manager.h"
 #include "m3_memory.h"
 #include "sd_media.h"
@@ -18,6 +19,7 @@
 #define PRIVATE_ROOT SD_MEDIA_ROOT "/.private"
 #define KEYS_PATH PRIVATE_ROOT "/api_keys.json"
 #define WIFI_PATH PRIVATE_ROOT "/wifi.json"
+#define RELAYS_PATH PRIVATE_ROOT "/relays.json"
 enum { JSON_LIMIT = 65536, KEY_LIMIT = 256 };
 /* Published once. Readers keep immutable pointers for the entire HTTP request. */
 static char gemini[KEY_LIMIT], tts[KEY_LIMIT], openai[KEY_LIMIT];
@@ -407,7 +409,16 @@ void m3_sd_settings_init(void) {
             ESP_LOGI("SD_CONFIG","API JSON loaded: gemini=%d google_tts=%d openai=%d azure=%d",
                 gemini[0]!=0,tts[0]!=0,openai[0]!=0,azure[0]!=0);
         } else ESP_LOGW("SD_CONFIG","API JSON missing or invalid; no embedded key fallback");
-        release_json(json);sd_media_admin_unlock();
+        release_json(json);
+        json = read_json(RELAYS_PATH, &absent);
+        if (!m3_relay_load(json)) {
+            release_json(json);
+            json = read_json(RELAYS_PATH ".bak", &absent);
+            if (m3_relay_load(json)) ESP_LOGW("SD_CONFIG", "Using relay settings backup");
+        }
+        release_json(json);
+        ESP_LOGI("SD_CONFIG", "Relay JSON loaded: %u profiles", m3_relay_count());
+        sd_media_admin_unlock();
     } else ESP_LOGW("SD_CONFIG","API JSON load busy; boot key snapshot unavailable");
     atomic_store(&keys_loaded,true);
     network_settings_t settings;

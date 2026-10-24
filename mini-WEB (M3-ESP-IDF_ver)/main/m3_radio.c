@@ -1,7 +1,7 @@
 #include "m3_cores.h"
 #include "m3_wifi_performance.h"
 #include "m3_audio_apps.h"
-#include "m3_tube_config.h"
+#include "m3_relay.h"
 #include "network_manager.h"
 #include "https_memory.h"
 #include "esp_http_client.h"
@@ -230,12 +230,22 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
     radio_rx_t rx = {.stop = ATOMIC_VAR_INIT(false), .done = ATOMIC_VAR_INIT(false), .received = ATOMIC_VAR_INIT(0)};
     radio_decode_t dec = {.rx = &rx, .stop = ATOMIC_VAR_INIT(false), .done = ATOMIC_VAR_INIT(false), .format_ready = ATOMIC_VAR_INIT(false)};
     bool receiver_started = false, decoder_started = false;
+    m3_relay_profile_t relay_profile = {0};
+    const char *relay_suffix = NULL;
+    char relay_url[513];
+    bool relay = m3_relay_radio_route(url, &relay_suffix);
     out->message("Radio connecting... / Stop cancels playback", true, 0);
     if (!strncmp(url, "https://", 8)) {
         leased = https_memory_exclusive_begin(5000);
         if (!leased) { error = "TLS memory busy; stop AI request and retry"; goto done; }
     }
     if (out->cancelled()) goto done;
+    if (relay) {
+        if (!m3_relay_select(&relay_profile)) goto done;
+        int size = snprintf(relay_url, sizeof(relay_url), "%s%s", relay_profile.url, relay_suffix);
+        if (size < 0 || (size_t)size >= sizeof(relay_url)) goto done;
+        url = relay_url;
+    }
     ps_changed = m3_wifi_performance_acquire();
     if (!ps_changed) ESP_LOGW(TAG, "Wi-Fi power-save disable unavailable");
     rx.storage = heap_caps_malloc(RADIO_BUFFER_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -265,8 +275,7 @@ void m3_radio_run(const char *url, bool aac, const m3_audio_output_t *out) {
     };
     http = esp_http_client_init(&config);
     if (!http) goto done;
-    bool relay = !strncmp(url, M3_TUBE_URL "/api/radio?", sizeof(M3_TUBE_URL "/api/radio?") - 1);
-    if (relay) esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN);
+    if (relay) esp_http_client_set_header(http, "x-m3-token", relay_profile.token);
     esp_http_client_set_header(http, "Icy-MetaData", "0");
     esp_http_client_set_header(http, "Accept-Encoding", "identity");
     for (unsigned redirect = 0;; ++redirect) {
