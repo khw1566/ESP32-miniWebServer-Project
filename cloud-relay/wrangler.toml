@@ -34,6 +34,10 @@ custom_domain = true
 pattern = "m3-80f1b2d68499.audreaming.com"
 custom_domain = true
 
+[[routes]]
+pattern = "c3-90da728a2b18.audreaming.com"
+custom_domain = true
+
 [[durable_objects.bindings]]
 name = "DEVICES"
 class_name = "RelayDevice"
