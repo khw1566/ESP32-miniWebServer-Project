@@ -1,0 +1,8 @@
+﻿device,serial,mdns_url,public_url,public_http_status,checked_at_kst,note
+C3,90da728a2b18,http://c3-v1-2-90da728a2b18.local/,https://c3-90da728a2b18.audreaming.com/,503,2026-10-26 22:27,offline response; mDNS not verified
+S3,a4cb8ff82bb8,http://s3-v1-2-a4cb8ff82bb8.local/,https://s3-a4cb8ff82bb8.audreaming.com/,200,2026-10-26 22:51,"cloud_status=online; Chrome confirmed; original home preserved; mDNS initially 200, later timeout"
+S3 Zero,90da72475334,http://s3-v1-2-90da72475334.local/,https://s3-90da72475334.audreaming.com/,503,2026-10-26 22:27,offline response; mDNS not verified
+M1 (1),b0cbd899de80,http://m1-v1-2-b0cbd899de80.local/,https://m1-b0cbd899de80.audreaming.com/,503,2026-10-26 22:27,offline response; mDNS not verified
+M1 (2),20500d34b5f0,http://m1-v1-2-20500d34b5f0.local/,https://m1-20500d34b5f0.audreaming.com/,503,2026-10-26 22:27,offline response; mDNS not verified
+M3,80f1b2d68499,http://m3-v1-2-80f1b2d68499.local/,https://m3-80f1b2d68499.audreaming.com/,503,2026-10-26 22:27,offline response; mDNS not verified
+C3 spare,e83dc19c243c,http://c3-v1-2-e83dc19c243c.local/,https://c3-e83dc19c243c.audreaming.com/,200,2026-10-26 23:09,cloud_status=online; mDNS 200; USB serial input verified; original home preserved

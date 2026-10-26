@@ -1,5 +1,8 @@
 **/build/
 **/build.*/
+/mini-WEB (S3-ESP-IDF_ver)/build-s3-domain/
+/mini-WEB (C3-ESP-IDF_ver)/sdkconfig.spare
+/mini-WEB (C3-ESP-IDF_ver)/sdkconfig.spare.old
 **/managed_components/
 **/.pio/
 **/.cache/

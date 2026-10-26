@@ -21,6 +21,7 @@ async function validToken(request, expected) {
 const response = (status, text = '') => new Response(status === 204 ? null : text, {
   status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }
 });
+const relayHost = env => env.RELAY_HOST || `relay.${env.PUBLIC_DOMAIN}`;
 async function limitedBody(request, limit) {
   if (!request.body) return new Uint8Array();
   const reader = request.body.getReader(); const chunks = []; let length = 0;
@@ -42,7 +43,7 @@ export default {
     let registry;
     try { registry = JSON.parse(env.DEVICE_REGISTRY || '{}'); } catch { return response(503); }
     let id;
-    if (url.hostname === `relay.${domain}`) {
+    if (url.hostname === relayHost(env)) {
       const match = /^\/v[12]\/devices\/([a-z0-9-]{1,32})\/(poll|result\/[a-f0-9-]+\/(start|chunk|end|abort|ack|stream))$/.exec(url.pathname);
       if (!match || url.search) return response(404);
       id = match[1];
@@ -92,7 +93,7 @@ export class RelayDevice {
   }
   async handle(request) {
     const url = new URL(request.url);
-    if (url.hostname === `relay.${this.env.PUBLIC_DOMAIN}`) {
+    if (url.hostname === relayHost(this.env)) {
       const match = /^\/v([12])\/devices\/([a-z0-9-]+)\/(poll|result\/([a-f0-9-]+)\/(start|chunk|end|abort|ack|stream))$/.exec(url.pathname);
       if (!match) return response(404);
       if ((match[1] === '2') !== (match[5] === 'stream')) return response(404);

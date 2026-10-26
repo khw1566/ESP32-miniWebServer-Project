@@ -1,0 +1,27 @@
+# Isolate this spare board from existing C3/M1/M3/S3 registrations.
+name = "mini-web-c3-spare"
+account_id = "60bbc5ec2b671498c5f12537cd46e65a"
+main = "worker.mjs"
+compatibility_date = "2026-10-06"
+workers_dev = false
+
+[vars]
+PUBLIC_DOMAIN = "audreaming.com"
+RELAY_HOST = "relay-c3-spare.audreaming.com"
+DEMO_DEVICE = "c3-e83dc19c243c"
+
+[[routes]]
+pattern = "relay-c3-spare.audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "c3-e83dc19c243c.audreaming.com"
+custom_domain = true
+
+[[durable_objects.bindings]]
+name = "DEVICES"
+class_name = "RelayDevice"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDevice"]
