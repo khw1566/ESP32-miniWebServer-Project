@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
+#include "esp_wifi.h"
 
 #include "network_manager.h"
 #include "dns_server.h"
@@ -122,6 +123,26 @@ static void serial_wifi_task(void *arg) {
                 trimmed[--tlen] = '\0';
             }
             if (tlen == 0) {
+                printf("> ");
+                fflush(stdout);
+                continue;
+            }
+
+            if (strcmp(trimmed, "/tx-low") == 0) {
+                esp_err_t result = esp_wifi_set_max_tx_power(60);
+                printf("[RADIO] TX limit 15 dBm: %s\n> ", esp_err_to_name(result));
+                fflush(stdout);
+                continue;
+            }
+
+            if (strcmp(trimmed, "/scan") == 0) {
+                wifi_scan_item_t items[20];
+                int count = network_scan_wifi(items, 20);
+                printf("[SCAN] count=%d\n", count);
+                for (int i = 0; i < count; ++i) {
+                    printf("[SCAN] ssid=%s rssi=%d auth=%d\n", items[i].ssid,
+                           (int)items[i].rssi, (int)items[i].authmode);
+                }
                 printf("> ");
                 fflush(stdout);
                 continue;

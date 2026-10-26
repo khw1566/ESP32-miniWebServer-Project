@@ -13,6 +13,6 @@ extern const char HTML_AI_STUDIO[];
 // 4. 관리자 대시보드 HTML
 extern const char HTML_ADMIN_DASHBOARD[];
 
-// 5. 제품 기본 페이지: 첫 부팅 때 /spiffs/index.html로 복사 (web_page_factory.c)
+// 5. 제품 기본 페이지: 내장 제품 페이지 데이터 (파일 저장소는 SD 전용) (web_page_factory.c)
 extern const char FACTORY_INDEX_HTML[];
 extern const size_t FACTORY_INDEX_HTML_LEN;

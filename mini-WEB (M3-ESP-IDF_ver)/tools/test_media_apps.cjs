@@ -66,7 +66,8 @@ for(let chunk=1;chunk<=wire.length;chunk++){
 }
 const manifest=JSON.parse(read('tts_data/manifest.json'));
 for(const [name,info] of Object.entries(manifest)){
- const bytes=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data',name));assert.equal(bytes.length,info.size);
+ let bytes=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data',name));
+ if(name.startsWith('lang/'))bytes=Buffer.from(bytes.toString('latin1').replaceAll('\r\n','\n'),'latin1'); // CRLF checkout, as the generatorassert.equal(bytes.length,info.size);
  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),info.sha256);
 }
 const phondata=fs.readFileSync(path.join(root,'tts_data/espeak-ng-data/phondata'));
@@ -74,7 +75,7 @@ assert.equal(phondata.readUInt32LE(0),0x014801);assert.equal(phondata.readUInt32
 assert(read('tts_data/espeak-ng-data/lang/ko').includes('language ko'));
 const tts=read('main/m3_tts.c');assert(tts.includes('espeak_SetVoiceByName("ko")'));assert(tts.includes('ENOUTPUT_MODE_SYNCHRONOUS'));
 assert(!/esp_http|network_|fopen\(/.test(tts),'TTS must synthesize without network/SD');
-const validator=/bool m3_tts_text_valid\([^)]*\) \{([\s\S]*?)\n\}/.exec(tts);assert(validator);
+const validator=/bool m3_speech_text_valid\([^)]*\) \{([\s\S]*?)\n\}/.exec(tts);assert(validator);
 source=validator[1].replace('!*text','!text[0]')
  .replace('const unsigned char *p = (const unsigned char *)text;','const bytes = text; let p = 0;')
  .replace(/\*p\+\+/g,'bytes[p++]').replace(/\*p/g,'bytes[p]')

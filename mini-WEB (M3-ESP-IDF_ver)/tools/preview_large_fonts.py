@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 from PIL import Image, ImageDraw, ImageFont
+from font_pack import read_bitmap
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,7 +16,7 @@ def main():
     korean = (ROOT / 'main/m3_font_korean.c').read_text(encoding='utf-8')
     cjk = (ROOT / 'main/m3_font_cjk.c').read_text(encoding='utf-8')
     title = (ROOT / 'main/m3_font_title.c').read_text(encoding='utf-8')
-    kb, cb, tb = bytes(array(korean, 'bitmap')), bytes(array(cjk, 'bitmap')), bytes(array(title, 'bitmap'))
+    kb, cb, tb = read_bitmap(korean), read_bitmap(cjk), bytes(array(title, 'bitmap'))
     points = array(cjk, 'codepoints') + array(cjk, 'upper_codepoints')
     offsets = array(cjk, 'offsets')
     fallback = {cp: cb[offsets[i]*16:offsets[i+1]*16] for i, cp in enumerate(points)}

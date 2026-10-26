@@ -205,10 +205,10 @@ void app_main(void) {
     esp_reset_reason_t reset_reason = esp_reset_reason();
     ESP_LOGW(TAG, "[BOOT] wifi-reset-diag-2, reset=%s (%d)",
              reset_reason_name(reset_reason), (int)reset_reason);
-    web_server_storage_init();
     ESP_LOGI(TAG, "PSRAM detected: %u bytes", (unsigned)esp_psram_get_size());
     /* A missing or unsupported card must not prevent Wi-Fi/web setup. */
-    if (sd_media_init() != ESP_OK) ESP_LOGW(TAG, "SD unavailable; flash storage remains available");
+    if (sd_media_init() != ESP_OK) ESP_LOGW(TAG, "SD unavailable; file storage disabled, setup/admin remain available");
+    else web_server_storage_init();
 
     // 네트워크 드라이버 초기화
     ESP_ERROR_CHECK(network_init());

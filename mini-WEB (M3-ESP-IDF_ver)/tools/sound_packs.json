@@ -1,0 +1,56 @@
+{
+  "comment": "Boot melody and effect sound sets synthesized on the device. Each note is [Hz (0 = rest), ms, wave, gain 1-100]. Edit with the m3-sound-design skill, then run tools/generate_sound_packs.py.",
+  "rate": 24000,
+  "packs": [
+    {
+      "id": "classic",
+      "name": {"en": "Classic", "ko": "기본", "ja": "クラシック"},
+      "boot": [[523, 140, "sine", 100], [659, 140, "sine", 100], [784, 180, "sine", 100], [1047, 240, "sine", 100], [988, 120, "sine", 100], [1047, 400, "sine", 100]],
+      "tap": [[880, 35, "sine", 100]],
+      "confirm": [[659, 90, "sine", 100], [988, 150, "sine", 100]],
+      "error": [[330, 110, "sine", 100], [220, 180, "sine", 100]],
+      "setup": [[440, 110, "sine", 100], [660, 110, "sine", 100], [440, 160, "sine", 100]],
+      "app": {"base": 600, "step": 35, "ms": 90, "wave": "sine", "gain": 100}
+    },
+    {
+      "id": "crystal",
+      "name": {"en": "Crystal", "ko": "크리스탈", "ja": "クリスタル"},
+      "boot": [[1319, 120, "bell", 100], [1568, 120, "bell", 100], [1976, 120, "bell", 100], [2637, 180, "bell", 100], [0, 40, "sine", 1], [1976, 130, "bell", 100], [2637, 480, "bell", 100]],
+      "tap": [[2093, 30, "bell", 75]],
+      "confirm": [[1568, 80, "bell", 100], [2093, 200, "bell", 100]],
+      "error": [[784, 120, "bell", 100], [622, 240, "bell", 100]],
+      "setup": [[1319, 100, "bell", 100], [1760, 100, "bell", 100], [1319, 180, "bell", 100]],
+      "app": {"base": 1200, "step": 50, "ms": 90, "wave": "bell", "gain": 95}
+    },
+    {
+      "id": "retro",
+      "name": {"en": "Retro", "ko": "레트로", "ja": "レトロ"},
+      "boot": [[523, 80, "square", 60], [659, 80, "square", 60], [784, 80, "square", 60], [1047, 80, "square", 60], [0, 60, "sine", 1], [784, 80, "square", 60], [1047, 320, "square", 60]],
+      "tap": [[1568, 25, "square", 45]],
+      "confirm": [[988, 60, "square", 60], [1319, 160, "square", 60]],
+      "error": [[494, 90, "square", 60], [392, 90, "square", 60], [330, 220, "square", 60]],
+      "setup": [[523, 80, "square", 60], [784, 80, "square", 60], [523, 120, "square", 60]],
+      "app": {"base": 700, "step": 40, "ms": 60, "wave": "square", "gain": 55}
+    },
+    {
+      "id": "soft",
+      "name": {"en": "Soft", "ko": "부드럽게", "ja": "やわらか"},
+      "boot": [[392, 220, "triangle", 85], [494, 220, "triangle", 85], [587, 260, "triangle", 85], [784, 600, "triangle", 85]],
+      "tap": [[660, 30, "triangle", 55]],
+      "confirm": [[587, 100, "triangle", 85], [784, 200, "triangle", 85]],
+      "error": [[440, 140, "triangle", 90], [349, 260, "triangle", 90]],
+      "setup": [[494, 120, "triangle", 85], [659, 120, "triangle", 85], [494, 180, "triangle", 85]],
+      "app": {"base": 500, "step": 30, "ms": 100, "wave": "triangle", "gain": 80}
+    },
+    {
+      "id": "minimal",
+      "name": {"en": "Minimal", "ko": "미니멀", "ja": "ミニマル"},
+      "boot": [[1047, 120, "sine", 80], [0, 60, "sine", 1], [1568, 120, "sine", 80], [2093, 360, "sine", 75]],
+      "tap": [[1200, 18, "sine", 50]],
+      "confirm": [[1319, 70, "sine", 75]],
+      "error": [[523, 70, "sine", 85], [0, 40, "sine", 1], [523, 120, "sine", 85]],
+      "setup": [[880, 80, "sine", 75], [0, 30, "sine", 1], [1175, 90, "sine", 75]],
+      "app": {"base": 900, "step": 25, "ms": 50, "wave": "sine", "gain": 70}
+    }
+  ]
+}

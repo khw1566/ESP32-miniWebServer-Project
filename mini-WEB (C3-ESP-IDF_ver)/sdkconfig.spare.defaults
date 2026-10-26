@@ -1,0 +1,6 @@
+# Spare C3 e83dc19c243c uses the native USB connector for serial Wi-Fi setup.
+CONFIG_MINI_WEB_RELAY_URL="https://relay-c3-spare.audreaming.com"
+CONFIG_MINI_WEB_PUBLIC_DOMAIN="audreaming.com"
+CONFIG_MINI_WEB_PUBLIC_HOST=""
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

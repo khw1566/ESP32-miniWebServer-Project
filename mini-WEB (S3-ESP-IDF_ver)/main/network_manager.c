@@ -94,6 +94,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "[AP] client IPv4 assigned, heap=%lu",
                  (unsigned long)esp_get_free_heap_size());
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+#ifdef MINI_WEB_WIFI_TX_POWER_QDBM
+        esp_err_t tx_err = esp_wifi_set_max_tx_power(MINI_WEB_WIFI_TX_POWER_QDBM);
+        if (tx_err == ESP_OK) ESP_LOGI(TAG, "[RADIO] STA TX limit: %d quarter-dBm", MINI_WEB_WIFI_TX_POWER_QDBM);
+        else ESP_LOGW(TAG, "[RADIO] Cannot set TX limit: %s", esp_err_to_name(tx_err));
+#endif
         xEventGroupSetBits(s_wifi_event_group, WIFI_STA_STARTED_BIT);
         // s_sta_connect_requested 플래그로 제어: STA 연결 요청이 있을 때만 connect 호출
         // SoftAP 모드에서 내부적으로 STA 인터페이스가 시작되어도 connect가 호출되지 않도록 차단

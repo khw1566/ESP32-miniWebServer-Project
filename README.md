@@ -34,6 +34,7 @@ ESP32 보드에 웹 콘텐츠를 담고, 휴대전화·PC 브라우저에서 관
 | [S3-N16R8-SD](<mini-WEB (S3-N16R8-SD-ESP-IDF_ver)/README.md>) | 16MB Flash · 8MB PSRAM · SDMMC | 일반 S3와 별도 펌웨어입니다. SD·클라우드 기능을 포함하며 카메라는 사용하지 않습니다. |
 | [M1](<mini-WEB (M1-ESP-IDF_ver)/README.md>) | ESP32-2432S028 계열 · 2.8인치 240×320 터치 | LVGL 대시보드, 온보드 키보드, Wi-Fi 설정, QR 접속과 저장소 탐색. |
 | [M3](<mini-WEB (M3-ESP-IDF_ver)/README.md>) | GUITION JC4880P443C_I_W · ESP32-P4 + C6 · 4.3인치 480×800 터치 | 16MB Flash·32MB PSRAM, LVGL 9 앱 UI, ES8311 오디오·SD·라디오·갤러리·AI/음성 기능. 호환 C6 펌웨어가 필요합니다. |
+| [M4](<mini-WEB (M4-ESP-IDF_ver)/README.md>) | GUITION JC1060P470C · JD9165 V2 · 세로 600×1024 | M3와 독립된 소스·설정·빌드 경로의 이식 작업입니다. 소스·호스트 검사 단계이며 전체 빌드·실기 검증은 별도입니다. |
 | [P4](<mini-WEB (P4-ESP-IDF_ver)/README.md>) | Waveshare ESP32-P4-Module-DEV-KIT + C6 | ESP-Hosted 무선 웹서버·SD 파일 관리. M3와 보드 배선·디스플레이 구성이 다릅니다. |
 
 M3의 최근 기능 설명은 [라디오](<mini-WEB (M3-ESP-IDF_ver)/docs/RADIO.md>), [홈 위젯](<mini-WEB (M3-ESP-IDF_ver)/docs/HOME_WIDGETS.md>), [AI Agent](<mini-WEB (M3-ESP-IDF_ver)/docs/GEMINI_AGENT.md>), [음성 입력](<mini-WEB (M3-ESP-IDF_ver)/docs/VOICE_INPUT.md>)에서 확인할 수 있습니다. 외부 AI·STT·라디오 서비스에는 인터넷과 해당 서비스 설정이 필요합니다.
@@ -87,6 +88,8 @@ M3의 최근 기능 설명은 [라디오](<mini-WEB (M3-ESP-IDF_ver)/docs/RADIO.
 최근 P4 소개 페이지는 [web_examples/13_p4_webserver/index.html](web_examples/13_p4_webserver/index.html)에 있습니다. 폴더 정리 시 파일을 삭제하지 않았으며 이동 기록은 `results/folder_cleanup/2026-10-10-moves.json`에 보관했습니다.
 
 ## 웹 예제
+
+PC에서 이미지를 P4용 JPG/BMP 또는 웹용 WebP로 줄이려면 `scripts/ESP32_Image_Converter.bat`을 실행하세요. 파일·폴더 일괄 변환과 크기·품질 설정을 지원합니다. [이미지 변환기 사용법](tools/ESP32_IMAGE_CONVERTER.md)을 참고하세요.
 
 `web_examples`에 보드에서 제공할 HTML 및 미디어 예제가 있습니다. `scripts/Serve_Bianca_ngrok.bat`을 실행하면 Bianca/Fernando 보드용 웹 파일을 로컬 서버와 기존 ngrok으로 제공합니다. Python과 ngrok 설치 및 ngrok 계정 인증이 필요합니다. 세부 사용법은 `web_examples/09_bianca_fernando/README.md`를 참고하세요.
 

@@ -297,11 +297,13 @@ static esp_err_t ai_logout_post_handler(httpd_req_t *req) {
 }
 static esp_err_t ai_key_get_handler(httpd_req_t *req) {
     if (!ai_require_auth(req)) return ESP_OK;
-    ai_security_record_t record = {0};
-    if (ai_record_read(&record) != ESP_OK) return httpd_resp_send_500(req);
-    bool configured = record.key_len != 0; ai_wipe(&record, sizeof(record));
-    httpd_resp_set_type(req, "application/json"); httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_sendstr(req, configured ? "{\"ok\":true,\"configured\":true}" : "{\"ok\":true,\"configured\":false}");
+    if (!sd_media_ready()) return ai_error(req,"503 Service Unavailable","SD카드를 인식하지 못해 API JSON을 읽을 수 없습니다.");
+    char key[256];
+    bool configured = m3_sd_key_copy("gemini",key);ai_wipe(key,sizeof(key));
+    httpd_resp_set_type(req,"application/json");httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,configured ?
+        "{\"ok\":true,\"configured\":true,\"storage\":\"sd_json\"}" :
+        "{\"ok\":true,\"configured\":false,\"storage\":\"sd_json\"}");
 }
 static esp_err_t ai_key_post_handler(httpd_req_t *req) {
     ai_session_t *session = ai_session_for(req);
@@ -329,28 +331,13 @@ static esp_err_t ai_key_post_handler(httpd_req_t *req) {
     bool valid = deleting || (cJSON_IsString(value) && strlen(value->valuestring) >= 16 && strlen(value->valuestring) < 256);
     if (valid && !deleting) for (const char *p = value->valuestring; *p; ++p)
         if (!((*p>='A' && *p<='Z') || (*p>='a' && *p<='z') || (*p>='0' && *p<='9') || strchr("-_.~+/=",*p))) valid = false;
-    ai_security_record_t record = {0};
-    const char *failure = "키 형식 오류: 키 원문 16~255자를 입력하세요. 키 내부 공백이나 URL·명령문은 지원하지 않습니다.";
-    esp_err_t storage_error = ESP_OK;
-    bool ok = valid;
-    if (ok) {
-        storage_error = ai_record_read(&record);
-        ok = storage_error == ESP_OK;
-        if (!ok) failure = "키 저장 실패: 보드의 인증 저장정보를 읽지 못했습니다. 다시 로그인하고 재시도하세요.";
+    esp_err_t storage_error = valid ? m3_sd_gemini_save(deleting ? "" : value->valuestring) : ESP_ERR_INVALID_ARG;
+    if (cJSON_IsString(value)) ai_wipe(value->valuestring,strlen(value->valuestring));
+    cJSON_Delete(body);
+    if (!valid) return ai_error(req,"400 Bad Request","키 형식 오류: 공백 없는 키 원문 16~255자를 입력하세요.");
+    if (storage_error!=ESP_OK) {
+        ESP_LOGW("SD_CONFIG","Web AI key JSON save failed: %s",esp_err_to_name(storage_error));
+        return ai_error(req,"503 Service Unavailable","SD JSON 저장 실패: SD카드 연결·쓰기 권한·설정 파일을 확인하세요. 기존 키는 변경되지 않았습니다.");
     }
-    if (ok && deleting) { record.key_len = 0; ai_wipe(record.ciphertext, sizeof(record.ciphertext)); ai_wipe(record.iv, sizeof(record.iv)); ai_wipe(record.tag, sizeof(record.tag)); }
-    else if (ok) {
-        ok = ai_key_encrypt(&record, session->wrapping_key, value->valuestring);
-        if (!ok) failure = "키 저장 실패: 보드의 AES-GCM 암호화에 실패했습니다.";
-    }
-    if (ok) {
-        storage_error = ai_record_write(&record);
-        ok = storage_error == ESP_OK;
-        if (!ok) failure = "키 저장 실패: NVS 저장공간에 기록하지 못했습니다. 보드 로그를 확인하세요.";
-    }
-    if (!ok && storage_error != ESP_OK) ESP_LOGW(TAG, "AI key storage failed: %s", esp_err_to_name(storage_error));
-    if (cJSON_IsString(value)) ai_wipe(value->valuestring, strlen(value->valuestring));
-    cJSON_Delete(body); ai_wipe(&record, sizeof(record));
-    if (!ok) return ai_error(req, valid ? "500 Internal Server Error" : "400 Bad Request", failure);
     return ai_key_get_handler(req);
 }

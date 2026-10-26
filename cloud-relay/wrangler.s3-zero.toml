@@ -1,0 +1,27 @@
+# Independent registration: preserve the existing M1/M3/C3 relay and secret.
+name = "mini-web-s3-zero"
+account_id = "60bbc5ec2b671498c5f12537cd46e65a"
+main = "worker.mjs"
+compatibility_date = "2026-10-06"
+workers_dev = false
+
+[vars]
+PUBLIC_DOMAIN = "audreaming.com"
+RELAY_HOST = "relay-s3-zero.audreaming.com"
+DEMO_DEVICE = "s3-90da72475334"
+
+[[routes]]
+pattern = "relay-s3-zero.audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "s3-90da72475334.audreaming.com"
+custom_domain = true
+
+[[durable_objects.bindings]]
+name = "DEVICES"
+class_name = "RelayDevice"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDevice"]

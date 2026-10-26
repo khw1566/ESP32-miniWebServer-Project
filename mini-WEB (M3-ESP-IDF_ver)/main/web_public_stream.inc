@@ -19,9 +19,9 @@ static const char PUBLIC_NOT_FOUND[]="<!doctype html><html lang='ko'><head><meta
 static void public_stream_message(web_public_stream_t *s,int status,const char *message) {
     if(s->file) fclose(s->file);
     s->file=NULL;s->body=message;s->length=strlen(message);s->offset=0;
-    s->status=status;s->mime="text/plain; charset=utf-8";
+    s->status=status;s->mime="text/plain; charset=utf-8";s->memory_file=false;
 }
-bool web_server_public_open(const char *path,const char *range,web_public_stream_t *s) {
+bool web_server_public_open_limit(const char *path,const char *range,web_public_stream_t *s,size_t limit) {
     memset(s,0,sizeof(*s));s->status=200;
     if(!cloud_relay_public_path(path)) return false;
     if(!web_server_is_running() || network_get_mode()!=NET_MODE_STA_CONNECTED) {
@@ -34,8 +34,22 @@ bool web_server_public_open(const char *path,const char *range,web_public_stream
         return true;
     }
     if(!strcmp(path,"/")) __atomic_fetch_add(&s_home_requests,1,__ATOMIC_RELAXED);
+    const m3_web_asset_t *asset=m3_web_assets_find(path);
+    if(asset) {
+        size_t first,length;
+        if(!m3_web_assets_slice(asset->bytes,range,&first,&length)) {
+            snprintf(s->content_range,sizeof(s->content_range),"bytes */%u",(unsigned)asset->bytes);
+            public_stream_message(s,416,"");return true;
+        }
+        if(length>limit) {public_stream_message(s,503,"File exceeds relay transfer limit");return true;}
+        s->body=(const char *)asset->data+first;s->length=length;s->mime=asset->mime;s->memory_file=true;
+        if(range && *range) {
+            s->status=206;snprintf(s->content_range,sizeof(s->content_range),"bytes %u-%u/%u",(unsigned)first,(unsigned)(first+length-1),(unsigned)asset->bytes);
+        }
+        return true;
+    }
     char filename[280];struct stat st;
-    if(sd_media_ready() && (strncmp(path,"/media/",7) || sd_media_name_valid(path+7))) {
+    if((!m3_web_assets_ready() || !strncmp(path,"/media/",7)) && sd_media_ready() && (strncmp(path,"/media/",7) || sd_media_name_valid(path+7))) {
         snprintf(filename,sizeof(filename),"%s%s",SD_MEDIA_ROOT,!strcmp(path,"/")?"/index.html":path);
         if(stat(filename,&st)==0 && S_ISREG(st.st_mode)) s->file=fopen(filename,"rb");
     }
@@ -79,12 +93,15 @@ bool web_server_public_open(const char *path,const char *range,web_public_stream
         s->status=206;snprintf(s->content_range,sizeof(s->content_range),"bytes %ld-%ld/%ld",start,end,size);
     }
     s->length=size?(size_t)(end-start+1):0;
-    if(s->length>8U*1024U*1024U) {s->content_range[0]=0;public_stream_message(s,503,"File exceeds relay transfer limit");return true;}
+    if(s->length>limit) {s->content_range[0]=0;public_stream_message(s,503,"File exceeds relay transfer limit");return true;}
     if(fseek(s->file,start,SEEK_SET)!=0) {s->content_range[0]=0;public_stream_message(s,503,"Cannot seek file");}
     return true;
 invalid_range:
     snprintf(s->content_range,sizeof(s->content_range),"bytes */%ld",size);
     public_stream_message(s,416,"");return true;
+}
+bool web_server_public_open(const char *path,const char *range,web_public_stream_t *s) {
+    return web_server_public_open_limit(path,range,s,8U*1024U*1024U);
 }
 size_t web_server_public_read(web_public_stream_t *s,void *buffer,size_t length) {
     if(length>s->length-s->offset) length=s->length-s->offset;

@@ -3,7 +3,7 @@ import { readFileSync,writeFileSync,existsSync } from 'node:fs';
 const serial=(process.argv[2]||'').toLowerCase();
 if(!/^[a-f0-9]{12}$/.test(serial)) throw new Error('Usage: node issue-upload-key.mjs <12-digit board MAC>');
 const product=process.argv[3]||'m1';
-if(!['m1','m3','s3','c3'].includes(product)) throw new Error('Product must be m1, m3, s3 or c3');
+if(!['m1','m3','m4','s3','c3'].includes(product)) throw new Error('Product must be m1, m3, m4, s3 or c3');
 const id=`${product}-${serial}`,file=`provisioned/${id}-upload-key.txt`;
 const registry=JSON.parse(readFileSync('provisioned/registry.json','utf8'));
 if(!registry[id]||registry[id].uploadTokenHash||existsSync(file)) throw new Error('Unknown device or upload key already exists');

@@ -56,7 +56,7 @@ const glyphs=new Set(/unicode_list\[\] = \{([^}]*)\}/.exec(font)[1].split(',').m
 for(const id of [...header.matchAll(/\bTITLE\((\w+)\)/g)].map(m=>m[1]))
  for(const c of entries[id].ko)if(/[가-힣]/.test(c))assert(glyphs.has(c),`title font lacks ${c} (run tools/generate_ui_fonts.py)`);
 // Status translations must match real service messages (catches drift when a message is reworded).
-const services=['m3_runtime.c','m3_audio.c','m3_radio.c','m3_agent.c','m3_voice.c','m3_recorder.c','m3_tts.c','m3_google_audio.c','m3_tube.c','m3_tube_download.inc','m3_music.c','m3_mp4.c']
+const services=['m3_runtime.c','m3_audio.c','m3_feedback.c','m3_radio.c','m3_agent.c','m3_voice.c','m3_recorder.c','m3_tts.c','m3_google_audio.c','m3_azure_audio.c','m3_tube.c','m3_tube_download.inc','m3_tube_music.inc','m3_music.c','m3_mp4.c']
  .map(f=>read('main/'+f)).join('\n');
 const statuses=[...source.slice(source.indexOf('statuses[] = {'),source.indexOf('tokens[] = {')).matchAll(/\{"((?:[^"\\]|\\.)*)", "((?:[^"\\]|\\.)*)"\}/g)];
 assert(statuses.length>100);
@@ -71,7 +71,7 @@ for(const [,en,ko] of statuses){
 // Speech waiting animations key off service status prefixes; each prefix must still be emitted.
 const phase=/static unsigned tts_phase[\s\S]*?\n\}/.exec(ui)[0];
 const prefixes=[...phase.matchAll(/"([^"]+)"/g)].map(m=>m[1]);
-assert.equal(prefixes.length,6);
+assert.equal(prefixes.length,8);
 for(const prefix of prefixes)assert(services.includes('"'+prefix),`tts_phase prefix no longer emitted: ${prefix}`);
 // Monitor QR shows the local URL, or the cloud relay address published by the runtime.
 assert(read('main/m3_runtime.c').includes('cloud_relay_get_url(next.cloud_url, sizeof(next.cloud_url))'));

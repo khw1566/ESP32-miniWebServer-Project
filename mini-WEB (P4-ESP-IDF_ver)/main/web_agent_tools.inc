@@ -269,7 +269,15 @@ static esp_err_t api_agent_post_handler(httpd_req_t *req) {
     cJSON *args = cJSON_GetObjectItemCaseSensitive(request, "arguments");
     esp_err_t result;
     if (!tool || !cJSON_IsObject(args)) result = agent_error(req, "400 Bad Request", "도구 이름과 실행 인자를 확인하세요.");
-    else result = agent_execute(req, tool, args);
+    else {
+        bool files = !strcmp(tool,"list_files") || !strcmp(tool,"read_file") || !strcmp(tool,"write_file") || !strcmp(tool,"set_home");
+        if (files && !sd_media_ready()) result = agent_error(req,"503 Service Unavailable","SD card is not mounted");
+        else if (files && !sd_media_admin_lock()) result = agent_error(req,"409 Conflict","SD storage is busy");
+        else {
+            result = agent_execute(req, tool, args);
+            if (files) { if (!strcmp(tool,"write_file")) sd_media_changed(); sd_media_admin_unlock(); }
+        }
+    }
     cJSON_Delete(request);
     return result;
 }

@@ -1,0 +1,19 @@
+#pragma once
+#include "network_settings.h"
+/* Called once by the service task after SD mount, before network startup. */
+void m4_sd_settings_init(void);
+const char *m4_sd_tube_token(void);
+const char *m4_sd_gemini_key(void);
+const char *m4_sd_google_tts_key(void);
+const char *m4_sd_openai_key(void);
+const char *m4_sd_azure_key(void);
+const char *m4_sd_azure_region(void);
+/* A save hook runs only in network/service HTTP tasks, never the LVGL task. */
+void m4_sd_wifi_save(const network_settings_t *settings);
+bool m4_sd_wifi_find(const char *ssid, network_settings_t *settings);
+
+/* M4 uses SD JSON directly, without an NVS credential copy. */
+bool m4_sd_wifi_load(network_settings_t *settings);
+esp_err_t m4_sd_wifi_store(const network_settings_t *settings);
+bool m4_sd_key_copy(const char *name, char out[256]);
+esp_err_t m4_sd_gemini_save(const char *key);

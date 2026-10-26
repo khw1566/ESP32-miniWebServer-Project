@@ -1,0 +1,11 @@
+# Synchronous eSpeak runs with caches enabled and never in an ISR. Its large
+# zero-initialized synthesis tables do not need internal/DMA RAM.
+[scheme:m4_espeak_psram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:m4_espeak_psram]
+archive: libespeak_ng.a
+entries:
+    * (m4_espeak_psram)

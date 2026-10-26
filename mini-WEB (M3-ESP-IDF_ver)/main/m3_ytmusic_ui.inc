@@ -2,37 +2,95 @@
  * Songs come from the same PC relay as audio only (m3_tube_play_audio). Playback runs
  * on the audio worker and keeps going after leaving the app, like the music player;
  * the next song of the list starts when one ends. */
-typedef struct { lv_obj_t *button, *title, *meta; } ytm_row_t;
+typedef struct { lv_obj_t *button, *title, *meta, *thumb, *canvas; } ytm_row_t;
 static M3_PSRAM_BSS ytm_row_t ytm_rows[M3_TUBE_ITEMS];
 static lv_obj_t *ytm_query, *ytm_heading, *ytm_status, *ytm_prev, *ytm_next, *ytm_page, *ytm_pager;
 static lv_obj_t *ytm_title, *ytm_artist, *ytm_seek, *ytm_time, *ytm_total, *ytm_toggle, *ytm_state, *ytm_wait, *ytm_autonext;
 static lv_obj_t *ytm_prev_song, *ytm_next_song;
+static lv_obj_t *ytm_cache_info[2], *ytm_download_info, *ytm_save, *ytm_save_next;
 static M3_PSRAM_BSS m3_tube_list_t ytm_list;
 /* Songs of the listing the current track came from; turning pages does not change it. */
 static M3_PSRAM_BSS m3_tube_item_t ytm_queue[M3_TUBE_ITEMS];
 static unsigned ytm_queue_count, ytm_index, ytm_start_s, ytm_duration_s;
-static unsigned seen_ytm_list = ~0u, seen_ytm_player = ~0u;
-static bool ytm_pending, ytm_was_active;
+static unsigned seen_ytm_list = ~0u;
+static unsigned ytm_request_revision;
+static bool ytm_pending, ytm_submitted;
+static m3_text_t ytm_error = T_NONE;
+static uint16_t seen_ytm_thumbs;
+static lv_obj_t *ytm_cover, *ytm_cover_canvas;
+static bool ytm_cover_ready;
+static M3_PSRAM_BSS uint8_t ytm_cover_pixels[M3_TUBE_THUMB_W * M3_TUBE_THUMB_H * 2];
 static int64_t ytm_pending_until;
-static char ytm_last_query[128];
+static char ytm_last_query[M3_TUBE_QUERY_BYTES];
+static bool ytm_download_error;
+
+static void ytm_prepare_pair(void) {
+    if (!ytm_queue_count) return;
+    m3_tube_music_prepare(ytm_queue[ytm_index].id,
+        ytm_index+1<ytm_queue_count ? ytm_queue[ytm_index+1].id : NULL);
+}
+static void ytm_autonext_changed(lv_event_t *event) { (void)event; m3_tube_music_autonext(segment_value(ytm_autonext)==1); }
+static void ytm_save_event(lv_event_t *event) {
+    m3_tube_download_t download; m3_tube_download_state(&download);
+    if (download.busy && download.music) { m3_tube_download_cancel(); return; }
+    unsigned index=ytm_index+(unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index>=ytm_queue_count || download.busy) return;
+    ytm_download_error=!m3_tube_music_download(ytm_queue[index].id,ytm_queue[index].title);
+}
+static void ytm_update_cache(void) {
+    char text[192];
+    for (unsigned i=0;i<2;++i) {
+        unsigned index=ytm_index+i; m3_tube_music_cache_t cache;
+        if (index>=ytm_queue_count) { set_text(ytm_cache_info[i],""); continue; }
+        m3_tube_music_cache(ytm_queue[index].id,&cache);
+        snprintf(text,sizeof(text),"%s: %s  %u%%",tr(i?T_YTM_NEXT_CACHE:T_YTM_CURRENT_CACHE),status_text(cache.message),cache.percent);
+        set_text(ytm_cache_info[i],text);
+    }
+    m3_tube_download_t download; m3_tube_download_state(&download);
+    const char *message=ytm_download_error?tr(T_TUBE_BUSY):download.music?status_text(download.message):"";
+    if (download.busy && download.music && download.total && !ytm_download_error) {
+        snprintf(text,sizeof(text),"%s / %u%%",message,download.percent); set_text(ytm_download_info,text);
+    } else set_text(ytm_download_info,message);
+    set_text(lv_obj_get_child(ytm_save,0),tr(download.busy && download.music?T_TUBE_SAVE_CANCEL:T_TUBE_SAVE));
+    if (ytm_queue_count && (!download.busy || download.music)) lv_obj_remove_state(ytm_save,LV_STATE_DISABLED);
+    else lv_obj_add_state(ytm_save,LV_STATE_DISABLED);
+    if (!download.busy && ytm_index+1<ytm_queue_count) lv_obj_remove_state(ytm_save_next,LV_STATE_DISABLED);
+    else lv_obj_add_state(ytm_save_next,LV_STATE_DISABLED);
+}
+
+static void ytm_update_cover(void) {
+    if (ytm_cover_ready || !ytm_queue_count) return;
+    for (unsigned i = 0; i < ytm_list.count; ++i) {
+        if (strcmp(ytm_list.items[i].id, ytm_queue[ytm_index].id)) continue;
+        const uint8_t *pixels = m3_tube_thumb(&ytm_list, i);
+        if (!pixels) return;
+        /* Independent UI-owned cover survives another search or list page. */
+        memcpy(ytm_cover_pixels, pixels, sizeof(ytm_cover_pixels));
+        lv_canvas_set_buffer(ytm_cover_canvas, ytm_cover_pixels, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H, LV_COLOR_FORMAT_RGB565);
+        lv_obj_remove_flag(ytm_cover_canvas, LV_OBJ_FLAG_HIDDEN); ytm_cover_ready = true; return;
+    }
+}
 
 /* Queues the song at queue index; the audio worker takes it once the previous source stopped. */
 static void ytm_start(unsigned index, unsigned seconds) {
     if (index >= ytm_queue_count) return;
     const m3_tube_item_t *item = &ytm_queue[index];
     ytm_index = index; ytm_start_s = seconds; ytm_duration_s = item->duration;
+    ytm_prepare_pair();
     set_text(ytm_title, item->title); set_text(ytm_artist, item->channel);
     lv_slider_set_range(ytm_seek, 0, item->duration ? (int32_t)item->duration : 1);
     lv_slider_set_value(ytm_seek, (int32_t)seconds, LV_ANIM_OFF);
     m3_audio_state_t audio; m3_audio_state(&audio);
     if (audio.playing) m3_audio_stop();
-    ytm_pending = true; ytm_pending_until = esp_timer_get_time() + 8000000;
+    ytm_pending = true; ytm_submitted = false; ytm_error = T_NONE;
+    ytm_cover_ready = false; lv_obj_add_flag(ytm_cover_canvas, LV_OBJ_FLAG_HIDDEN); ytm_update_cover();
+    ytm_pending_until = esp_timer_get_time() + 8000000;
     set_text(ytm_state, tr(T_TUBE_CONNECTING));
-    seen_ytm_player = ~0u;
 }
 static void ytm_submit(void) {
     const char *query = lv_textarea_get_text(ytm_query);
     if (!query[0]) return;
+    if (strlen(query) >= M3_TUBE_QUERY_BYTES || !m3_utf8_valid(query)) { set_text(ytm_status, tr(T_TUBE_QUERY_LONG)); return; }
     hide_keyboard();
     snprintf(ytm_last_query, sizeof(ytm_last_query), "%s", query);
     if (!m3_tube_music_search(query, 1)) set_text(ytm_status, tr(T_TUBE_NOT_CONFIGURED));
@@ -89,9 +147,11 @@ static void ytm_render_rows(void) {
 }
 static void update_ytm_list(void) {
     m3_tube_music_list(&ytm_list);
-    if (ytm_list.revision == seen_ytm_list) return;
+    if (ytm_list.revision != seen_ytm_list) {
     seen_ytm_list = ytm_list.revision;
-    char text[160];
+    seen_ytm_thumbs = 0;
+    for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) lv_obj_add_flag(ytm_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
+    char text[512];
     ytm_render_rows();
     if (ytm_list.count) snprintf(text, sizeof(text), tr(T_YTM_RESULTS_FOR), ytm_list.query); else text[0] = 0;
     lv_label_set_text(ytm_heading, text);
@@ -109,24 +169,49 @@ static void update_ytm_list(void) {
     else lv_obj_add_flag(ytm_pager, LV_OBJ_FLAG_HIDDEN);
     if (ytm_list.page > 1) lv_obj_remove_state(ytm_prev, LV_STATE_DISABLED); else lv_obj_add_state(ytm_prev, LV_STATE_DISABLED);
     if (ytm_list.more) lv_obj_remove_state(ytm_next, LV_STATE_DISABLED); else lv_obj_add_state(ytm_next, LV_STATE_DISABLED);
+    }
+    /* Thumbnail bits arrive after READY without a metadata revision. */
+    if (ytm_list.thumbs != seen_ytm_thumbs) {
+        for (unsigned i = 0; i < ytm_list.count; ++i) {
+            if (seen_ytm_thumbs & (1u << i)) continue;
+            const uint8_t *pixels = m3_tube_thumb(&ytm_list, i); if (!pixels) continue;
+            lv_canvas_set_buffer(ytm_rows[i].canvas, (void *)pixels, M3_TUBE_THUMB_W, M3_TUBE_THUMB_H, LV_COLOR_FORMAT_RGB565);
+            lv_obj_remove_flag(ytm_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
+        }
+        seen_ytm_thumbs = ytm_list.thumbs;
+    }
+    ytm_update_cover();
 }
 /* Runs every refresh even when the app is hidden, so the next song follows in the background. */
 static void update_ytm(const m3_audio_state_t *audio) {
     update_ytm_list();
     m3_tube_player_t player; m3_tube_player(&player);
     bool mine = player.audio_only, active = mine && player.active;
-    if (ytm_pending && !audio->playing && !player.active) {
-        ytm_pending = false;
-        if (!m3_tube_play_audio(ytm_queue[ytm_index].id, ytm_start_s)) set_text(ytm_state, tr(T_TUBE_NOT_CONFIGURED));
-    } else if (ytm_pending && esp_timer_get_time() > ytm_pending_until) {
-        ytm_pending = false; set_text(ytm_state, tr(T_TUBE_BUSY));
+    if (ytm_pending && !ytm_submitted && !audio->playing && !player.active) {
+        if (!m3_tube_configured()) { ytm_pending = false; ytm_error = T_TUBE_NOT_CONFIGURED; }
+        else {
+            ytm_request_revision = player.revision;
+            ytm_submitted = m3_tube_play_audio(ytm_queue[ytm_index].id, ytm_start_s);
+        }
     }
-    /* A finished song (not a stop or an error) continues with the next one in the list. */
-    if (ytm_was_active && !active && mine && player.ended && !ytm_pending && segment_value(ytm_autonext) == 1 &&
-        ytm_index + 1 < ytm_queue_count) ytm_start(ytm_index + 1, 0);
-    ytm_was_active = active;
-    if (current_app != APP_YTMUSIC || (player.revision == seen_ytm_player && !active)) return;
-    seen_ytm_player = player.revision;
+    if (ytm_pending && ytm_submitted && mine && !strcmp(player.id, ytm_queue[ytm_index].id) &&
+        (active || player.revision != ytm_request_revision)) ytm_pending = false;
+    if (ytm_pending && esp_timer_get_time() > ytm_pending_until) {
+        ytm_pending = false; ytm_error = T_TUBE_BUSY;
+    }
+    /* The audio worker queues EOF successors. Adopt its song without stopping or
+     * submitting it again; this also updates the next prefetch while the app is hidden. */
+    if (active && !ytm_pending && ytm_queue_count && strcmp(player.id,ytm_queue[ytm_index].id)) {
+        for (unsigned i=0;i<ytm_queue_count;++i) if (!strcmp(player.id,ytm_queue[i].id)) {
+            ytm_index=i; ytm_duration_s=player.duration_s?player.duration_s:ytm_queue[i].duration;
+            set_text(ytm_title,ytm_queue[i].title); set_text(ytm_artist,ytm_queue[i].channel);
+            lv_slider_set_range(ytm_seek,0,ytm_duration_s?(int32_t)ytm_duration_s:1);
+            ytm_cover_ready=false; lv_obj_add_flag(ytm_cover_canvas,LV_OBJ_FLAG_HIDDEN); ytm_update_cover();
+            ytm_prepare_pair(); break;
+        }
+    }
+    if (current_app != APP_YTMUSIC) return;
+    ytm_update_cache();
     char text[64];
     if (!ytm_queue_count) set_text(ytm_title, tr(T_YTM_IDLE)); /* follows a language change */
     if (active && !strcmp(player.id, ytm_queue[ytm_index].id)) {
@@ -143,7 +228,7 @@ static void update_ytm(const m3_audio_state_t *audio) {
     if (ytm_index > 0) lv_obj_remove_state(ytm_prev_song, LV_STATE_DISABLED); else lv_obj_add_state(ytm_prev_song, LV_STATE_DISABLED);
     if (ytm_index + 1 < ytm_queue_count) lv_obj_remove_state(ytm_next_song, LV_STATE_DISABLED);
     else lv_obj_add_state(ytm_next_song, LV_STATE_DISABLED);
-    const char *state = ytm_pending ? tr(T_TUBE_CONNECTING) : !active ? (mine ? status_text(audio->message) : "") :
+    const char *state = ytm_error != T_NONE ? tr(ytm_error) : ytm_pending ? tr(T_TUBE_CONNECTING) : !active ? (mine ? status_text(audio->message) : "") :
         player.buffering ? tr(T_TUBE_BUFFERING) : player.paused ? tr(T_TUBE_PAUSED) : "";
     if (active && player.buffering && !ytm_pending) { snprintf(text, sizeof(text), "%s  %u%%", state, player.buffer_percent); state = text; }
     set_text(ytm_state, state);
@@ -151,9 +236,19 @@ static void update_ytm(const m3_audio_state_t *audio) {
 }
 static void build_ytmusic(lv_obj_t *page, unsigned volume) {
     lv_obj_t *box = card(page, T_NOW_PLAYING);
-    ytm_title = label(box, tr(T_YTM_IDLE), TEXT); lv_obj_add_style(ytm_title, &st_title, 0);
-    lv_label_set_long_mode(ytm_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    ytm_artist = label(box, "", MUTED); lv_label_set_long_mode(ytm_artist, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *heading = row(box); lv_obj_set_style_flex_cross_place(heading, LV_FLEX_ALIGN_CENTER, 0);
+    ytm_cover = bare(heading); lv_obj_set_size(ytm_cover, 96, 96);
+    lv_obj_set_style_radius(ytm_cover, 12, 0); lv_obj_set_style_clip_corner(ytm_cover, true, 0);
+    lv_obj_set_style_bg_opa(ytm_cover, LV_OPA_COVER, 0); set_bg(ytm_cover, 0xff0033);
+    lv_obj_t *cover_placeholder = label(ytm_cover, LV_SYMBOL_PLAY, 0xffffff);
+    lv_obj_set_width(cover_placeholder, LV_SIZE_CONTENT); lv_obj_set_style_text_font(cover_placeholder, FONT_ICON, 0); lv_obj_center(cover_placeholder);
+    ytm_cover_canvas = lv_canvas_create(ytm_cover); lv_obj_add_flag(ytm_cover_canvas, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(ytm_cover_canvas, -37, 0); lv_obj_set_style_transform_scale(ytm_cover_canvas, 273, 0);
+    lv_obj_t *heading_text = bare(heading); grow(heading_text); lv_obj_set_height(heading_text, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(heading_text, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(heading_text, 6, 0);
+    ytm_title = label(heading_text, tr(T_YTM_IDLE), TEXT); lv_obj_add_style(ytm_title, &st_title, 0);
+    label_ellipsis(ytm_title);
+    ytm_artist = label(heading_text, "", MUTED); label_ellipsis(ytm_artist);
     lv_obj_t *line = row(box);
     ytm_time = label(line, "0:00", MUTED); lv_obj_set_width(ytm_time, 64);
     ytm_seek = lv_slider_create(line); style_slider(ytm_seek); grow(ytm_seek);
@@ -171,10 +266,17 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
     ytm_next_song = icon_button(line, LV_SYMBOL_NEXT, ytm_step_event, (void *)(intptr_t)1); lv_obj_set_size(ytm_next_song, 64, 56);
     lv_obj_add_state(ytm_prev_song, LV_STATE_DISABLED); lv_obj_add_state(ytm_next_song, LV_STATE_DISABLED);
     line = row(box);
-    ytm_state = label(line, "", MUTED); grow(ytm_state); lv_label_set_long_mode(ytm_state, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ytm_state = label(line, "", MUTED); grow(ytm_state); label_ellipsis(ytm_state);
     ytm_wait = activity_create(line, ACTIVITY_DOTS, CYAN, T_NONE);
     static const m3_text_t modes[] = {T_YTM_AUTONEXT_OFF, T_YTM_AUTONEXT_ON};
-    ytm_autonext = segmented(box, modes, NULL, 2, 1, NULL);
+    ytm_autonext = segmented(box, modes, NULL, 2, 1, ytm_autonext_changed);
+    ytm_cache_info[0]=label(box,"",MUTED); ytm_cache_info[1]=label(box,"",MUTED);
+    for (unsigned i=0;i<2;++i) label_ellipsis(ytm_cache_info[i]);
+    line=row(box);
+    ytm_save=grow(button(line,LV_SYMBOL_DOWNLOAD,T_TUBE_SAVE,BTN_SECONDARY,ytm_save_event,NULL));
+    ytm_save_next=grow(button(line,LV_SYMBOL_DOWNLOAD,T_YTM_SAVE_NEXT,BTN_SECONDARY,ytm_save_event,(void *)(uintptr_t)1));
+    ytm_download_info=label(box,"",MUTED); label_ellipsis(ytm_download_info);
+    caption(box,T_YTM_CACHE_HINT);
     box = card(page, T_SEC_VOLUME); volume_row(box, 7, volume);
 
     ytm_query = input_field(page, T_NONE, 100, INPUT_KOREAN, true);
@@ -194,7 +296,7 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
         lv_obj_set_width(chip_text, LV_SIZE_CONTENT); lv_label_set_long_mode(chip_text, LV_LABEL_LONG_CLIP);
         lv_obj_center(chip_text);
     }
-    ytm_heading = label(page, "", TEXT); lv_label_set_long_mode(ytm_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ytm_heading = label(page, "", TEXT); label_ellipsis(ytm_heading);
     ytm_status = caption(page, T_YTM_EMPTY);
     for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) {
         ytm_row_t *item = &ytm_rows[i];
@@ -204,11 +306,16 @@ static void build_ytmusic(lv_obj_t *page, unsigned volume) {
         lv_obj_set_flex_flow(item->button, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(item->button, 12, 0);
         lv_obj_set_style_flex_cross_place(item->button, LV_FLEX_ALIGN_CENTER, 0);
         lv_obj_add_event_cb(item->button, ytm_open, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-        lv_obj_t *glyph = label(item->button, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_width(glyph, 28);
+        item->thumb = bare(item->button); lv_obj_set_size(item->thumb, 64, 64);
+        lv_obj_set_style_radius(item->thumb, 8, 0); lv_obj_set_style_clip_corner(item->thumb, true, 0);
+        lv_obj_set_style_bg_opa(item->thumb, LV_OPA_COVER, 0); set_bg(item->thumb, 0xff0033);
+        lv_obj_t *glyph = label(item->thumb, LV_SYMBOL_PLAY, 0xffffff); lv_obj_set_width(glyph, LV_SIZE_CONTENT); lv_obj_center(glyph);
+        item->canvas = lv_canvas_create(item->thumb); lv_obj_add_flag(item->canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(item->canvas, -25, 0); lv_obj_set_style_transform_scale(item->canvas, 182, 0);
         lv_obj_t *texts = bare(item->button); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 3, 0);
-        item->title = label(texts, "", TEXT); lv_label_set_long_mode(item->title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        item->meta = label(texts, "", MUTED); lv_label_set_long_mode(item->meta, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        item->title = label(texts, "", TEXT); label_ellipsis(item->title);
+        item->meta = label(texts, "", MUTED); label_ellipsis(item->meta);
         lv_obj_add_flag(item->button, LV_OBJ_FLAG_HIDDEN);
     }
     ytm_pager = row(page);

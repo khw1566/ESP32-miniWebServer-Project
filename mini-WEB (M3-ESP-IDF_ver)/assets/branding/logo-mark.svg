@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-labelledby="title desc">
+  <title id="title">miniweb M arrow monogram</title>
+  <desc id="desc">miniweb identity with a bold uppercase M and an extended rising arrow. All lettering and symbols are vector paths.</desc>
+  <rect width="192" height="192" rx="31" fill="#D2FA7A" />
+  <g fill="#172115" transform="translate(20 18) scale(0.244)">
+    <path d="M0 250L117 450V621H0Z" />
+    <path d="M0 198H117L265 452L203 570L0 228Z" />
+    <path d="M207 578L470 76L415 51L566 0L625 147L576 124L314 621H231Z" />
+    <path d="M408 469L524 249V621H408Z" />
+  </g>
+</svg>

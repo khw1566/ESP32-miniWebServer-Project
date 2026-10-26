@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import worker, { RelayDevice, publicPath } from '../worker.mjs';
 const id = 'm1-aabbccddeeff', token = 'a'.repeat(64);
-function setup(deviceId = id) {
+function setup(deviceId = id, relayHost = 'relay.audeaming.com') {
   const id = deviceId;
   const env = { PUBLIC_DOMAIN: 'audeaming.com', DEMO_DEVICE: id,
     DEVICE_REGISTRY: JSON.stringify({ [id]: { tokenHash: createHash('sha256').update(token).digest('hex') } }) };
+  if (relayHost !== 'relay.audeaming.com') env.RELAY_HOST = relayHost;
   const device = new RelayDevice({}, env); device.pollMs = 100; device.requestMs = 500;
   env.DEVICES = { idFromName: name => name, get: name => { assert.equal(name, id); return device; } };
-  const call = (path, options = {}) => worker.fetch(new Request(`https://relay.audeaming.com/v1/devices/${id}/${path}`, {
+  const call = (path, options = {}) => worker.fetch(new Request(`https://${relayHost}/v1/devices/${id}/${path}`, {
     ...options, headers: { authorization: `Bearer ${token}`, ...options.headers }
   }), env);
   const visit = (path = '/', options = {}) => worker.fetch(new Request(`https://demo.audeaming.com${path}`, options), env);
@@ -43,6 +44,15 @@ test('device credentials are required; idle poll returns no job', async () => {
   assert.equal((await s.call('poll', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status, 401);
   assert.equal((await s.call('poll')).status, 204);
   assert.ok(s.device.lastSeen > 0);
+});
+
+test('a dedicated relay hostname preserves board authentication and private path blocking', async () => {
+  const s = setup('s3-aabbccddeeff', 'relay-s3-zero.audeaming.com');
+  assert.equal((await s.call('poll', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status, 401);
+  assert.equal((await s.call('poll')).status, 204);
+  assert.ok(s.device.lastSeen > 0);
+  assert.equal((await s.visit('/api/system')).status, 403);
+  assert.equal((await worker.fetch(new Request('https://relay.audeaming.com/v1/devices/s3-aabbccddeeff/poll'), s.env)).status, 404);
 });
 
 test('M3 hostname reaches its registered board and preserves device authentication', async () => {

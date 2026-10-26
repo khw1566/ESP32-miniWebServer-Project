@@ -492,6 +492,30 @@ static esp_err_t send_product_qr_inline(httpd_req_t *req, const char *url) {
   return err == ESP_OK ? httpd_resp_sendstr_chunk(req, "</svg>") : err;
 }
 
+static bool decode_wifi_field(char *out, size_t capacity, const char *encoded) {
+  size_t used = 0;
+  while (*encoded) {
+    unsigned char c = (unsigned char)*encoded++;
+    if (c == '+') {
+      c = ' ';
+    } else if (c == '%') {
+      if (!encoded[0] || !encoded[1] ||
+          !isxdigit((unsigned char)encoded[0]) ||
+          !isxdigit((unsigned char)encoded[1])) return false;
+      unsigned char a = (unsigned char)tolower((unsigned char)encoded[0]);
+      unsigned char b = (unsigned char)tolower((unsigned char)encoded[1]);
+      c = ((a <= '9' ? a - '0' : a - 'a' + 10) << 4) |
+          (b <= '9' ? b - '0' : b - 'a' + 10);
+      encoded += 2;
+    }
+    if (c < 32 || c == 127 || used + 1 >= capacity) return false;
+    out[used++] = (char)c;
+  }
+  if (!capacity) return false;
+  out[used] = '\0';
+  return true;
+}
+
 #include "web_network_setup.inc"
 
 static esp_err_t api_logs_get_handler(httpd_req_t *req) {

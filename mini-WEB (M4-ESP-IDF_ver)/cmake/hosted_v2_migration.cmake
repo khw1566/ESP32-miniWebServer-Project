@@ -1,0 +1,23 @@
+# sdkconfig.defaults does not override an existing sdkconfig. Hosted 1.4.1
+# ignored the SDIO reset polarity choice and always idled RESET54 high; 2.x
+# honors it, so a saved ACTIVE_LOW would hold the C6 in reset. Migrate it.
+function(m4_hosted_v2_migration)
+    if(DEFINED SDKCONFIG AND NOT "${SDKCONFIG}" STREQUAL "")
+        get_filename_component(config "${SDKCONFIG}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    else()
+        set(config "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig")
+    endif()
+    if(NOT EXISTS "${config}")
+        return()
+    endif()
+    file(READ "${config}" original)
+    set(updated "${original}")
+    string(REGEX REPLACE "(^|\n)# CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH is not set" "\\1CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y" updated "${updated}")
+    foreach(key IN ITEMS CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW CONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW)
+        string(REGEX REPLACE "(^|\n)${key}=[^\n]*" "\\1# ${key} is not set" updated "${updated}")
+    endforeach()
+    if(NOT updated STREQUAL original)
+        file(WRITE "${config}" "${updated}")
+        message(STATUS "M4: migrated C6 reset pin to Hosted 2.x ACTIVE_HIGH (RESET54 idles high as before)")
+    endif()
+endfunction()

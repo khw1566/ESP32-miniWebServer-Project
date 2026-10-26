@@ -120,7 +120,7 @@ const cleanup=source.slice(source.lastIndexOf('\ndone:'));
 assert(cleanup.indexOf('atomic_store(&rx.stop, true)')<cleanup.indexOf('while (decoder_started'));
 assert(cleanup.indexOf('while (decoder_started')<cleanup.indexOf('esp_audio_simple_dec_close'));
 assert(source.includes('esp_http_client_set_timeout_ms(http, 250)'));
-assert(source.includes('if (ps_changed) esp_wifi_set_ps(previous_ps)'));
+assert(source.includes('if (ps_changed) m3_wifi_performance_release()'));
 assert(source.includes('rx=%lu B/s'));
 const sink=source.slice(source.indexOf('int64_t last_status = 0, last_stats'));
 assert(sink.includes('xStreamBufferReceive(dec.stream, output'));
@@ -129,9 +129,11 @@ assert(source.includes('MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT'));
 assert(source.indexOf('while (receiver_started && !atomic_load(&rx.done))')<source.indexOf('esp_http_client_cleanup(http)'));
 assert(source.includes('xTaskCreatePinnedToCore(radio_receive'));
 // Execute station selection, including codec selection and bounds.
-const stations=[...ui.matchAll(/\{"([^"]+)", "(https:[^"]+)", (true|false)(?:, [012])?\}/g)]
- .map(m=>({name:m[1],url:m[2],aac:m[3]==='true'}));
-assert.equal(stations.length,10);assert(stations.some(s=>s.name.includes("Korea")));assert(stations.some(s=>s.name.includes("Japan")));assert(stations.some(s=>s.aac&&s.url.includes('64-aac')));
+const stations=JSON.parse(fs.readFileSync(path.join(root,'../tube-relay/radio_stations.json'),'utf8')).map(s=>({...s,url:s.url||''}));
+assert.equal(stations.length,20);assert(stations.filter(s=>s.region===1).length>=6);assert(stations.filter(s=>s.region===2).length>=7);
+assert(stations.some(s=>s.name.includes('Classic')));assert(stations.some(s=>s.aac&&s.url.includes('64-aac')));
+const catalog=read('main/m3_radio_stations.inc');
+for(const s of stations){assert(catalog.includes(JSON.stringify(s.id)));assert(catalog.includes(JSON.stringify(s.url)));}
 const picker={radio_stations:stations,radio_url:{},radio_codec:{},marked:null,
  lv_event_get_user_data:event=>event.index,hide_keyboard:()=>{},radio_mark:index=>picker.marked=index,
  lv_textarea_set_text:(_,url)=>picker.url=url,segment_select:(_,codec)=>picker.codec=codec};
@@ -141,4 +143,22 @@ const cast=source=>source.replace('unsigned index = (unsigned)(uintptr_t)','let 
 vm.runInContext('function radio_select(index){'+cast(body('radio_select',ui))+'}\nfunction select(event){'+cast(body('radio_preset',ui))+'}',picker);
 for(let i=0;i<stations.length;i++){picker.select({index:i});assert.equal(picker.url,stations[i].url);assert.equal(picker.codec,stations[i].aac?1:0);assert.equal(picker.marked,i);}
 picker.select({index:99});assert.equal(picker.url,stations.at(-1).url,'out-of-range station is ignored');
-console.log('PASS: adaptive bitrate reserve, PCM hysteresis/EOF, two-ring 5s receive and 300ms decode jitter model, long-outage resume, partial-send integrity, blocked-producer cancellation, 10 presets including KR/JP.');
+const routes={radio_selected:0,radio_transport:{mode:0},radio_codec:{mode:0},radio_url:{},radio_info:{},
+ radio_stations:stations.map(s=>({...s,relay:!!s.kbs})),NULL:null,T_RADIO_FAIL:0,T_RADIO_QUEUED:1,
+ hide_keyboard:()=>{},segment_value:o=>o.mode,lv_textarea_get_text:()=>routes.url||'',
+ m3_audio_radio_preset:(id,profile)=>{routes.sent={id,profile};return routes.accept;},
+ m3_audio_radio:(url,aac)=>{routes.sent={url,aac};return routes.accept;},
+ lv_label_set_text:(o,s)=>o.text=s,tr:s=>s};
+vm.createContext(routes);vm.runInContext('function start(event){'+body('start_radio',ui)
+ .replace('(void)event;','').replace(/\bunsigned |\bbool /g,'let ').replace('(unsigned)radio_selected','radio_selected')
+ .replace('sizeof(radio_stations) / sizeof(radio_stations[0])','radio_stations.length')+'}',routes);
+routes.accept=true;
+for(let i=0;i<stations.length;i++)for(let mode=0;mode<4;mode++){
+ routes.radio_selected=i;routes.radio_transport.mode=mode;routes.url=stations[i].url;routes.start(null);
+ assert.deepEqual(routes.sent,mode||stations[i].kbs?{id:stations[i].id,profile:mode?mode-1:1}:{url:stations[i].url,aac:false});
+ assert.equal(routes.radio_info.text,1);
+}
+routes.radio_selected=-1;routes.url='https://example.test/custom.mp3';routes.start(null);
+assert.deepEqual(routes.sent,{url:routes.url,aac:false},'custom URL never becomes an arbitrary relay input');
+routes.accept=false;routes.start(null);assert.equal(routes.radio_info.text,0);
+console.log('PASS: adaptive bitrate reserve, PCM hysteresis/EOF, two-ring jitter model, long-outage resume, partial-send integrity, cancellation, 20 presets including KR 6 / JP 7 and classical.');

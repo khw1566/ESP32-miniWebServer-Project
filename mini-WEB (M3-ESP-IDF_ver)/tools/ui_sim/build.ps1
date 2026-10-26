@@ -6,7 +6,7 @@ $lvgl = "$root\managed_components\lvgl__lvgl"
 New-Item -ItemType Directory -Force "$Out\obj", "$Out\frames" | Out-Null
 python "$sim\gen_sdkconfig.py" "$root\sdkconfig" "$Out\sim_sdkconfig.h"
 $sources = Get-ChildItem -Recurse "$lvgl\src" -Filter *.c | Where-Object { $_.FullName -notlike '*\drivers\*' } | ForEach-Object { $_.FullName }
-$sources += "$sim\sim_main.c", "$root\main\m3_font_korean.c", "$root\main\m3_2048.c", "$root\main\m3_crossing.c", "$root\main\m3_hangul.c", "$root\main\m3_calendar.c", "$root\main\m3_kana.c", "$root\main\m3_calculator.c"
+$sources += "$sim\sim_main.c", "$root\main\m3_font_korean.c", "$root\main\m3_2048.c", "$root\main\m3_crossing.c", "$root\main\m3_hangul.c", "$root\main\m3_calendar.c", "$root\main\m3_kana.c", "$root\main\m3_calculator.c", "$root\main\m3_flash_usage.c", "$root\main\m3_flash_usage_view.c", "$root\main\m3_inflate.c", "$root\main\m3_theme.c", "$root\main\m3_wallpaper.c"
 $sources += Get-ChildItem "$root\main" -Filter 'm3_font_*.c' | Where-Object { $_.Name -ne 'm3_font_korean.c' } | ForEach-Object { $_.FullName }
 $sources += Get-ChildItem "$root\main" -Filter 'm3_i18n.c' | ForEach-Object { $_.FullName }
 $rsp = "$Out\sources.rsp"; $sources | ForEach-Object { "`"$_`"" } | Set-Content -Encoding ascii $rsp

@@ -1,5 +1,7 @@
 #include "network_manager.h"
 #include "m3_c6_update.h"
+#include "m3_wifi_performance.h"
+#include "m3_sd_settings.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -36,12 +38,16 @@ ESP_EVENT_DEFINE_BASE(NET_IPV6_EVENT);
 // (SoftAP 모드에서 STA_START 이벤트 발생 시 자동 connect 차단)
 static atomic_bool s_sta_connect_requested = false;
 static atomic_bool s_auto_retry;
+static atomic_bool s_rescan_pending;
+bool network_recovery_pending(void) { return atomic_load(&s_rescan_pending); }
+static bool s_sta_connect_inflight; /* Wi-Fi event-loop owned; duplicate START is harmless. */
 static esp_timer_handle_t s_recovery_timer;
 ESP_EVENT_DEFINE_BASE(NET_RECOVERY_EVENT);
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 #define WIFI_STA_STARTED_BIT BIT2
+#define WIFI_STA_STOPPED_BIT BIT3
 #define WIFI_MAX_RETRY     5
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -49,16 +55,13 @@ static EventGroupHandle_t s_wifi_event_group;
 static esp_err_t network_apply_sta_address(void);
 static esp_err_t network_apply_setup_ap_address(void);
 
-/* Recovery runs on the Wi-Fi event loop, not on the display or timer task. */
+/* Event/timer tasks only request recovery. Blocking scans belong to services. */
 static void recovery_tick(void *arg) {
     esp_event_post(NET_RECOVERY_EVENT, 0, NULL, 0, 0);
 }
 static void recovery_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    if (!s_auto_retry || !s_sta_connect_requested || s_sta_link_up ||
-        s_net_mode != NET_MODE_STA_CONNECTING || s_retry_num < WIFI_MAX_RETRY) return;
-    s_retry_num = 0;
-    xEventGroupClearBits(s_wifi_event_group, WIFI_FAIL_BIT);
-    if (esp_wifi_connect() != ESP_OK) s_retry_num = WIFI_MAX_RETRY;
+    if (!s_auto_retry || s_sta_link_up || s_net_mode != NET_MODE_STA_CONNECTING) return;
+    atomic_store(&s_rescan_pending, true);
 }
 
 /* Run all lwIP mutations in the TCP/IP task, after default Wi-Fi handlers. */
@@ -87,6 +90,22 @@ static void ipv6_start_event(void *arg, esp_event_base_t base, int32_t id, void 
 // -------------------------------------------------------------
 // 이벤트 핸들러
 // -------------------------------------------------------------
+static void network_sta_start_connect(void) {
+    if (s_sta_connect_requested && !s_sta_connect_inflight && !s_sta_link_up) {
+        s_sta_connect_inflight = true;
+        ESP_LOGI(TAG, "[EVT] STA_START -> esp_wifi_connect() 호출");
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            s_sta_connect_inflight = false;
+            ESP_LOGE(TAG, "esp_wifi_connect() 실패: 0x%x", err);
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        s_net_mode = NET_MODE_STA_CONNECTING;
+    } else {
+        ESP_LOGD(TAG, "[EVT] STA_START 수신 (연결 요청 없음, 무시)");
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
@@ -96,25 +115,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "[AP] client IPv4 assigned, heap=%lu",
                  (unsigned long)esp_get_free_heap_size());
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        xEventGroupClearBits(s_wifi_event_group, WIFI_STA_STOPPED_BIT);
         xEventGroupSetBits(s_wifi_event_group, WIFI_STA_STARTED_BIT);
         // s_sta_connect_requested 플래그로 제어: STA 연결 요청이 있을 때만 connect 호출
         // SoftAP 모드에서 내부적으로 STA 인터페이스가 시작되어도 connect가 호출되지 않도록 차단
-        if (s_sta_connect_requested) {
-            ESP_LOGI(TAG, "[EVT] STA_START -> esp_wifi_connect() 호출");
-            esp_err_t err = esp_wifi_connect();
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "esp_wifi_connect() 실패: 0x%x", err);
-                xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            }
-            s_net_mode = NET_MODE_STA_CONNECTING;
-        } else {
-            ESP_LOGD(TAG, "[EVT] STA_START 수신 (연결 요청 없음, 무시)");
-        }
+        network_sta_start_connect();
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
+        s_sta_connect_inflight = false;
+        s_sta_link_up = false;
         xEventGroupClearBits(s_wifi_event_group, WIFI_STA_STARTED_BIT);
+        xEventGroupSetBits(s_wifi_event_group, WIFI_STA_STOPPED_BIT);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         if (!s_sta_connect_requested) return;
+        s_sta_connect_inflight = false;
         s_sta_link_up = true;
         if (s_sta_netif) {
             /* Queue behind default STA_CONNECTED handlers that bring netif up. */
@@ -127,6 +141,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         atomic_fetch_add(&s_diagnostic_disconnects, 1);
         if (event_data) atomic_store(&s_diagnostic_last_reason, ((wifi_event_sta_disconnected_t *)event_data)->reason);
         s_sta_link_up = false;
+        s_sta_connect_inflight = false;
         /* Deliberate STA stop during SoftAP handover is not a connection failure. */
         if (!s_sta_connect_requested) return;
         snprintf(s_current_ip, sizeof(s_current_ip), "0.0.0.0");
@@ -135,15 +150,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGW(TAG, "[EVT] STA_DISCONNECTED reason=%d, retry=%d/%d",
                  dc->reason, s_retry_num, WIFI_MAX_RETRY);
 
-        if (s_sta_connect_requested && s_retry_num < WIFI_MAX_RETRY) {
-            s_retry_num++;
-            ESP_LOGW(TAG, "재연결 시도 (%d/%d)...", s_retry_num, WIFI_MAX_RETRY);
-            esp_wifi_connect();
-        } else {
-            if (!s_auto_retry) s_sta_connect_requested = false;
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            ESP_LOGE(TAG, "연결 최종 실패. FAIL_BIT 설정.");
-        }
+        /* Never reconnect blindly to the old SSID from this event handler. */
+        s_sta_connect_requested = false;
+        atomic_store(&s_rescan_pending, s_auto_retry);
+        xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         if (!s_sta_connect_requested) return;
@@ -153,6 +163,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_retry_num = 0;
         s_net_mode = NET_MODE_STA_CONNECTED;
         s_auto_retry = true;
+        atomic_store(&s_rescan_pending, false);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_GOT_IP6) {
@@ -172,6 +183,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 // 초기화
 // -------------------------------------------------------------
 esp_err_t network_init(void) {
+    ESP_RETURN_ON_ERROR(m3_wifi_performance_init(),TAG,"Wi-Fi performance lock");
     s_wifi_event_group = xEventGroupCreate();
     if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
@@ -274,7 +286,24 @@ esp_err_t network_start_softap(void) {
 // -------------------------------------------------------------
 // STA 모드 Wi-Fi 연결 (단일 진입점)
 // -------------------------------------------------------------
-esp_err_t network_connect_sta(const char *ssid, const char *pass) {
+static esp_err_t network_wait_sta_stop(void) {
+    xEventGroupClearBits(s_wifi_event_group, WIFI_STA_STOPPED_BIT);
+    esp_err_t stop = esp_wifi_stop();
+    if (stop != ESP_OK && stop != ESP_ERR_WIFI_NOT_STARTED) return stop;
+    if (stop == ESP_OK) {
+        /* Let old DISCONNECTED/STOP events drain with connection requests
+         * disabled, before publishing the new STA attempt. */
+        EventBits_t stopped = xEventGroupWaitBits(s_wifi_event_group, WIFI_STA_STOPPED_BIT,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(3000));
+        if (!(stopped & WIFI_STA_STOPPED_BIT)) {
+            ESP_LOGW(TAG, "STA stop confirmation timed out; connection can be retried");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t connect_sta_visible(const char *ssid, const char *pass) {
     if (!ssid || strlen(ssid) == 0 || strlen(ssid)>32 || (pass && strlen(pass)>63)) {
         ESP_LOGE(TAG, "SSID가 비어있음");
         return ESP_ERR_INVALID_ARG;
@@ -313,8 +342,8 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
     if (cur_mode != WIFI_MODE_NULL) {
         ESP_LOGI(TAG, "기존 Wi-Fi 정지 후 재구성 (현재 모드: %d)", cur_mode);
         s_sta_connect_requested = false;
-        esp_wifi_stop();
-        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_err_t stopped = network_wait_sta_stop();
+        if (stopped != ESP_OK) return stopped;
     }
 
     /* Discard old stop/disconnect results before starting this attempt. */
@@ -358,8 +387,8 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
         ESP_LOGI(TAG, "연결 성공: %s (IP: %s)", ssid, s_current_ip);
         return ESP_OK;
     } else {
-        if (!s_auto_retry) s_sta_connect_requested = false;
-        else s_retry_num = WIFI_MAX_RETRY;
+        s_sta_connect_requested = false;
+        s_retry_num = WIFI_MAX_RETRY;
         ESP_LOGW(TAG, "연결 실패 또는 타임아웃");
         esp_wifi_disconnect();
         return ESP_FAIL;
@@ -367,8 +396,11 @@ esp_err_t network_connect_sta(const char *ssid, const char *pass) {
 }
 
 // -------------------------------------------------------------
-// NVS: Wi-Fi 자격증명 저장
+// M3: SD JSON Wi-Fi configuration (shared NVS backend is bypassed)
 // -------------------------------------------------------------
+#include "m3_sd_settings.h"
+#define NETWORK_SETTINGS_LOAD_HOOK m3_sd_wifi_load
+#define NETWORK_SETTINGS_SAVE_HOOK m3_sd_wifi_store
 #include "network_settings.inc"
 
 esp_err_t network_get_ip_str(char *out_ip, size_t ip_len) {
@@ -448,7 +480,7 @@ esp_err_t network_retry_ipv6(void) {
 // -------------------------------------------------------------
 // Wi-Fi 스캔
 // -------------------------------------------------------------
-int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
+static int scan_wifi(wifi_scan_item_t *items, int max_items, bool saved_only, const char *target) {
     if (!items || max_items <= 0) return -ESP_ERR_INVALID_ARG;
     if (!s_wifi_event_group) return -ESP_ERR_INVALID_STATE;
 
@@ -504,7 +536,8 @@ int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
         return 0;
     }
 
-    uint16_t fetch_count = (ap_count > (uint16_t)max_items) ? (uint16_t)max_items : ap_count;
+    /* Read all records: a saved AP must not disappear behind stronger strangers. */
+    uint16_t fetch_count = ap_count;
     wifi_ap_record_t *ap_records = malloc(sizeof(wifi_ap_record_t) * fetch_count);
     if (!ap_records) {esp_wifi_clear_ap_list();return -ESP_ERR_NO_MEM;}
 
@@ -519,6 +552,9 @@ int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
     int valid_count = 0;
     for (int i = 0; i < fetch_count; i++) {
         if (strlen((char *)ap_records[i].ssid) == 0) continue;
+        if (target && strcmp((char *)ap_records[i].ssid, target)) continue;
+        bool saved = m3_sd_wifi_matches((char *)ap_records[i].ssid, ap_records[i].authmode == WIFI_AUTH_OPEN);
+        if (saved_only && !saved) continue;
 
         bool duplicate = false;
         for (int j = 0; j < valid_count; j++) {
@@ -527,13 +563,15 @@ int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
                 break;
             }
         }
-        if (duplicate) continue;
+        if (duplicate) continue; /* SDK returns records sorted by decreasing RSSI. */
+        if (valid_count >= max_items) break;
 
         strncpy(items[valid_count].ssid, (char *)ap_records[i].ssid,
                 sizeof(items[valid_count].ssid) - 1);
         items[valid_count].ssid[sizeof(items[valid_count].ssid) - 1] = '\0';
         items[valid_count].rssi     = ap_records[i].rssi;
         items[valid_count].authmode = ap_records[i].authmode;
+        items[valid_count].saved = saved;
         valid_count++;
         if (valid_count >= max_items) break;
     }
@@ -541,4 +579,36 @@ int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
     free(ap_records);
     ESP_LOGI(TAG, "스캔 완료: %d개 AP 발견", valid_count);
     return valid_count;
+}
+int network_scan_wifi(wifi_scan_item_t *items, int max_items) {
+    return scan_wifi(items, max_items, false, NULL);
+}
+esp_err_t network_connect_sta(const char *ssid, const char *pass) {
+    if (!ssid || !*ssid || strlen(ssid) > 32 || (pass && strlen(pass) > 63)) return ESP_ERR_INVALID_ARG;
+    /* Explicit selection also verifies visibility before starting association. */
+    wifi_scan_item_t item;
+    int count = scan_wifi(&item, 1, false, ssid);
+    if (count <= 0) return count < 0 ? (esp_err_t)-count : ESP_ERR_NOT_FOUND;
+    (void)m3_sd_wifi_activate(ssid);
+    atomic_store(&s_rescan_pending, false);
+    return connect_sta_visible(ssid, pass);
+}
+esp_err_t network_connect_saved(void) {
+    if (!m3_sd_wifi_profiles(NULL, 0)) return ESP_ERR_NOT_FOUND;
+    atomic_store(&s_rescan_pending, false);
+    wifi_scan_item_t candidates[M3_WIFI_PROFILE_LIMIT];
+    int count = scan_wifi(candidates, M3_WIFI_PROFILE_LIMIT, true, NULL);
+    if (count < 0) return (esp_err_t)-count;
+    esp_err_t result = ESP_ERR_NOT_FOUND;
+    /* RSSI order comes from the scan, never last_ssid or save order. */
+    for (int i = 0; i < count; ++i) {
+        network_settings_t settings;
+        if (!m3_sd_wifi_activate(candidates[i].ssid) || !m3_sd_wifi_load(&settings)) continue;
+        bool open = candidates[i].authmode == WIFI_AUTH_OPEN;
+        if (open != (settings.pass[0] == 0)) { memset(&settings, 0, sizeof(settings)); continue; }
+        result = connect_sta_visible(settings.ssid, settings.pass);
+        memset(&settings, 0, sizeof(settings));
+        if (result == ESP_OK) break;
+    }
+    return result;
 }

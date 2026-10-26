@@ -1,6 +1,6 @@
 # ESP32-P4 Mini WebServer — C6 무선 연결 버전
 
-Waveshare **ESP32-P4-Module-DEV-KIT / ESP32-P4NRW32**용 ESP-IDF 5.5.5 프로젝트입니다. ESP32-C6 무선 칩을 ESP-Hosted/SDIO로 연결하여 Wi-Fi STA와 SoftAP를 제공합니다. 관리자·AI Assistant·플래시/SD 파일 관리·웹 OTA·mDNS를 포함합니다.
+Waveshare **ESP32-P4-Module-DEV-KIT / ESP32-P4NRW32**용 ESP-IDF 5.5.5 프로젝트입니다. ESP32-C6 무선 칩을 ESP-Hosted/SDIO로 연결하여 Wi-Fi STA와 SoftAP를 제공합니다. 관리자·AI Assistant·SD 전용 파일 관리·웹 OTA·mDNS를 포함합니다.
 
 ## Wi-Fi와 서버 IP
 
@@ -39,7 +39,7 @@ COM9는 P4 포트입니다. C6 설치 명령의 포트는 **C6 UART에 연결한
 - 16MB DIO 플래시, 32MB HEX PSRAM 200MHz. 제공된 카메라 예제의 초기 P4 rev 1.x 설정을 유지합니다. 실제 칩이 rev 3 이상이면 칩 revision 설정을 바꿔 빌드하세요.
 - C6 SDIO: ESP-Hosted 1.4.1의 P4 기본 배선 CLK18, CMD19, D0=14, D1=15, D2=16, D3=17, RESET54. 4-bit/20MHz로 시작하며 P4 SDMMC **slot1**을 사용합니다. 실제 SDIO 열거 로그로 보드와의 동작을 확인해야 합니다.
 - TF 카드: 제공된 회로도의 CMD44, CLK43, D0=39, GPIO45(low) 전원 스위치, LDO4를 사용합니다. **slot0**, 1-bit/10MHz로 분리해 무선 통신과 함께 사용합니다. FAT32 카드를 넣고 재부팅합니다. 자동 포맷하지 않습니다.
-- 4MiB OTA 슬롯 두 개와 7.8125MiB SPIFFS. 최초 설치는 전체 flash를 사용합니다.
+- 기존 파티션 표는 보존합니다. SPIFFS 파일 파티션은 마운트·포맷·파일 저장에 사용하지 않습니다. 펌웨어·OTA·NVS는 플래시를 사용하며 사용자 파일은 SD카드에만 저장합니다.
 - 이 버전의 기본 네트워크는 Wi-Fi입니다. 이전 유선 전용 초기화는 무선 초기화로 교체했습니다. RJ45는 이번 무선 펌웨어에서 활성화하지 않습니다. 카메라·LCD·오디오도 포함하지 않습니다.
 
 ## 확인할 로그와 검증 범위
@@ -49,3 +49,5 @@ C6 Hosted 버전/SDIO 열거, `SoftAP 시작`, 공유기 연결 후 IPv4 URL과 
 에이전트는 프로젝트 규칙에 따라 펌웨어 컴파일·업로드를 실행하지 않았습니다. 호스트 화면/설정/파티션 검사 결과만으로 실제 C6·Wi-Fi·고정 IP·SD 동시 동작을 보장하지 않습니다. 사용자 빌드 후 공통 안내의 실물 확인 항목을 수행하세요.
 
 참조: [Waveshare 보드 문서](https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT), [제조사 P4/C6 버전 안내](https://github.com/waveshareteam/ESP32-P4-Platform/blob/main/docs/P4_C6_HOSTED_WIFI.md), [ESP-Hosted 1.4.1](https://components.espressif.com/components/espressif/esp_hosted/versions/1.4.1), [Wi-Fi Remote 0.14.0](https://components.espressif.com/components/espressif/esp_wifi_remote/versions/0.14.0).
+
+SD 관리자 파일 추가·편집·교체·삭제·다운로드와 검증 절차: [SD_ADMIN.md](SD_ADMIN.md).

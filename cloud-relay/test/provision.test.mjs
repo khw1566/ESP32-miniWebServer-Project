@@ -46,6 +46,15 @@ test('factory credentials match registry and cannot be overwritten', () => {
       createHash('sha256').update(m3token).digest('hex'));
     assert.notEqual(run('aabbccddeeff', 'm3').status, 0);
     assert.equal(readFileSync(resolve(dir, 'provisioned/m3-aabbccddeeff.csv'), 'utf8'), m3csv);
+    const m4 = run('aabbccddeeff', 'm4'); assert.equal(m4.status, 0, m4.stderr);
+    assert.ok(m4.stdout.includes('pattern = "m4-aabbccddeeff.audreaming.com"'));
+    const m4csv = readFileSync(resolve(dir, 'provisioned/m4-aabbccddeeff.csv'), 'utf8');
+    const m4token = /token,data,string,([a-f0-9]{64})/.exec(m4csv)?.[1]; assert.ok(m4token);
+    assert.notEqual(m4token, m3token);
+    assert.equal(JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'))['m4-aabbccddeeff'].tokenHash,
+      createHash('sha256').update(m4token).digest('hex'));
+    assert.equal(m4.stdout.includes(m4token), false);
+    assert.notEqual(run('aabbccddeeff', 'm4').status, 0);
     // Upgrade an existing M3 registration that predates owner upload keys.
     const m3registry = JSON.parse(readFileSync(resolve(dir, 'provisioned/registry.json'), 'utf8'));
     delete m3registry['m3-aabbccddeeff'].uploadTokenHash;

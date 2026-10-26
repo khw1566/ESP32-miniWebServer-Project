@@ -1,0 +1,83 @@
+menu "Mini WebServer M4"
+    choice M4_PANEL_VARIANT
+        prompt "JC1060P470C panel revision"
+        default M4_PANEL_V2
+        config M4_PANEL_V1
+            bool "V1 (no V2 rear label)"
+        config M4_PANEL_V2
+            bool "V2 (V2 on rear label)"
+    endchoice
+    config M4_LCD_RESET
+        int "JD9165 LCD reset GPIO (-1 if unconnected)"
+        range -1 54
+        default 0
+    config M4_LCD_BACKLIGHT
+        int "Backlight GPIO"
+        range 0 54
+        default 23
+    config M4_BACKLIGHT_ACTIVE_LOW
+        bool "Invert backlight PWM"
+        default n
+    config M4_PORTRAIT_REVERSE
+        bool "Reverse portrait orientation (270 instead of 90 degrees)"
+        default n
+    config M4_TOUCH_SWAP_XY
+        bool "Swap touch X/Y before display rotation"
+        default n
+    menu "I2S pins (confirm the board revision)"
+        config M4_I2S_MCLK
+            int "MCLK GPIO"
+            range 0 54
+            default 13
+        config M4_I2S_BCLK
+            int "BCLK GPIO"
+            range 0 54
+            default 12
+        config M4_I2S_LRCK
+            int "LRCK GPIO"
+            range 0 54
+            default 10
+        config M4_I2S_DOUT
+            int "Speaker data GPIO"
+            range 0 54
+            default 9
+        config M4_I2S_DIN
+            int "Microphone data GPIO"
+            range 0 54
+            default 48
+    endmenu
+    config M4_WEB_ASSET_LIMIT_KB
+        int "PSRAM budget for SD Main WebFlie web files (KiB)"
+        range 256 16384
+        default 8192
+    config M4_WEB_ASSET_MAX_FILES
+        int "Maximum preloaded Main WebFlie files"
+        range 8 4096
+        default 512
+    config M4_TOUCH_RESET
+        int "GT911 reset GPIO (-1 if unconnected)"
+        range -1 54
+        default -1
+    config M4_TOUCH_MIRROR_X
+        bool "Mirror touchscreen X"
+        default n
+    config M4_TOUCH_MIRROR_Y
+        bool "Mirror touchscreen Y"
+        default n
+endmenu
+
+menu "Mini WEB automatic cloud connection"
+    config MINI_WEB_RELAY_URL
+        string "Factory cloud relay HTTPS endpoint"
+        default "https://relay.audreaming.com"
+    config MINI_WEB_PUBLIC_DOMAIN
+        string "Factory public domain"
+        default "audreaming.com"
+    config MINI_WEB_PUBLIC_HOST
+        string "Optional factory hostname"
+        default ""
+        help
+            Empty uses m4-<board MAC>.PUBLIC_DOMAIN. Configure the matching
+            Worker domain before shipment. Device token comes from factory
+            NVS, never Wi-Fi UI.
+endmenu

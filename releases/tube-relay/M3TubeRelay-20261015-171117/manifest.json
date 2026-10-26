@@ -1,0 +1,72 @@
+﻿[
+    {
+        "file":  "M3TubeRelay.exe",
+        "bytes":  39936,
+        "sha256":  "7AE6DE478047F8ACD915FBD7A6C55071CC1C5362E6D4355B2C9E869ACF9274A1"
+    },
+    {
+        "file":  "server.mjs",
+        "bytes":  22582,
+        "sha256":  "B00A31A449C5DE9CB5B54EFE5983433801183169C688ECED33766D6364A03CA6"
+    },
+    {
+        "file":  "lib.mjs",
+        "bytes":  7713,
+        "sha256":  "BD75E585A1A645179380F55F1D993722BFCC24693F4173649D1637F8E5204160"
+    },
+    {
+        "file":  "audio_cache.mjs",
+        "bytes":  2919,
+        "sha256":  "53914C573732ABD26108377BDB851AC6FBAAFDE667D4B6F0DB0D7F346109CA7D"
+    },
+    {
+        "file":  "video_cache.mjs",
+        "bytes":  3104,
+        "sha256":  "30E82D072174B0A90729FE09FB61C39493DE76E317F8BDE3197A8E76C1E32E80"
+    },
+    {
+        "file":  "package.json",
+        "bytes":  238,
+        "sha256":  "CF165B935E690E6857FD66E73F0E2BB9326C6388A5D44F177AD8AFC3EA5E2675"
+    },
+    {
+        "file":  "README.md",
+        "bytes":  11636,
+        "sha256":  "E3F4E8607A97230293BE4497232829F5A373D17B7485433E1245F3DEC924006E"
+    },
+    {
+        "file":  "StartTubeRelay.bat",
+        "bytes":  1936,
+        "sha256":  "DE6DE8FEB771AF080141BD38F80139231CB5DE5C43DCBB183B334B13CEB0124E"
+    },
+    {
+        "file":  "start.ps1",
+        "bytes":  1840,
+        "sha256":  "472528E96CDD7CF5457B7C993F8381B70EBCE6F851305C9DEDC3A5713D3D3E7A"
+    },
+    {
+        "file":  "setup.mjs",
+        "bytes":  1516,
+        "sha256":  "5D2588034D4F7D5F150BD07B1D5FE4841960DF7E60B376B281967272DEBE5AC6"
+    },
+    {
+        "file":  "setup-tunnel.ps1",
+        "bytes":  2274,
+        "sha256":  "F33FEADEBBF10E516D63CE09B82D38A4499C8CC56B403A0A38695213A654F22E"
+    },
+    {
+        "file":  "test.mjs",
+        "bytes":  4780,
+        "sha256":  "190D81E86FE7A8F76D5D19093A3C3304FF26D471C89E8562616FBD919E80CC29"
+    },
+    {
+        "file":  "test_video_cache.mjs",
+        "bytes":  3326,
+        "sha256":  "E9701FF2999EE49D924F370F0518DDB2A1A8D6C76F6EDC254AE5F56A382B130B"
+    },
+    {
+        "file":  "test_media.mjs",
+        "bytes":  6877,
+        "sha256":  "73AD5026999C573BA699F9570E252877D1292CCE7D71A6F1F12FAC4821723BA6"
+    }
+]

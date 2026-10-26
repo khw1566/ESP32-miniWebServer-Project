@@ -2,6 +2,9 @@
 #include "m3_photos.h"
 #include "m3_audio.h"
 #include "m3_mp4.h"
+#include "m3_gif.h"
+#include "m3_memory.h"
+#include "m3_utf8.h"
 #include "sd_media.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -14,38 +17,58 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <limits.h>
+#include <errno.h>
 
 enum { INPUT_LIMIT = 4 * 1024 * 1024, JPEG_LIMIT = 256 * 1024 };
-typedef struct { char path[256]; unsigned generation; } request_t;
+typedef struct { char path[256]; unsigned generation, page; bool library; } request_t;
 static QueueHandle_t requests;
-static atomic_bool active, paused;
+static atomic_bool active, paused, library_active;
 static atomic_bool mp4_selected;
 static atomic_uint generation;
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static m3_gallery_state_t state;
 /* FREE=0, WRITING=1, READY=2, SHOWN=3. Bounded PSRAM buffers stay pinned for LVGL. */
-static struct { uint8_t *data; unsigned owner; } slots[2];
+static struct { uint8_t *data; unsigned owner, generation; } slots[2];
 static void status(m3_gallery_status_t value) {
     portENTER_CRITICAL(&lock); state.status = value; ++state.revision; portEXIT_CRITICAL(&lock);
 }
 bool m3_gallery_supported(const char *name) {
     const char *ext = name ? strrchr(name, '.') : NULL;
     return ext && (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".bmp") ||
-        !strcasecmp(ext, ".png") || !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi") || !strcasecmp(ext, ".mp4"));
+        !strcasecmp(ext, ".png") || !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi") || !strcasecmp(ext, ".mp4") || !strcasecmp(ext, ".gif"));
+}
+bool m3_gallery_video(const char *name) {
+    const char *ext = name ? strrchr(name, '.') : NULL;
+    static const char *const formats[] = {".mjpg", ".mjpeg", ".avi", ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".3gp", ".mpeg", ".mpg", ".wmv", ".flv", ".ts", ".m2ts", ".mts"};
+    for (unsigned i = 0; ext && i < sizeof(formats) / sizeof(formats[0]); ++i) if (!strcasecmp(ext, formats[i])) return true;
+    return false;
+}
+bool m3_gallery_media(const char *name) {
+    if (m3_gallery_supported(name) || m3_gallery_video(name)) return true;
+    const char *ext = name ? strrchr(name, '.') : NULL;
+    static const char *const formats[] = {".gif", ".webp", ".heic", ".heif", ".avif", ".tif", ".tiff"};
+    for (unsigned i = 0; ext && i < sizeof(formats) / sizeof(formats[0]); ++i) if (!strcasecmp(ext, formats[i])) return true;
+    return false;
 }
 bool m3_gallery_active(void) { return atomic_load(&active); }
-void m3_gallery_close(void) { atomic_store(&active, false); atomic_fetch_add(&generation, 1); }
-void m3_gallery_pause(void) { atomic_store(&paused, !atomic_load(&paused)); }
+void m3_gallery_close(void) { atomic_store(&active, false); atomic_store(&library_active, false); atomic_fetch_add(&generation, 1); }
+void m3_gallery_pause(void) {
+    atomic_store(&paused, !atomic_load(&paused));
+    portENTER_CRITICAL(&lock); ++state.revision; portEXIT_CRITICAL(&lock);
+}
 bool m3_gallery_open(const char *relative) {
-    if (!requests || !relative || relative[0] != '/' || strlen(relative) > 255 || strstr(relative, "..") ||
-        strchr(relative, '\\') || !m3_gallery_supported(relative)) return false;
+    if (!requests || !m3_gallery_path_valid(relative) || !m3_gallery_supported(relative)) return false;
     request_t request = {.generation = atomic_fetch_add(&generation, 1) + 1};
     snprintf(request.path, sizeof(request.path), "%s", relative);
     const char *ext = strrchr(relative, '.');
     atomic_store(&mp4_selected, ext && !strcasecmp(ext, ".mp4"));
+    atomic_store(&library_active, false);
     atomic_store(&paused, false); atomic_store(&active, true);
     portENTER_CRITICAL(&lock);
-    state.status = M3_GALLERY_LOADING; state.mp4 = atomic_load(&mp4_selected);
+    state.status = M3_GALLERY_LOADING; state.mp4 = atomic_load(&mp4_selected); state.video = m3_gallery_video(relative);
     state.frames = state.position_ms = state.duration_ms = 0; ++state.revision;
     portEXIT_CRITICAL(&lock);
     return xQueueOverwrite(requests, &request) == pdPASS;
@@ -56,11 +79,13 @@ void m3_gallery_state(m3_gallery_state_t *out) {
 const uint8_t *m3_gallery_frame(void) {
     const uint8_t *data = NULL;
     portENTER_CRITICAL(&lock);
+    unsigned job = atomic_load(&generation);
+    for (unsigned i = 0; i < 2; ++i) if (slots[i].owner == 2 && slots[i].generation != job) slots[i].owner = 0;
     for (unsigned i = 0; i < 2; ++i) if (slots[i].owner == 2) {
         for (unsigned j = 0; j < 2; ++j) if (slots[j].owner == 3) slots[j].owner = 0;
         slots[i].owner = 3; break;
     }
-    for (unsigned i = 0; i < 2; ++i) if (slots[i].owner == 3) data = slots[i].data;
+    for (unsigned i = 0; i < 2; ++i) if (slots[i].owner == 3 && slots[i].generation == job) data = slots[i].data;
     portEXIT_CRITICAL(&lock); return data;
 }
 static int claim(void) {
@@ -89,7 +114,7 @@ static void mp4_publish(unsigned job, int slot, uint32_t position, uint32_t dura
     if (slot < 0 || slot >= 2) return;
     portENTER_CRITICAL(&lock);
     if (current(job) && position != UINT32_MAX) {
-        slots[slot].owner = 2; state.status = M3_GALLERY_READY; state.mp4 = state.video = true;
+        slots[slot].owner = 2; slots[slot].generation = job; state.status = M3_GALLERY_READY; state.mp4 = state.video = true;
         state.position_ms = position; state.duration_ms = duration; ++state.frames; ++state.revision;
     } else slots[slot].owner = 0;
     portEXIT_CRITICAL(&lock);
@@ -104,9 +129,9 @@ void m3_gallery_mp4_run(const char *relative, unsigned job, const m3_audio_outpu
     status(statuses[result]); atomic_store(&active, false);
 }
 /* JPEG SOI/EOI framing also extracts MJPEG from AVI; other AVI codecs are rejected. */
-static size_t next_jpeg(FILE *file, uint8_t *buffer, unsigned job) {
+static size_t next_jpeg(FILE *file, uint8_t *buffer, unsigned job, bool (*valid)(unsigned)) {
     unsigned previous = 0, searched = 0; size_t length = 0;
-    while (searched++ < 2 * 1024 * 1024 && current(job)) {
+    while (searched++ < 2 * 1024 * 1024 && valid(job)) {
         int byte = fgetc(file); if (byte == EOF) return 0;
         if (!length) { if (previous == 0xff && byte == 0xd8) { buffer[0] = 0xff; buffer[1] = 0xd8; length = 2; } }
         else { if (length >= JPEG_LIMIT) return 0; buffer[length++] = byte; if (previous == 0xff && byte == 0xd9) return length; }
@@ -114,10 +139,44 @@ static size_t next_jpeg(FILE *file, uint8_t *buffer, unsigned job) {
     }
     return 0;
 }
+/* Animated GIFs loop until closed; a single-frame GIF stays visible like a still image. */
+static void gif_run(const char *relative, unsigned job) {
+    portENTER_CRITICAL(&lock); state.mp4 = false; state.video = true; state.frames = 0; portEXIT_CRITICAL(&lock);
+    m3_gif_t *gif = NULL;
+    m3_gif_result_t result = m3_gif_open(relative, job, current, &gif);
+    while (result == M3_GIF_OK && current(job)) {
+        if (atomic_load(&paused)) { vTaskDelay(pdMS_TO_TICKS(40)); continue; }
+        int64_t frame_started = esp_timer_get_time();
+        int slot = claim(); if (slot < 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        if (!slots[slot].data) slots[slot].data = heap_caps_malloc(M3_PHOTO_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        unsigned delay = 100;
+        result = slots[slot].data ? m3_gif_frame(gif, slots[slot].data, &delay) : M3_GIF_MEMORY;
+        bool ok = result == M3_GIF_OK || result == M3_GIF_END;
+        portENTER_CRITICAL(&lock);
+        slots[slot].owner = ok && current(job) ? 2 : 0;
+        if (slots[slot].owner == 2) slots[slot].generation = job;
+        if (current(job)) {
+            if (ok) { ++state.frames; state.status = M3_GALLERY_READY; if (result == M3_GIF_END) state.video = false; }
+            else state.status = result == M3_GIF_MEMORY ? M3_GALLERY_MEMORY : result == M3_GIF_STORAGE ? M3_GALLERY_STORAGE : M3_GALLERY_BAD_FORMAT;
+            ++state.revision;
+        }
+        portEXIT_CRITICAL(&lock);
+        int64_t until = frame_started + (int64_t)delay * 1000;
+        while (result == M3_GIF_OK && current(job) && esp_timer_get_time() < until) {
+            int64_t remaining = until - esp_timer_get_time();
+            vTaskDelay(pdMS_TO_TICKS(remaining > 20000 ? 20 : remaining > 1000 ? (unsigned)(remaining / 1000) : 1));
+        }
+    }
+    if (result != M3_GIF_OK && result != M3_GIF_END && result != M3_GIF_STOPPED && current(job))
+        status(result == M3_GIF_MEMORY ? M3_GALLERY_MEMORY : result == M3_GIF_STORAGE ? M3_GALLERY_STORAGE : M3_GALLERY_BAD_FORMAT);
+    m3_gif_close(gif);
+}
+#include "m3_gallery_index.inc"
 static void worker(void *unused) {
     (void)unused;
     for (;;) {
         request_t request; if (xQueueReceive(requests, &request, portMAX_DELAY) != pdTRUE) continue;
+        if (request.library) { gallery_library_run(request.page, request.generation); continue; }
         if (!current(request.generation)) continue;
         status(M3_GALLERY_LOADING);
         char path[272]; snprintf(path, sizeof(path), "%s%s", SD_MEDIA_ROOT, request.path);
@@ -137,6 +196,7 @@ static void worker(void *unused) {
             }
             continue;
         }
+        if (!strcasecmp(ext, ".gif")) { gif_run(request.path, request.generation); continue; }
         bool video = !strcasecmp(ext, ".mjpg") || !strcasecmp(ext, ".mjpeg") || !strcasecmp(ext, ".avi");
         portENTER_CRITICAL(&lock); state.mp4 = false; state.video = video; state.frames = 0; portEXIT_CRITICAL(&lock);
         if (!sd_media_admin_lock()) { status(M3_GALLERY_STORAGE); continue; }
@@ -173,10 +233,11 @@ static void worker(void *unused) {
             int slot = claim(); if (slot < 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
             if (!slots[slot].data) slots[slot].data = heap_caps_malloc(M3_PHOTO_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             size_t size = 0; bool locked = slots[slot].data && sd_media_admin_lock();
-            if (locked) { size = video ? next_jpeg(file, input, request.generation) : fread(input, 1, length, file); sd_media_admin_unlock(); }
+            if (locked) { size = video ? next_jpeg(file, input, request.generation, current) : fread(input, 1, length, file); sd_media_admin_unlock(); }
             bool ok = size && (video || size == (size_t)length) && m3_photo_decode(input, size, slots[slot].data);
             portENTER_CRITICAL(&lock);
             slots[slot].owner = ok && current(request.generation) ? 2 : 0;
+            if (slots[slot].owner == 2) slots[slot].generation = request.generation;
             if (current(request.generation)) {
                 if (ok) { ++state.frames; state.status = M3_GALLERY_READY; }
                 else state.status = !slots[slot].data ? M3_GALLERY_MEMORY : !locked ? M3_GALLERY_STORAGE : video && !size && feof(file) && state.frames ? M3_GALLERY_ENDED : M3_GALLERY_BAD_FORMAT;
@@ -194,6 +255,6 @@ static void worker(void *unused) {
 }
 esp_err_t m3_gallery_start(void) {
     requests = xQueueCreate(1, sizeof(request_t)); if (!requests) return ESP_ERR_NO_MEM;
-    if (xTaskCreatePinnedToCore(worker, "m3_gallery", 12288, NULL, 2, NULL, 0) == pdPASS) return ESP_OK;
+    if (xTaskCreatePinnedToCore(worker, "m3_gallery", 16384, NULL, 2, NULL, 0) == pdPASS) return ESP_OK;
     vQueueDelete(requests); requests = NULL; return ESP_ERR_NO_MEM;
 }

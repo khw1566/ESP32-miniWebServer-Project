@@ -1,10 +1,17 @@
 #pragma once
 #include "storage_view.h"
 #include "network_manager.h"
+#include "m3_power.h"
+#include "m3_sd_settings.h"
 #define M3_WIFI_RESULTS 8
-typedef enum { M3_WIFI_SCAN, M3_WIFI_CONNECT, M3_WIFI_SETUP, M3_WIFI_IPV6, M3_WIFI_CONNECT_SAVED } m3_wifi_action_t;
+typedef enum { M3_WIFI_SCAN, M3_WIFI_CONNECT, M3_WIFI_SETUP, M3_WIFI_IPV6, M3_WIFI_CONNECT_SAVED,
+    M3_WIFI_USE_PROFILE, M3_WIFI_FORGET_PROFILE } m3_wifi_action_t;
+typedef enum { M3_WEB_STOP_DOMAIN, M3_WEB_STOP_ALL, M3_WEB_START_DOMAIN, M3_WEB_START_ALL } m3_web_action_t;
 typedef struct {
     bool initialized, web, sd, cloud;
+    m3_power_state_t power;
+    bool cpu_valid;
+    unsigned cpu_percent[2], cpu_revision;
     net_mode_t mode;
     int rssi;
     unsigned requests, disconnects, file_revision;
@@ -16,10 +23,17 @@ typedef struct {
     bool browse_sd;
     storage_view_t files;
     storage_capacity_t flash;
+    storage_capacity_t sd_capacity;
+    bool lp_configured, web_control_busy, sd_capacity_stale;
+    uint8_t web_policy; /* 0 serving, 1 domain paused, 2 all stopped */
+    unsigned web_control_revision;
+    esp_err_t web_control_result;
     bool wifi_busy, wifi_ready, wifi_password_saved;
     unsigned scan_revision, settings_revision, wifi_revision;
     int scan_count;
     wifi_scan_item_t networks[M3_WIFI_RESULTS];
+    unsigned saved_wifi_count;
+    m3_wifi_profile_info_t saved_wifi[M3_WIFI_PROFILE_LIMIT];
     network_settings_t settings; /* Public fields only; password is always cleared. */
     char wifi_message[128];
     unsigned mutation_revision;
@@ -31,3 +45,4 @@ void m3_runtime_state(m3_runtime_state_t *out);
 bool m3_runtime_browse(bool sd, const char *folder, unsigned offset);
 bool m3_runtime_wifi(m3_wifi_action_t action, const network_settings_t *settings);
 bool m3_runtime_file_action(bool sd, const char *source, const char *destination, bool remove);
+bool m3_runtime_web(m3_web_action_t action);

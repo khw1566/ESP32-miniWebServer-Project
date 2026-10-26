@@ -12,7 +12,7 @@ typedef struct {
     void (*end)(void);
     bool (*cancelled)(void);
 } m3_voice_capture_t;
-/* 0 OpenAI mini-transcribe; 1 Gemini 3.1; 2 Gemini 3.5. */
+/* 0 OpenAI mini-transcribe; 1 Gemini 3.1; 2 Gemini 3.5; 3 Azure Speech. */
 bool m3_voice_set_provider(unsigned provider);
 bool m3_voice_set_key(const char *key);
 void m3_voice_state(m3_voice_state_t *out);

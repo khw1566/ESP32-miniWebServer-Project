@@ -1,0 +1,27 @@
+# Isolated S3 registration; existing M1/M3/C3 and S3 Zero secrets are preserved.
+name = "mini-web-s3"
+account_id = "60bbc5ec2b671498c5f12537cd46e65a"
+main = "worker.mjs"
+compatibility_date = "2026-10-06"
+workers_dev = false
+
+[vars]
+PUBLIC_DOMAIN = "audreaming.com"
+RELAY_HOST = "relay-s3.audreaming.com"
+DEMO_DEVICE = "s3-a4cb8ff82bb8"
+
+[[routes]]
+pattern = "relay-s3.audreaming.com"
+custom_domain = true
+
+[[routes]]
+pattern = "s3-a4cb8ff82bb8.audreaming.com"
+custom_domain = true
+
+[[durable_objects.bindings]]
+name = "DEVICES"
+class_name = "RelayDevice"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDevice"]

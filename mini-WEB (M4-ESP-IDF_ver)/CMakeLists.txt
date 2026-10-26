@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.16)
+# ESP-IDF prioritizes the environment over a normal CMake variable.
+# Refuse an inherited ESP32 selection or compiler cache before configuration.
+if(DEFINED ENV{IDF_TARGET} AND NOT "$ENV{IDF_TARGET}" STREQUAL "" AND
+   NOT "$ENV{IDF_TARGET}" STREQUAL "esp32p4")
+    message(FATAL_ERROR "This P4 project requires esp32p4. Set IDF_TARGET=esp32p4 and run: idf.py set-target esp32p4")
+endif()
+if(DEFINED CACHE{IDF_TARGET} AND NOT "$CACHE{IDF_TARGET}" STREQUAL "esp32p4")
+    message(FATAL_ERROR "Build cache belongs to another chip. In this project folder run: idf.py set-target esp32p4")
+endif()
+set(IDF_TARGET "esp32p4")
+set(ENV{IDF_TARGET} "esp32p4")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/memory_policy.cmake")
+m4_memory_policy()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hosted_v2_migration.cmake")
+m4_hosted_v2_migration()
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(mini-webserver-m4)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/web_assets.cmake")
+m4_web_assets()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/audio_codec_link_compat.cmake")
+m4_audio_codec_link_compat()

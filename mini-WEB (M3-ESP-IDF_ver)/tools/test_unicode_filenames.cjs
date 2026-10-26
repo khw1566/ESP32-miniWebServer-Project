@@ -6,8 +6,9 @@ function body(source,name){const m=new RegExp('\\b'+name+'\\([^)]*\\)\\s*\\{').e
  let start=m.index+m[0].length,end=start,depth=1;while(depth){if(source[end]==='{')depth++;if(source[end]==='}')depth--;end++;}return source.slice(start,end-1);}
 function array(source,name){const m=new RegExp('\\b'+name+'\\[\\] = \\{([\\s\\S]*?)\\};').exec(source);assert(m,name);
  return m[1].split(',').map(v=>v.trim()).filter(Boolean).map(Number);}
+function fontBitmap(src){return /\bbitmap_packed\[\] = \{/.test(src)?require('zlib').inflateSync(Buffer.from(array(src,'bitmap_packed'))):array(src,'bitmap');}
 const cjk=read('main/m3_font_cjk.c'),korean=read('main/m3_font_korean.c');
-const points=array(cjk,'codepoints'),upper=array(cjk,'upper_codepoints'),offsets=array(cjk,'offsets'),bitmap=Uint8Array.from(array(cjk,'bitmap'));
+const points=array(cjk,'codepoints'),upper=array(cjk,'upper_codepoints'),offsets=array(cjk,'offsets'),bitmap=Uint8Array.from(fontBitmap(cjk));
 const manifest=JSON.parse(read('third_party/unifont/subset-manifest.json'));
 assert.equal(points.length+upper.length,manifest.glyph_count);assert.equal(bitmap.length,manifest.bitmap_bytes);
 assert.equal(offsets.length,manifest.glyph_count+1);assert.equal(offsets.at(-1)*16,bitmap.length);
@@ -29,12 +30,12 @@ for(const text of ['春の音楽（特別版）①.mp3','ひらがな・カタ�
  for(const ch of text)if(ch.codePointAt(0)>127)assert(dscs.has(ch.codePointAt(0)),ch);
 const hangul={LV_FONT_GLYPH_FORMAT_A1:1};vm.createContext(hangul);
 vm.runInContext('function describe(cp,out){'+descriptor(korean).replace('unsigned index;','let index;')+'}',hangul);
-const kb=Uint8Array.from(array(korean,'bitmap'));assert.equal(kb.length,11266*36);
+const kb=Uint8Array.from(fontBitmap(korean));assert.equal(kb.length,11266*36);
 for(let cp=0xAC00;cp<=0xD7A3;cp++){const d={gid:{}};assert(hangul.describe(cp,d));assert.equal(d.gid.index,(cp-0xAC00+94)*36);}
 assert(!hangul.describe(0xD7A4,{gid:{}}));assert(cjk.includes('.fallback=&lv_font_montserrat_16'));assert(korean.includes('.fallback=&m3_font_cjk'));
 const convert={lv_draw_buf_width_to_stride:n=>n+4,LV_COLOR_FORMAT_A8:8};vm.createContext(convert);
 const convertBody=body(read('main/m3_font_bitmap.c'),'m3_font_bitmap')
- .replace('const uint8_t *source = (const uint8_t *)glyph->resolved_font->dsc + glyph->gid.index;','let source = glyph.resolved_font.dsc.subarray(glyph.gid.index);')
+ .replace('const uint8_t *data = m3_font_blob_data(glyph->resolved_font);\n    if (!data) return NULL;\n    const uint8_t *source = data + glyph->gid.index;','let source = glyph.resolved_font.dsc.subarray(glyph.gid.index);')
  .replace('uint8_t *target = buffer->data;','let target = buffer.data;')
  .replace(/\b(?:uint32_t|unsigned) /g,'let ').replaceAll('glyph->','glyph.').replaceAll('buffer->','buffer.')
  .replace('target += stride','target = target.subarray(stride)').replaceAll('NULL','null').replace('0x80u','0x80');

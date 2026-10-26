@@ -1,4 +1,6 @@
 #include "m3_music.h"
+#include "m3_reader.h"
+#include "m3_reader_font.h"
 #include "m3_sd_apps.h"
 #include "m3_photos.h"
 #include "m3_calendar.h"
@@ -16,11 +18,17 @@
 #include "m3_calculator.h"
 #include "m3_gallery.h"
 #include "m3_preferences.h"
+#include "m3_feedback.h"
+#include "m3_screen_wake.h"
 #include "m3_hangul.h"
 #include "m3_voice.h"
 #include "m3_agent.h"
 #include "m3_i18n.h"
 #include "m3_tube.h"
+#include "m3_flash_usage_view.h"
+#include "m3_theme.h"
+#include "m3_wallpaper.h"
+#include "m3_weather.h"
 #include "esp_heap_caps.h"
 #include "esp_psram.h"
 #include "esp_timer.h"
@@ -34,30 +42,48 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <limits.h>
 
-/* Palette. CYAN/MAGENTA remain the product accents; everything else is neutral. */
-#define CYAN 0x00e5ef
-#define MAGENTA 0xf548ba
-#define INK 0x0a0e14
-#define SURFACE 0x151b25
-#define SURFACE_HI 0x202938
-#define LINE 0x2b3647
-#define TEXT 0xe9eef5
-#define MUTED 0x8c99ab
-#define ON_ACCENT 0x00272b
+/* Palette. The theme style (m3_theme.c) sets the neutral roles and the accents CYAN/MAGENTA;
+ * ON_WALL inks follow the home wallpaper. They are variables, so static tables cannot use them. */
+static uint32_t theme_primary = M3_THEME_PRIMARY, theme_accent = M3_THEME_ACCENT, theme_on_accent = 0x00272b;
+static uint32_t theme_on_wall = 0xf7f9fc, theme_on_wall_muted = 0xbfcad8;
+static m3_palette_t ui_palette = {0x0a0e14, 0x151b25, 0x202938, 0x2b3647, 0xe9eef5, 0x8c99ab, 0x0e131b,
+    0x0d121a, 0x2a3445, 0x18202c, 0xc3cede, 0x3a1d27, 0xff9aa8, 0x111824, 0x1a1426, 0xfffffd};
+#define CYAN theme_primary
+#define MAGENTA theme_accent
+#define INK ui_palette.ink
+#define SURFACE ui_palette.surface
+#define SURFACE_HI ui_palette.surface_hi
+#define LINE ui_palette.line
+#define TEXT ui_palette.text
+#define MUTED ui_palette.muted
+#define KEY_BG ui_palette.key_bg
+#define KEY_ITEM ui_palette.key_item
+#define KEY_CHECKED ui_palette.key_checked
+#define KEY_TEXT ui_palette.key_text
+#define DANGER_BG ui_palette.danger_bg
+#define DANGER_TEXT ui_palette.danger_text
+#define SHADE_TOP ui_palette.shade_top
+#define SHADE_BOTTOM ui_palette.shade_bottom
+#define GLASS ui_palette.glass
+#define ON_WALL theme_on_wall
+#define ON_WALL_MUTED theme_on_wall_muted
+#define ON_ACCENT theme_on_accent
 #define GREEN 0x34d399
 #define AMBER 0xfbbf24
 #define RED 0xf87171
-#define FIELD 0x0e131b
+#define FIELD ui_palette.field
 extern const lv_font_t m3_font_korean, m3_font_title, m3_font_clock;
 #define FONT_TITLE (&m3_font_title)
 #define FONT_ICON (&lv_font_montserrat_28)
 
-typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_RECORDER, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_COUNT } app_id_t;
+typedef enum { APP_HOME, APP_WIFI, APP_FILES, APP_RECORDER, APP_MONITOR, APP_SYSTEM, APP_RADIO, APP_GAMES, APP_TTS, APP_AGENT, APP_TUBE, APP_MUSIC, APP_GALLERY, APP_CALCULATOR, APP_YTMUSIC, APP_READER, APP_WEATHER, APP_COUNT } app_id_t;
 _Static_assert(APP_AGENT == 9, "Agent app dispatch IDs must match the UI enum");
+_Static_assert(M3_CUE_APP_READER - M3_CUE_APP_HOME + 1 == APP_WEATHER, "Existing spoken app IDs must match navigation");
 enum { CONTENT_TOP = 100, HOME_TOP = 756, KEYBOARD_HEIGHT = 270 };
 static const m3_text_t app_names[] = {T_APP_HOME, T_APP_WIFI, T_APP_FILES, T_APP_RECORDER, T_APP_MONITOR,
-    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC, T_APP_GALLERY, T_APP_CALCULATOR, T_APP_YTMUSIC};
+    T_APP_SETTINGS, T_APP_RADIO, T_APP_GAMES, T_APP_TTS, T_APP_AGENT, T_APP_TUBE, T_APP_MUSIC, T_APP_GALLERY, T_APP_CALCULATOR, T_APP_YTMUSIC, T_APP_READER, T_APP_WEATHER};
 
 static lv_obj_t *pages[APP_COUNT], *viewport, *app_title, *back_button, *keyboard;
 static lv_obj_t *home_strip, *home_pill, *home_hint;
@@ -69,8 +95,12 @@ static M3_PSRAM_BSS m3_runtime_state_t snapshot;
 
 /* Status bar, home and activity shade. */
 static lv_obj_t *status, *status_clock, *status_audio, *status_strip, *wifi_levels[4];
+static lv_obj_t *power_plug, *power_battery, *power_fill, *power_charge, *power_percent;
 static lv_obj_t *home_clock, *home_date, *home_net_icon, *home_net, *home_detail;
-enum { HOME_APPS_PER_PAGE = 6, HOME_APP_PAGE_COUNT = (APP_COUNT - 2) / HOME_APPS_PER_PAGE + 1,
+static lv_obj_t *home_weather;
+static void update_weather(void);
+enum { HOME_PRIMARY_APPS = 6, HOME_APPS_PER_PAGE = 9,
+    HOME_APP_PAGE_COUNT = 1 + (APP_COUNT - 1 - HOME_PRIMARY_APPS + HOME_APPS_PER_PAGE - 1) / HOME_APPS_PER_PAGE,
     HOME_PHOTOS = HOME_APP_PAGE_COUNT + 1, HOME_PAGE_COUNT = HOME_PHOTOS + 1 };
 static lv_obj_t *home_tiles, *home_sheets[HOME_PAGE_COUNT], *home_dots[HOME_PAGE_COUNT], *home_page_name;
 static unsigned home_index = 1;
@@ -84,6 +114,10 @@ static void home_page_update(void);
 static void update_calendar(void);
 static void update_photos(void);
 static lv_obj_t *shade, *shade_scrim, *usage_arcs[3], *usage_values[3], *usage_details[3], *job_cards[6], *job_labels[6];
+static lv_obj_t *job_icons[6], *cpu_chart, *cpu_values[2], *job_stops[6];
+static void service_stop(lv_event_t *event);
+static lv_chart_series_t *cpu_series[2];
+static unsigned seen_cpu;
 static int32_t shade_y = -HOME_TOP, shade_start_y;
 static bool shade_drag;
 static lv_point_t shade_origin;
@@ -93,6 +127,8 @@ static void shade_set(bool open);
 static lv_obj_t *net_title, *net_dot, *network, *qr, *qr_url;
 static lv_obj_t *ssid_field, *pass_field, *ip_field, *gateway_field, *mask_field, *dns_field;
 static lv_obj_t *static_switch, *static_fields, *wifi_info, *wifi_actions[3], *scan_buttons[M3_WIFI_RESULTS];
+static lv_obj_t *wifi_saved_count, *wifi_saved_rows[M3_WIFI_PROFILE_LIMIT], *wifi_saved_names[M3_WIFI_PROFILE_LIMIT];
+static lv_obj_t *wifi_saved_connect[M3_WIFI_PROFILE_LIMIT], *wifi_saved_remove[M3_WIFI_PROFILE_LIMIT];
 static unsigned seen_scan, seen_settings, seen_wifi;
 static bool wifi_open_selected;
 static char wifi_selected_ssid[33];
@@ -109,7 +145,7 @@ static lv_obj_t *memory, *heap_bar, *chart, *monitor_info, *system_info;
 static lv_chart_series_t *heap_series, *psram_series;
 static unsigned chart_tick;
 static char seen_url[96], seen_audio[96];
-static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[12], *radio_region;
+static lv_obj_t *radio_url, *radio_codec, *radio_now, *radio_info, *radio_bar, *station_buttons[24], *radio_region, *radio_transport;
 static int radio_selected = -1;
 static bool radio_pending;
 static int64_t radio_pending_until;
@@ -119,6 +155,8 @@ static unsigned seen_agent;
 static lv_obj_t *voice_provider, *voice_panel, *voice_info, *voice_text, *voice_target, *voice_key, *voice_key_info, *voice_dot;
 static unsigned seen_voice;
 static lv_obj_t *language_tabs;
+static lv_obj_t *sound_switches[3], *sound_sliders[3], *sound_values[3];
+static lv_obj_t *sound_card, *accessibility_panel, *guidance_mode;
 static lv_obj_t *agent_thinking, *agent_voice, *voice_think, *tts_wait, *tts_talk, *tube_wait;
 enum { METER_BARS = 11, METER_MIN = 4, METER_MAX = 44 };
 static lv_obj_t *voice_meter, *voice_meter_bars[METER_BARS], *voice_db;
@@ -127,11 +165,17 @@ static lv_obj_t *web_tabs, *web_qr, *web_url, *web_state, *web_dot, *web_request
 static unsigned web_address_kind = M3_WEB_DOMAIN;
 static bool web_qr_dirty = true, web_qr_ok;
 static lv_obj_t *web_frame, *web_hint, *web_retry;
+static lv_obj_t *web_controls[4], *web_control_info;
 static char seen_web_url[96];
 static void voice_input(lv_event_t *event);
 static void apply_language(void);
 static void update_metrics(lv_timer_t *timer);
 static void tube_leave(void);
+static void reader_leave(void);
+static void reader_enter(void);
+static void reader_tick(void);
+static void power_visible(lv_obj_t *obj, bool visible);
+static void reader_open_path(const char *folder, const char *name);
 static void sd_apps_close(lv_event_t *event);
 static void sd_apps_tick(lv_timer_t *timer);
 static lv_obj_t *builtin_games, *sd_launcher, *sd_panel, *sd_list, *sd_stage, *sd_canvas, *sd_status;
@@ -142,20 +186,7 @@ static lv_obj_t *sd_frame_holder;
 static lv_obj_t *sd_restart;
 static bool sd_launch_failed;
 
-/* World presets retained; KR/JP direct MP3 endpoints checked on 2026-10-15. */
-static const struct { const char *name, *url; bool aac; unsigned region; } radio_stations[] = {
-    {"SomaFM Groove Salad / MP3 128k", "https://ice5.somafm.com/groovesalad-128-mp3", false, 0},
-    {"SomaFM Groove Salad / AAC 64k", "https://ice5.somafm.com/groovesalad-64-aac", true, 0},
-    {"SomaFM Drone Zone / MP3 128k", "https://ice5.somafm.com/dronezone-128-mp3", false, 0},
-    {"SomaFM Secret Agent / MP3 128k", "https://ice5.somafm.com/secretagent-128-mp3", false, 0},
-    {"Radio Swiss Jazz / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128", false, 0},
-    {"Radio Swiss Classic / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128", false, 0},
-    {"Radio Swiss Pop / MP3 128k", "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128", false, 0},
-    {"Korea Big B K-pop / MP3", "https://antares.dribbcast.com/proxy/kpop?mp=/s", false, 1},
-    {"Japan FM Setagaya / MP3", "https://fmsetagaya834.out.airtime.pro/fmsetagaya834_a", false, 2},
-    {"Japan Big B J-pop / MP3", "https://antares.dribbcast.com/proxy/jpop?mp=/s", false, 2}
-};
-_Static_assert(sizeof(radio_stations) / sizeof(radio_stations[0]) <= 12, "station buttons");
+#include "m3_radio_stations.inc"
 static lv_obj_t *game_board, *game_tiles[16], *game_info, *game_arrows[4], *game_tabs, *game_undo;
 static lv_obj_t *cross_scene, *cross_lanes[M3_CROSS_ROWS], *cross_objects[M3_CROSS_ROWS][3];
 static lv_obj_t *cross_windows[M3_CROSS_ROWS][3], *cross_player, *cross_body;
@@ -178,9 +209,21 @@ static lv_style_t st_page, st_card, st_row, st_btn, st_btn_pressed, st_primary, 
     st_caption, st_track, st_indicator, st_knob, st_title, st_bare;
 static m3_preferences_t ui_preferences = {1, 100, 30, 1, 0, 40, 40, 0};
 static lv_obj_t *brightness_slider, *fps_slider, *brightness_value, *fps_value;
+static m3_typography_t ui_typography = {1, 0, 16, 0};
+static lv_obj_t *font_family_tabs, *font_size_slider, *font_size_value, *font_preview;
+static unsigned applied_font_family = 255, applied_font_pixels = 255;
+static void apply_typography(void);
 static lv_obj_t *mute_switch, *animation_switch, *focus_switch, *settings_info;
+static lv_obj_t *wake_tabs, *screen_shield, *restart_confirm, *restart_info;
+static lv_obj_t *shade_note;
+static lv_indev_t *screen_input;
+static lv_timer_t *screen_timer;
+static m3_screen_wake_t screen_wake;
+static bool screen_blanked, screen_waking;
+static uint32_t screen_release_at;
 static unsigned applied_brightness = 255, applied_fps = 255, applied_animations = 255;
 static void update_preferences(void);
+static void theme_wallpaper_sync(void);
 static uint32_t ui_duration(uint32_t ms) { return ui_preferences.animations ? ms : 0; }
 static lv_anim_enable_t ui_animation(void) { return ui_preferences.animations ? LV_ANIM_ON : LV_ANIM_OFF; }
 static void styles_init(void) {
@@ -220,7 +263,7 @@ static void styles_init(void) {
     lv_style_init(&st_primary_pressed);
     lv_style_set_bg_color(&st_primary_pressed, lv_color_hex(0x00b4bd));
     lv_style_init(&st_danger);
-    lv_style_set_bg_color(&st_danger, lv_color_hex(0x3a1d27)); lv_style_set_text_color(&st_danger, lv_color_hex(0xff9aa8));
+    lv_style_set_bg_color(&st_danger, lv_color_hex(DANGER_BG)); lv_style_set_text_color(&st_danger, lv_color_hex(DANGER_TEXT));
     lv_style_init(&st_disabled);
     lv_style_set_opa(&st_disabled, LV_OPA_40);
 
@@ -256,7 +299,8 @@ static void styles_init(void) {
     lv_style_init(&st_caption);
     lv_style_set_text_color(&st_caption, lv_color_hex(MUTED)); lv_style_set_text_line_space(&st_caption, 3);
     lv_style_init(&st_title);
-    lv_style_set_text_font(&st_title, FONT_TITLE); lv_style_set_text_color(&st_title, lv_color_hex(TEXT));
+    lv_style_set_text_font(&st_title, m3_system_font(ui_typography.pixels + 4, ui_typography.family));
+    lv_style_set_text_color(&st_title, lv_color_hex(TEXT));
 
     lv_style_init(&st_track);
     lv_style_set_bg_color(&st_track, lv_color_hex(SURFACE_HI)); lv_style_set_bg_opa(&st_track, LV_OPA_COVER);
@@ -273,7 +317,7 @@ static void styles_init(void) {
 /* ---------- Language binding: every static string remembers its text ID. ---------- */
 typedef enum { BIND_TEXT, BIND_PLACEHOLDER } bind_kind_t;
 typedef struct { lv_obj_t *obj; const char *prefix; uint16_t id; uint8_t kind; } binding_t;
-static M3_PSRAM_BSS binding_t bindings[256];
+static M3_PSRAM_BSS binding_t bindings[320];
 static unsigned binding_count;
 static void bind_apply(unsigned index) {
     /* Help texts exceed any small buffer in Korean (3 bytes per syllable); only
@@ -313,6 +357,11 @@ static const char *status_text(const char *english) {
 }
 
 /* ---------- Small widget helpers. ---------- */
+static void label_ellipsis(lv_obj_t *obj) {
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
+    /* DOT needs a bounded line: content height would simply grow and wrap. */
+    lv_obj_set_height(obj, lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height);
+}
 static lv_obj_t *label(lv_obj_t *parent, const char *text, uint32_t color) {
     lv_obj_t *obj = lv_label_create(parent);
     lv_label_set_text(obj, text);
@@ -346,6 +395,7 @@ static lv_obj_t *card(lv_obj_t *parent, m3_text_t title) {
     }
     return obj;
 }
+static void sound_tap(lv_event_t *event) { (void)event; m3_feedback_emit(M3_CUE_TAP, m3_i18n_language()); }
 typedef enum { BTN_SECONDARY, BTN_PRIMARY, BTN_DANGER } button_kind_t;
 static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, button_kind_t kind, lv_event_cb_t callback, void *data) {
     lv_obj_t *obj = lv_button_create(parent);
@@ -356,9 +406,10 @@ static lv_obj_t *button(lv_obj_t *parent, const char *symbol, m3_text_t id, butt
         lv_obj_add_style(obj, &st_primary, 0); lv_obj_add_style(obj, &st_primary_pressed, LV_STATE_PRESSED);
     } else if (kind == BTN_DANGER) lv_obj_add_style(obj, &st_danger, 0);
     lv_obj_t *text_obj = lv_label_create(obj); lv_obj_set_width(text_obj, LV_PCT(100));
-    lv_label_set_long_mode(text_obj, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(text_obj);
     lv_obj_set_style_text_align(text_obj, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(text_obj);
     bind_text(text_obj, id, symbol, BIND_TEXT);
+    lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
     return obj;
 }
@@ -366,6 +417,12 @@ static lv_obj_t *grow(lv_obj_t *obj) { lv_obj_set_flex_grow(obj, 1); lv_obj_set_
 static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol, lv_event_cb_t callback, void *data) {
     lv_obj_t *obj = button(parent, symbol, T_NONE, BTN_SECONDARY, callback, data);
     lv_obj_set_size(obj, 52, 52); lv_obj_set_style_pad_all(obj, 0, 0);
+    return obj;
+}
+static lv_obj_t *refresh_button(lv_obj_t *parent,m3_text_t action,lv_event_cb_t callback,void *data) {
+    lv_obj_t *obj=icon_button(parent,LV_SYMBOL_REFRESH,callback,data);
+    /* Keep each app's action description separate from its icon-only face. */
+    lv_obj_set_user_data(obj,(void *)(uintptr_t)action);
     return obj;
 }
 static void style_slider(lv_obj_t *slider) {
@@ -451,10 +508,10 @@ static void activity_set(lv_obj_t *box, bool on) {
 }
 /* Speech phase from the audio worker's status: 1 preparing (download or engine start), 2 speaking. */
 static unsigned tts_phase(const m3_audio_state_t *audio) {
-    static const char *const preparing[] = {"Korean TTS initializing", "Google Korean TTS / downloading", "OpenAI TTS / downloading"};
-    static const char *const speaking[] = {"Speaking Korean", "Google Korean TTS / speaking", "OpenAI TTS / AI-generated"};
+    static const char *const preparing[] = {"Korean TTS initializing", "Google Korean TTS / downloading", "OpenAI TTS / downloading", "Azure TTS / preparing"};
+    static const char *const speaking[] = {"Speaking Korean", "Google Korean TTS / speaking", "OpenAI TTS / AI-generated", "Azure TTS / speaking"};
     if (!audio->playing) return 0;
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < sizeof(preparing) / sizeof(preparing[0]); ++i) {
         if (!strncmp(audio->message, preparing[i], strlen(preparing[i]))) return 1;
         if (!strncmp(audio->message, speaking[i], strlen(speaking[i]))) return 2;
     }
@@ -463,7 +520,7 @@ static unsigned tts_phase(const m3_audio_state_t *audio) {
 
 /* Segmented control on a button matrix: translated labels, exactly one choice. */
 typedef struct { lv_obj_t *obj; const char *const *fixed; const char *map[5]; m3_text_t ids[4]; uint8_t count, selected; } segment_t;
-static segment_t segments[16];
+static segment_t segments[28];
 static unsigned segment_count;
 static segment_t *segment_of(lv_obj_t *obj) {
     for (unsigned i = 0; i < segment_count; ++i) if (segments[i].obj == obj) return &segments[i];
@@ -647,6 +704,7 @@ static void phone_enter(app_id_t app);
 static void show_app(app_id_t app) {
     if (app >= APP_COUNT) return;
     if (current_app == APP_TUBE && app != APP_TUBE) tube_leave();
+    if (current_app == APP_READER && app != APP_READER) reader_leave();
     if (current_app == APP_GAMES && app != APP_GAMES && sd_panel) sd_apps_close(NULL);
     if (voice_target) { m3_audio_stop(); voice_target = NULL; }
     if (voice_panel) lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
@@ -661,8 +719,11 @@ static void show_app(app_id_t app) {
         else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
     }
     if (current_app == APP_GALLERY && app != APP_GALLERY) m3_gallery_close();
+    bool changed_app = current_app != app;
     current_app = app;
+    if (changed_app) m3_feedback_emit(app == APP_WEATHER ? M3_CUE_TAP : M3_CUE_APP_HOME + app, m3_i18n_language());
     phone_enter(app);
+    if (app == APP_READER) reader_enter();
     if (app == APP_HOME && home_tiles) {
         home_index = 1;
         lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
@@ -878,15 +939,19 @@ static void edit_field(lv_event_t *event) {
     }
 }
 static lv_obj_t *icon_part(lv_obj_t *parent, int x, int y, int w, int h, int radius);
+/* A drawn glyph on a themed surface: same shape as icon_part, in the text color. */
+static lv_obj_t *glyph_part(lv_obj_t *parent, int x, int y, int w, int h, int radius) {
+    lv_obj_t *part = icon_part(parent, x, y, w, h, radius); set_bg(part, TEXT); return part;
+}
 /* Microphone glyph drawn from shapes; the built-in symbol set has no microphone. */
 static lv_obj_t *mic_button(lv_obj_t *parent, lv_obj_t *field) {
     lv_obj_t *obj = icon_button(parent, NULL, voice_input, field);
-    icon_part(obj, 21, 11, 10, 19, 5);
+    glyph_part(obj, 21, 11, 10, 19, 5);
     lv_obj_t *cradle = bare(obj); lv_obj_set_pos(cradle, 16, 20); lv_obj_set_size(cradle, 20, 16);
-    lv_obj_set_style_border_width(cradle, 2, 0); lv_obj_set_style_border_color(cradle, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_border_width(cradle, 2, 0); lv_obj_set_style_border_color(cradle, lv_color_hex(TEXT), 0);
     lv_obj_set_style_border_side(cradle, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT | LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_radius(cradle, 9, 0);
-    icon_part(obj, 25, 36, 2, 5, 1); icon_part(obj, 20, 40, 12, 2, 1);
+    glyph_part(obj, 25, 36, 2, 5, 1); glyph_part(obj, 20, 40, 12, 2, 1);
     return obj;
 }
 typedef enum { INPUT_TEXT, INPUT_NUMBER, INPUT_KOREAN } input_mode_t;
@@ -905,6 +970,8 @@ static lv_obj_t *input_field(lv_obj_t *parent, m3_text_t title, unsigned length,
     return field;
 }
 
+#include "m3_weather_ui.inc"
+
 /* ---------- Voice input sheet. ---------- */
 static void voice_retry(lv_event_t *event) {
     (void)event;
@@ -918,7 +985,7 @@ static void voice_input(lv_event_t *event) {
     hide_keyboard();
     voice_target = lv_event_get_user_data(event);
     lv_label_set_text(voice_text, "");
-    lv_label_set_text(voice_info, tr(voice.provider ? T_VOICE_GEMINI : T_VOICE_OPENAI));
+    lv_label_set_text(voice_info, tr(voice.provider == 3 ? T_VOICE_AZURE : voice.provider ? T_VOICE_GEMINI : T_VOICE_OPENAI));
     lv_obj_remove_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_to_index(voice_panel, -1); lv_obj_move_to_index(home_strip, -1);
     voice_retry(NULL);
@@ -973,7 +1040,10 @@ static void voice_provider_changed(lv_event_t *event) {
 static void language_changed(lv_event_t *event) {
     (void)event;
     m3_lang_t language = (m3_lang_t)segment_value(language_tabs);
-    if (language != m3_i18n_language() && m3_i18n_set_language(language)) apply_language();
+    if (language != m3_i18n_language() && m3_i18n_set_language(language)) {
+        apply_language();
+        m3_feedback_clear(); m3_feedback_emit(M3_CUE_LANGUAGE, language);
+    }
 }
 
 /* ---------- AI agent. ---------- */
@@ -1016,18 +1086,47 @@ static void select_network(lv_event_t *event) {
     wifi_open_selected = snapshot.networks[index].authmode == WIFI_AUTH_OPEN;
     snprintf(wifi_selected_ssid, sizeof(wifi_selected_ssid), "%s", snapshot.networks[index].ssid);
     form_dirty = true;
-    /* Move straight to the password so one tap selects and continues. */
-    if (!wifi_open_selected) lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
+    if (snapshot.networks[index].saved) {
+        network_settings_t settings = {.version = 1};
+        snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.networks[index].ssid);
+        bool accepted = m3_runtime_wifi(M3_WIFI_USE_PROFILE, &settings);
+        memset(&settings, 0, sizeof(settings));
+        set_text(wifi_info, tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY));
+        return;
+    }
+    if (wifi_open_selected) {
+        /* Public networks always use an empty password and automatic addressing. */
+        network_settings_t settings = {.version = 1};
+        snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.networks[index].ssid);
+        lv_obj_remove_state(static_switch, LV_STATE_CHECKED); static_changed(NULL);
+        bool accepted = m3_runtime_wifi(M3_WIFI_CONNECT, &settings);
+        memset(&settings, 0, sizeof(settings));
+        set_text(wifi_info, tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY));
+        set_ink(wifi_info, accepted ? CYAN : AMBER);
+    } else lv_obj_send_event(pass_field, LV_EVENT_FOCUSED, NULL);
 }
 static void wifi_feedback(const char *message, uint32_t color) {
     lv_label_set_text(wifi_info, message);
     lv_obj_set_style_text_color(wifi_info, lv_color_hex(color), 0);
     lv_obj_scroll_to_view_recursive(wifi_info, ui_animation());
 }
+static void wifi_saved_action(lv_event_t *event) {
+    unsigned value = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    unsigned index = value % M3_WIFI_PROFILE_LIMIT;
+    if (index >= snapshot.saved_wifi_count) return;
+    network_settings_t settings = {.version = 1};
+    snprintf(settings.ssid, sizeof(settings.ssid), "%s", snapshot.saved_wifi[index].ssid);
+    hide_keyboard();
+    bool accepted = m3_runtime_wifi(value >= M3_WIFI_PROFILE_LIMIT ? M3_WIFI_FORGET_PROFILE : M3_WIFI_USE_PROFILE, &settings);
+    memset(&settings, 0, sizeof(settings));
+    wifi_feedback(tr(accepted ? T_WIFI_QUEUED : T_WIFI_BUSY), accepted ? CYAN : AMBER);
+}
 static m3_wifi_action_t wifi_connection_action(const network_settings_t *settings) {
     bool explicit_open = wifi_open_selected && !strcmp(settings->ssid, wifi_selected_ssid);
-    return !settings->pass[0] && !explicit_open && snapshot.wifi_password_saved &&
-        !strcmp(settings->ssid, snapshot.settings.ssid) ? M3_WIFI_CONNECT_SAVED : M3_WIFI_CONNECT;
+    bool saved = snapshot.wifi_password_saved && !strcmp(settings->ssid, snapshot.settings.ssid);
+    for (unsigned i = 0; i < snapshot.saved_wifi_count; ++i)
+        if (snapshot.saved_wifi[i].secured && !strcmp(settings->ssid, snapshot.saved_wifi[i].ssid)) saved = true;
+    return !settings->pass[0] && !explicit_open && saved ? M3_WIFI_CONNECT_SAVED : M3_WIFI_CONNECT;
 }
 static void wifi_action(lv_event_t *event) {
     m3_wifi_action_t action = (m3_wifi_action_t)(uintptr_t)lv_event_get_user_data(event);
@@ -1113,11 +1212,24 @@ static void update_wifi(void) {
                 lv_obj_set_style_text_color(lv_obj_get_child(scan_buttons[i], 0),
                     lv_color_hex(bars >= 3 ? GREEN : bars == 2 ? AMBER : RED), 0);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 1), snapshot.networks[i].ssid);
-                snprintf(text, sizeof(text), "%d dBm", snapshot.networks[i].rssi);
+                snprintf(text, sizeof(text), "%s%s%d dBm", snapshot.networks[i].saved ? tr(T_WIFI_SAVED) : "",
+                    snapshot.networks[i].saved ? " · " : "", snapshot.networks[i].rssi);
                 lv_label_set_text(lv_obj_get_child(scan_buttons[i], 2), text);
                 wifi_security(lv_obj_get_child(scan_buttons[i], 3), snapshot.networks[i].authmode == WIFI_AUTH_OPEN);
                 lv_obj_remove_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
             } else lv_obj_add_flag(scan_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    char count[80]; snprintf(count, sizeof(count), tr(T_WIFI_SAVED_COUNT), snapshot.saved_wifi_count);
+    set_text(wifi_saved_count, count);
+    for (unsigned i = 0; i < M3_WIFI_PROFILE_LIMIT; ++i) {
+        power_visible(wifi_saved_rows[i], i < snapshot.saved_wifi_count);
+        if (i >= snapshot.saved_wifi_count) continue;
+        set_text(wifi_saved_names[i], snapshot.saved_wifi[i].ssid);
+        if (snapshot.wifi_busy || !snapshot.wifi_ready) {
+            lv_obj_add_state(wifi_saved_connect[i], LV_STATE_DISABLED); lv_obj_add_state(wifi_saved_remove[i], LV_STATE_DISABLED);
+        } else {
+            lv_obj_remove_state(wifi_saved_connect[i], LV_STATE_DISABLED); lv_obj_remove_state(wifi_saved_remove[i], LV_STATE_DISABLED);
         }
     }
 }
@@ -1177,7 +1289,12 @@ static void radio_mark(int index) {
 }
 static void start_radio(lv_event_t *event) {
     (void)event; hide_keyboard();
-    if (!m3_audio_radio(lv_textarea_get_text(radio_url), segment_value(radio_codec) == 1))
+    unsigned mode = segment_value(radio_transport);
+    bool preset = radio_selected >= 0 && (unsigned)radio_selected < sizeof(radio_stations) / sizeof(radio_stations[0]);
+    bool accepted = preset && (mode || radio_stations[radio_selected].relay)
+        ? m3_audio_radio_preset(radio_stations[radio_selected].id, mode ? mode - 1 : 1)
+        : m3_audio_radio(lv_textarea_get_text(radio_url), segment_value(radio_codec) == 1);
+    if (!accepted)
         lv_label_set_text(radio_info, tr(T_RADIO_FAIL));
     else lv_label_set_text(radio_info, tr(T_RADIO_QUEUED));
 }
@@ -1233,7 +1350,9 @@ static void tts_speed_changed(lv_event_t *event) { (void)event; tts_speed_label(
 
 /* ---------- Games. ---------- */
 static uint32_t tile_color(uint8_t power) {
-    static const uint32_t colors[] = {SURFACE_HI, 0x2e3a4d, 0x3b4a61, 0xf59e0b, 0xf97316, 0xef4444, 0xdc2626,
+    if (power == 1 || power == 2)
+        return lv_color_to_u32(lv_color_mix(lv_color_hex(MUTED), lv_color_hex(SURFACE_HI), power == 1 ? 60 : 105)) & 0xffffff;
+    const uint32_t colors[] = {SURFACE_HI, 0, 0, 0xf59e0b, 0xf97316, 0xef4444, 0xdc2626,
         0xeab308, 0xfacc15, 0x22c55e, 0x06b6d4, 0xa855f7};
     return power < sizeof(colors) / sizeof(colors[0]) ? colors[power] : MAGENTA;
 }
@@ -1302,7 +1421,7 @@ static void render_game(void) {
             snprintf(text, sizeof(text), "%s", "?"); ink = MUTED;
             if (memory_visible[i] || memory_solved[i]) {
                 snprintf(text, sizeof(text), "%u", memory_cards[i] + 1);
-                color = memory_solved[i] ? 0x0f5f4a : 0x7c205f; ink = TEXT;
+                color = memory_solved[i] ? 0x0f5f4a : 0x7c205f; ink = 0xffffff;
             }
         } else {
             text[0] = 0;
@@ -1506,6 +1625,8 @@ static void open_file(lv_event_t *event) {
         if (length <= 0 || (size_t)length >= sizeof(folder)) return;
         snprintf(selected_folder, sizeof(selected_folder), "%s", folder);
         selected_sd = true; selected_offset = 0; browse_refresh();
+    } else if (snapshot.browse_sd && m3_reader_supported(entry->name)) {
+        reader_open_path(snapshot.folder, entry->name);
     } else if (snapshot.browse_sd && m3_gallery_supported(entry->name)) {
         show_app(APP_GALLERY); gallery_load(row_index);
     } else if (snapshot.browse_sd && !strcmp(snapshot.folder, "/media")) {
@@ -1613,19 +1734,68 @@ static void shade_touch(lv_event_t *event) {
     } else if (code == LV_EVENT_PRESS_LOST && shade_drag) shade_set(shade_start_y == 0);
 }
 static void shade_close(lv_event_t *event) { (void)event; shade_set(false); }
+
+/* Backlight only: touch scanning, audio, networking and workers stay active.
+ * A top-layer shield consumes all touches, including the wake gesture release. */
+static void screen_off(lv_event_t *event) {
+    (void)event;
+    if (screen_blanked || screen_waking) return;
+    screen_input = NULL;
+    for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
+        if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER &&
+            lv_indev_get_display(input) == m3_board_display()) { screen_input = input; break; }
+    }
+    if (!m3_board_touch_ready() || !screen_input || !screen_timer) {
+        set_text(shade_note, tr(T_SET_WAKE_UNAVAILABLE)); return;
+    }
+    m3_screen_wake_reset(&screen_wake);
+    lv_obj_move_to_index(screen_shield, -1);
+    lv_obj_remove_flag(screen_shield, LV_OBJ_FLAG_HIDDEN);
+    if (m3_board_set_screen_on(false) != ESP_OK) {
+        lv_obj_add_flag(screen_shield, LV_OBJ_FLAG_HIDDEN);
+        set_text(shade_note, tr(T_SET_BRIGHTNESS_ERROR)); return;
+    }
+    screen_blanked = true; theme_wallpaper_sync();
+}
+static void screen_wake_tick(lv_timer_t *timer) {
+    (void)timer;
+    if ((!screen_blanked && !screen_waking) || !screen_input) return;
+    uint32_t now = lv_tick_get();
+    bool pressed = lv_indev_get_state(screen_input) == LV_INDEV_STATE_PRESSED;
+    lv_point_t point; lv_indev_get_point(screen_input, &point);
+    if (screen_blanked && m3_screen_wake_sample(&screen_wake, ui_preferences.wake_mode, now, pressed, point.x, point.y)) {
+        esp_err_t err = m3_board_set_screen_on(true);
+        /* The board driver fails with backlight on, so always remove the shield. */
+        if (err != ESP_OK) set_text(settings_info, tr(T_SET_BRIGHTNESS_ERROR));
+        screen_blanked = false; screen_waking = true; screen_release_at = now; theme_wallpaper_sync();
+    }
+    if (screen_waking) {
+        if (pressed) screen_release_at = now;
+        else if ((uint32_t)(now - screen_release_at) >= 150) {
+            lv_obj_add_flag(screen_shield, LV_OBJ_FLAG_HIDDEN);
+            screen_waking = false;
+        }
+    }
+}
 static void usage_update(unsigned index, uint64_t occupied, uint64_t total) {
     char text[64]; unsigned percent = usage_percent(occupied, total);
     lv_arc_set_value(usage_arcs[index], percent);
     if (total) snprintf(text, sizeof(text), "%u%%", percent);
     else snprintf(text, sizeof(text), "--");
     set_text(usage_values[index], text);
-    if (total) snprintf(text, sizeof(text), "%.1f / %.1f MiB", occupied / 1048576.0, total / 1048576.0);
+    if (total >= 1073741824ULL) snprintf(text, sizeof(text), "%.1f / %.1f GiB", occupied / 1073741824.0, total / 1073741824.0);
+    else if (total) snprintf(text, sizeof(text), "%.1f / %.1f MiB", occupied / 1048576.0, total / 1048576.0);
     else snprintf(text, sizeof(text), "%s", tr(T_SHADE_UNAVAILABLE));
     set_text(usage_details[index], text);
 }
 static void job_update(unsigned index, const char *title, const char *detail, bool running) {
-    char text[192]; snprintf(text, sizeof(text), "%s  " LV_SYMBOL_BULLET "  %s\n%s", title, tr(running ? T_SHADE_ACTIVE : T_SHADE_IDLE), detail);
+    char text[192]; snprintf(text, sizeof(text), "%s\n%s", title, detail);
     set_text(job_labels[index], text);
+    set_ink(job_icons[index], running ? CYAN : MUTED);
+    if (job_stops[index]) {
+        if (running && (index != 4 || !snapshot.web_control_busy)) lv_obj_remove_state(job_stops[index], LV_STATE_DISABLED);
+        else lv_obj_add_state(job_stops[index], LV_STATE_DISABLED);
+    }
     if (!lv_color_eq(lv_obj_get_style_border_color(job_cards[index], 0), lv_color_hex(running ? CYAN : LINE)))
         lv_obj_set_style_border_color(job_cards[index], lv_color_hex(running ? CYAN : LINE), 0);
 }
@@ -1645,7 +1815,7 @@ static uint16_t seen_tube_thumbs;
 static int seen_tube_set = -1;
 static bool tube_in_player, tube_pending;
 static int64_t tube_pending_until;
-static char tube_id[12], tube_channel_id[25], tube_last_query[128];
+static char tube_id[12], tube_channel_id[25], tube_last_query[M3_TUBE_QUERY_BYTES];
 static unsigned tube_start_s, tube_duration_s;
 static bool tube_live;
 
@@ -1710,6 +1880,7 @@ static void tube_leave(void) { if (tube_in_player || tube_pending) tube_stop(); 
 static void tube_submit(void) {
     const char *query = lv_textarea_get_text(tube_query);
     if (!query[0]) return;
+    if (strlen(query) >= M3_TUBE_QUERY_BYTES || !m3_utf8_valid(query)) { set_text(tube_status, tr(T_TUBE_QUERY_LONG)); return; }
     hide_keyboard();
     snprintf(tube_last_query, sizeof(tube_last_query), "%s", query);
     if (!m3_tube_search(query, 1)) lv_label_set_text(tube_status, tr(T_TUBE_NOT_CONFIGURED));
@@ -1825,7 +1996,7 @@ static void update_tube(const m3_audio_state_t *audio) {
     m3_tube_list(&tube_list);
     if (tube_list.revision != seen_tube_list) {
         seen_tube_list = tube_list.revision;
-        char text[128];
+        char text[512];
         if (tube_list.thumb_set != seen_tube_set) {
             seen_tube_set = tube_list.thumb_set; seen_tube_thumbs = 0;
             for (unsigned i = 0; i < M3_TUBE_ITEMS; ++i) lv_obj_add_flag(tube_rows[i].canvas, LV_OBJ_FLAG_HIDDEN);
@@ -1903,6 +2074,26 @@ static void update_tube(const m3_audio_state_t *audio) {
 }
 #include "m3_ytmusic_ui.inc"
 
+static void service_stop(lv_event_t *event) {
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index == 1) {
+        radio_pending = tube_pending = ytm_pending = false;
+        ytm_queue_count = 0;
+        m3_recorder_state_t recorder; m3_recorder_state(&recorder);
+        if (recorder.busy) m3_recorder_finish(); /* Preserve a recording by saving it. */
+        else { m3_music_stop(); m3_audio_stop(); }
+    } else if (index == 2) voice_cancel(NULL);
+    else if (index == 4) {
+        bool accepted = m3_runtime_web(M3_WEB_STOP_ALL);
+        set_text(shade_note, tr(accepted ? T_SERVICE_STOPPING : T_SERVICE_BUSY));
+    } else if (index == 5) m3_agent_cancel(false);
+}
+static void web_control(lv_event_t *event) {
+    m3_web_action_t action = (m3_web_action_t)(uintptr_t)lv_event_get_user_data(event);
+    bool accepted = m3_runtime_web(action);
+    set_text(web_control_info, tr(accepted ? T_SERVICE_STOPPING : T_SERVICE_BUSY));
+}
+
 
 static void update_activity(const m3_agent_state_t *agent, const m3_voice_state_t *voice, const m3_audio_state_t *audio) {
     unsigned phase = tts_phase(audio);
@@ -1930,7 +2121,9 @@ static void web_retry_ipv6(lv_event_t *event) {
     web_qr_dirty = true;
 }
 static m3_text_t web_explanation(void) {
+    if (snapshot.web_policy == 2) return T_WEB_STOPPED_ALL;
     if (web_address_kind == M3_WEB_DOMAIN) {
+        if (snapshot.web_policy == 1 || !strcmp(snapshot.cloud_status, "stopped")) return T_WEB_STOPPED_DOMAIN;
         if (snapshot.cloud) return T_WEB_DOMAIN_READY;
         if (!strcmp(snapshot.cloud_status, "factory_missing")) return T_WEB_PROVISION;
         if (!strcmp(snapshot.cloud_status, "waiting_wifi")) return T_WEB_NO_WIFI;
@@ -1960,7 +2153,7 @@ static void update_web(void) {
     }
     set_text(web_url, url[0] ? url : tr(T_QR_WAIT));
     bool ready = snapshot.web && url[0] && (web_address_kind != M3_WEB_DOMAIN || snapshot.cloud);
-    set_text(web_state, tr(!snapshot.web ? T_WEB_STARTING : ready ? T_WEB_RUNNING : T_WEB_WAIT));
+    set_text(web_state, tr(snapshot.web_policy == 2 ? T_WEB_STOPPED_ALL : !snapshot.web ? T_WEB_STARTING : ready ? T_WEB_RUNNING : T_WEB_WAIT));
     set_bg(web_dot, ready && web_qr_ok ? GREEN : AMBER);
     set_text(web_hint, tr(url[0] && !web_qr_ok ? T_WEB_QR_ERROR :
         web_address_kind == M3_WEB_IPV6 && snapshot.wifi_busy ? T_WEB_RETRY_SENT : web_explanation()));
@@ -1970,6 +2163,21 @@ static void update_web(void) {
     else lv_obj_remove_state(web_retry, LV_STATE_DISABLED);
     snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests);
     set_text(web_requests, text);
+    for (unsigned i = 0; i < 4; ++i) {
+        bool enabled = !snapshot.web_control_busy;
+        if (i == M3_WEB_STOP_DOMAIN) enabled = enabled && snapshot.web && snapshot.web_policy == 0;
+        if (i == M3_WEB_STOP_ALL) enabled = enabled && snapshot.web;
+        if (i == M3_WEB_START_DOMAIN) enabled = enabled && snapshot.web && snapshot.web_policy == 1;
+        if (i == M3_WEB_START_ALL) enabled = enabled && !snapshot.web;
+        if (enabled) lv_obj_remove_state(web_controls[i], LV_STATE_DISABLED);
+        else lv_obj_add_state(web_controls[i], LV_STATE_DISABLED);
+    }
+    static unsigned seen_web_control;
+    if (seen_web_control != snapshot.web_control_revision) {
+        seen_web_control = snapshot.web_control_revision;
+        set_text(web_control_info, tr(snapshot.web_control_result == ESP_OK ? T_SERVICE_DONE : T_SERVICE_BUSY));
+        set_text(shade_note, tr(snapshot.web_control_result == ESP_OK ? T_SERVICE_DONE : T_SERVICE_BUSY));
+    }
 }
 
 
@@ -2038,10 +2246,34 @@ static void update_home(const m3_audio_state_t *audio) {
     else snprintf(text, sizeof(text), "%s", tr(snapshot.mode == NET_MODE_AP_CAPTIVE ? T_HOME_SETUP : T_HOME_WAITING));
     set_text(home_detail, text);
 }
+static void power_visible(lv_obj_t *obj, bool visible) {
+    if (visible) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+static void update_power(const m3_power_state_t *p) {
+    bool battery = !p->battery_known || p->battery_present;
+    bool measured = p->battery_known && p->battery_present && p->percent_known;
+    unsigned percent = p->percent > 100 ? 100 : p->percent;
+    bool charging = p->battery_known && p->battery_present && p->charge_known && p->charging &&
+        (!p->wired_known || p->wired);
+    power_visible(power_plug, p->wired_known && p->wired);
+    power_visible(power_battery, battery);
+    power_visible(power_percent, battery);
+    power_visible(power_fill, measured && percent > 0);
+    power_visible(power_charge, charging);
+    lv_obj_set_width(power_fill, percent ? (int)((22u * percent + 99u) / 100u) : 1);
+    uint32_t color = charging ? CYAN : measured && percent <= 20 ? RED : TEXT;
+    set_bg(power_fill, color); set_ink(power_percent, measured ? color : MUTED);
+    char text[8];
+    if (measured) snprintf(text, sizeof(text), "%u%%", percent);
+    else snprintf(text, sizeof(text), "--");
+    set_text(power_percent, text);
+}
 static void update_metrics(lv_timer_t *timer) {
     update_preferences();
     (void)timer;
     m3_runtime_state(&snapshot);
+    update_weather();
     phone_update();
     update_music();
     static M3_PSRAM_BSS m3_agent_state_t agent; m3_agent_state(&agent);
@@ -2056,6 +2288,10 @@ static void update_metrics(lv_timer_t *timer) {
     }
     set_bg(agent_dot, agent.busy ? AMBER : agent.key_ready ? GREEN : RED);
     static M3_PSRAM_BSS m3_voice_state_t voice; m3_voice_state(&voice);
+    segment_t *voice_segment = segment_of(voice_provider), *tts_segment = segment_of(tts_provider);
+    if (voice_segment && voice_segment->selected != voice.provider) segment_select(voice_provider, voice.provider);
+    unsigned selected_tts = m3_audio_tts_selected();
+    if (tts_segment && tts_segment->selected != selected_tts) segment_select(tts_provider, selected_tts);
     if (voice.revision != seen_voice) {
         seen_voice = voice.revision;
         if (voice_target) {
@@ -2078,23 +2314,42 @@ static void update_metrics(lv_timer_t *timer) {
     unsigned used = psram_total ? (unsigned)((psram_total - psram) * 100 / psram_total) : 0;
     static char text[768]; /* UI task only; keeps this 250 ms path off the 16 KiB stack */
     set_text(status, mode_text());
+    update_power(&snapshot.power);
+    reader_tick();
     unsigned levels = snapshot.mode == NET_MODE_STA_CONNECTED ? wifi_bars(snapshot.rssi) : 0;
     bool ap = snapshot.mode == NET_MODE_AP_CAPTIVE;
     for (unsigned i = 0; i < 4; ++i)
-        set_bg(wifi_levels[i], ap ? MAGENTA : i < levels ? TEXT : 0x3a4656);
+        set_bg(wifi_levels[i], ap ? MAGENTA : i < levels ? TEXT : LINE);
     if (audio.playing) lv_obj_remove_flag(status_audio, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
     size_t internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     usage_update(0, internal_total > internal ? internal_total - internal : 0, internal_total);
     usage_update(1, psram_total > psram ? psram_total - psram : 0, psram_total);
-    uint64_t flash_files = snapshot.flash.total > snapshot.flash.reserved ? snapshot.flash.total - snapshot.flash.reserved : 0;
-    usage_update(2, snapshot.flash.used, snapshot.flash.error == ESP_OK ? flash_files : 0);
+    usage_update(2, snapshot.sd_capacity.used, snapshot.sd && snapshot.sd_capacity.error == ESP_OK ? snapshot.sd_capacity.total : 0);
+    if (snapshot.sd && snapshot.sd_capacity_stale) {
+        if (snapshot.sd_capacity.total && snapshot.sd_capacity.error == ESP_OK) {
+            snprintf(text, sizeof(text), "%u%% *", usage_percent(snapshot.sd_capacity.used, snapshot.sd_capacity.total));
+            set_text(usage_values[2], text);
+        } else set_text(usage_details[2], tr(T_SD_BUSY));
+    }
     job_update(0, tr(T_JOB_APP), tr(app_names[current_app]), current_app != APP_HOME);
-    job_update(1, tr(T_JOB_AUDIO), status_text(audio.message), audio.playing && !voice.busy);
+    static const char *const app_glyphs[APP_COUNT] = {LV_SYMBOL_HOME, LV_SYMBOL_WIFI, LV_SYMBOL_DIRECTORY,
+        LV_SYMBOL_CALL, LV_SYMBOL_CHARGE, LV_SYMBOL_SETTINGS, LV_SYMBOL_AUDIO, LV_SYMBOL_LIST,
+        LV_SYMBOL_VOLUME_MAX, "AI", LV_SYMBOL_VIDEO, LV_SYMBOL_AUDIO, LV_SYMBOL_IMAGE, "=", LV_SYMBOL_PLAY, LV_SYMBOL_FILE, "W"};
+    set_text(job_icons[0], app_glyphs[current_app]);
+    job_update(1, tr(T_JOB_AUDIO), status_text(audio.message), (audio.playing || radio_pending || tube_pending || ytm_pending) && !voice.busy);
     job_update(2, tr(T_JOB_VOICE), voice.busy ? status_text(voice.message) : tr(voice.text[0] ? T_JOB_REVIEW : T_JOB_WAITING), voice.busy);
-    job_update(3, tr(T_JOB_WIFI), snapshot.wifi_busy ? status_text(snapshot.wifi_message) : mode_text(), snapshot.wifi_busy);
+    job_update(3, tr(T_JOB_WIFI), snapshot.wifi_busy ? status_text(snapshot.wifi_message) : mode_text(),
+        snapshot.wifi_busy || snapshot.mode == NET_MODE_STA_CONNECTED || snapshot.mode == NET_MODE_AP_CAPTIVE);
     snprintf(text, sizeof(text), tr(T_JOB_REQUESTS), snapshot.requests);
     job_update(4, tr(T_JOB_WEB), snapshot.web ? text : tr(T_JOB_NOT_STARTED), snapshot.web);
     job_update(5, tr(T_JOB_AGENT), status_text(agent.message), agent.busy);
+    if (snapshot.cpu_valid && snapshot.cpu_revision != seen_cpu) {
+        seen_cpu = snapshot.cpu_revision;
+        for (unsigned i = 0; i < 2; ++i) {
+            snprintf(text, sizeof(text), "HP%u  %u%%", i, snapshot.cpu_percent[i]); set_text(cpu_values[i], text);
+            lv_chart_set_next_value(cpu_chart, cpu_series[i], snapshot.cpu_percent[i]);
+        }
+    }
     update_clock(text, sizeof(text));
     update_home(&audio);
     update_calendar();
@@ -2173,15 +2428,27 @@ static const struct { app_id_t app; uint32_t top, bottom; const char *glyph; } a
     {APP_TTS, 0x818cf8, 0x4338ca, "가"},
     {APP_SYSTEM, 0x94a3b8, 0x475569, LV_SYMBOL_SETTINGS},
     {APP_TUBE, 0xf87171, 0xb91c1c, LV_SYMBOL_PLAY},
-    {APP_YTMUSIC, 0xfb7185, 0x9f1239, LV_SYMBOL_AUDIO},
+    {APP_YTMUSIC, 0xff0033, 0xff0033, LV_SYMBOL_PLAY},
     {APP_MUSIC, 0x22d3ee, 0x0369a1, LV_SYMBOL_AUDIO},
     {APP_GALLERY, 0x38bdf8, 0x7c3aed, LV_SYMBOL_IMAGE},
     {APP_CALCULATOR, 0x34d399, 0x047857, "="},
+    {APP_READER, 0xd6b98d, 0x785e3e, LV_SYMBOL_FILE},
+    {APP_WEATHER, 0x38bdf8, 0x0e7490, "W"},
 };
 static void draw_app_icon(lv_obj_t *icon, unsigned index) {
     lv_obj_set_style_bg_color(icon, lv_color_hex(app_icons[index].top), 0);
     lv_obj_set_style_bg_grad_color(icon, lv_color_hex(app_icons[index].bottom), 0);
     lv_obj_set_style_bg_grad_dir(icon, LV_GRAD_DIR_VER, 0);
+    if (app_icons[index].app == APP_YTMUSIC) {
+        lv_obj_set_style_radius(icon, LV_RADIUS_CIRCLE, 0);
+        lv_obj_t *ring = bare(icon); lv_obj_set_pos(ring, 14, 14); lv_obj_set_size(ring, 48, 48);
+        lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(ring, 3, 0); lv_obj_set_style_border_opa(ring, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(ring, lv_color_hex(0xffffff), 0);
+        lv_obj_t *play = label(icon, LV_SYMBOL_PLAY, 0xffffff); lv_obj_set_width(play, LV_SIZE_CONTENT);
+        lv_obj_set_style_text_font(play, FONT_ICON, 0); lv_obj_align(play, LV_ALIGN_CENTER, 2, 0);
+        return;
+    }
     if (app_icons[index].app == APP_RADIO) {
         icon_part(icon, 17, 28, 42, 30, 6);
         icon_part(icon, 24, 18, 33, 3, 1);
@@ -2228,20 +2495,20 @@ static void create_shade(lv_obj_t *screen) {
     lv_obj_add_event_cb(shade_scrim, shade_close, LV_EVENT_CLICKED, NULL);
     shade = lv_obj_create(screen); lv_obj_remove_style_all(shade); lv_obj_set_size(shade, 480, HOME_TOP);
     lv_obj_set_style_bg_opa(shade, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(shade, lv_color_hex(0x111824), 0);
-    lv_obj_set_style_bg_grad_color(shade, lv_color_hex(0x1a1426), 0);
+    lv_obj_set_style_bg_color(shade, lv_color_hex(SHADE_TOP), 0);
+    lv_obj_set_style_bg_grad_color(shade, lv_color_hex(SHADE_BOTTOM), 0);
     lv_obj_set_style_bg_grad_dir(shade, LV_GRAD_DIR_VER, 0);
     lv_obj_set_style_radius(shade, 24, 0); lv_obj_set_style_text_color(shade, lv_color_hex(TEXT), 0);
     lv_obj_remove_flag(shade, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(shade, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(shade, shade_touch, LV_EVENT_ALL, NULL);
-    lv_obj_t *handle = icon_part(shade, 205, 12, 70, 5, 3); lv_obj_set_style_bg_opa(handle, LV_OPA_40, 0);
+    lv_obj_t *handle = icon_part(shade, 205, 12, 70, 5, 3); set_bg(handle, GLASS); lv_obj_set_style_bg_opa(handle, LV_OPA_40, 0);
     lv_obj_t *title = text(shade, T_SHADE_TITLE, TEXT); lv_obj_set_pos(title, 20, 36); lv_obj_add_style(title, &st_title, 0);
-    static const m3_text_t names[] = {T_SHADE_RAM, T_SHADE_PSRAM, T_SHADE_FLASH};
-    static const uint32_t colors[] = {CYAN, MAGENTA, AMBER};
+    static const m3_text_t names[] = {T_SHADE_RAM, T_SHADE_PSRAM, T_SHADE_SD};
+    const uint32_t colors[] = {CYAN, MAGENTA, AMBER};
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_t *panel = bare(shade); lv_obj_set_pos(panel, 16 + i * 152, 80); lv_obj_set_size(panel, 144, 200);
-        lv_obj_set_style_bg_color(panel, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(panel, LV_OPA_10, 0);
+        lv_obj_set_style_bg_color(panel, lv_color_hex(GLASS), 0); lv_obj_set_style_bg_opa(panel, LV_OPA_10, 0);
         lv_obj_set_style_radius(panel, 18, 0);
         lv_obj_t *name = text(panel, names[i], MUTED);
         lv_obj_set_pos(name, 0, 12); lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
@@ -2260,19 +2527,44 @@ static void create_shade(lv_obj_t *screen) {
         usage_details[i] = label(panel, "", MUTED); lv_obj_set_pos(usage_details[i], 4, 152);
         lv_obj_set_width(usage_details[i], 136); lv_obj_set_style_text_align(usage_details[i], LV_TEXT_ALIGN_CENTER, 0);
     }
-    title = text(shade, T_SHADE_RUNNING, CYAN); lv_obj_set_pos(title, 20, 298);
+    cpu_chart = lv_chart_create(shade); lv_obj_set_pos(cpu_chart, 24, 310); lv_obj_set_size(cpu_chart, 432, 80);
+    lv_chart_set_type(cpu_chart, LV_CHART_TYPE_LINE); lv_chart_set_point_count(cpu_chart, 60);
+    lv_chart_set_range(cpu_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+    lv_chart_set_div_line_count(cpu_chart, 3, 5);
+    lv_obj_set_style_bg_opa(cpu_chart, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_size(cpu_chart, 0, 0, LV_PART_INDICATOR);
+    lv_obj_remove_flag(cpu_chart, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    for (unsigned i = 0; i < 2; ++i) {
+        cpu_values[i] = label(shade, i ? "HP1  --" : "HP0  --", i ? MAGENTA : CYAN);
+        lv_obj_set_pos(cpu_values[i], 24 + i * 224, 284); lv_obj_set_width(cpu_values[i], 200);
+        cpu_series[i] = lv_chart_add_series(cpu_chart, lv_color_hex(i ? MAGENTA : CYAN), LV_CHART_AXIS_PRIMARY_Y);
+    }
+    title = text(shade, T_SHADE_RUNNING, CYAN); lv_obj_set_pos(title, 20, 400);
+    static const char *const job_glyphs[] = {LV_SYMBOL_HOME, LV_SYMBOL_AUDIO, LV_SYMBOL_CALL, LV_SYMBOL_WIFI, LV_SYMBOL_UPLOAD, LV_SYMBOL_SETTINGS};
     for (unsigned i = 0; i < 6; ++i) {
-        job_cards[i] = bare(shade); lv_obj_set_pos(job_cards[i], 16 + (i % 2) * 228, 328 + (i / 2) * 98);
-        lv_obj_set_size(job_cards[i], 220, 88); lv_obj_set_style_radius(job_cards[i], 14, 0);
-        lv_obj_set_style_pad_all(job_cards[i], 12, 0); lv_obj_set_style_border_width(job_cards[i], 1, 0);
+        job_cards[i] = bare(shade); lv_obj_set_pos(job_cards[i], 16 + (i % 2) * 228, 426 + (i / 2) * 78);
+        lv_obj_set_size(job_cards[i], 220, 70); lv_obj_set_style_radius(job_cards[i], 14, 0);
+        lv_obj_set_style_border_width(job_cards[i], 1, 0);
         lv_obj_set_style_bg_opa(job_cards[i], LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(job_cards[i], lv_color_hex(SURFACE), 0);
-        job_labels[i] = label(job_cards[i], "", TEXT);
-        lv_obj_set_height(job_labels[i], 64); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        job_icons[i] = label(job_cards[i], job_glyphs[i], MUTED);
+        lv_obj_set_pos(job_icons[i], 8, 17); lv_obj_set_size(job_icons[i], 36, 36);
+        lv_obj_set_style_text_font(job_icons[i], FONT_ICON, 0);
+        job_labels[i] = label(job_cards[i], "", TEXT); lv_obj_set_pos(job_labels[i], 48, 8);
+        lv_obj_set_size(job_labels[i], 162, 58); lv_label_set_long_mode(job_labels[i], LV_LABEL_LONG_DOT);
+        if (i == 1 || i == 2 || i == 4 || i == 5) {
+            lv_obj_set_width(job_labels[i], 120);
+            job_stops[i] = icon_button(job_cards[i], LV_SYMBOL_STOP, service_stop, (void *)(uintptr_t)i);
+            lv_obj_set_pos(job_stops[i], 176, 17); lv_obj_set_size(job_stops[i], 36, 36);
+            lv_obj_set_style_text_font(job_stops[i], &lv_font_montserrat_20, 0);
+        }
     }
-    title = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(title, 20, 628); lv_obj_set_width(title, 440);
+    shade_note = caption(shade, T_SHADE_NOTE); lv_obj_set_pos(shade_note, 20, 658); lv_obj_set_size(shade_note, 440, 34);
+    label_ellipsis(shade_note);
     lv_obj_t *close = button(shade, LV_SYMBOL_UP, T_SHADE_CLOSE, BTN_SECONDARY, shade_close, NULL);
-    lv_obj_set_pos(close, 16, 684); lv_obj_set_width(close, 448);
+    lv_obj_set_pos(close, 16, 700); lv_obj_set_width(close, 216);
+    lv_obj_t *off = button(shade, LV_SYMBOL_POWER, T_SCREEN_OFF, BTN_SECONDARY, screen_off, NULL);
+    lv_obj_set_pos(off, 248, 700); lv_obj_set_width(off, 216);
     shade_motion(shade, -HOME_TOP);
 }
 
@@ -2291,18 +2583,20 @@ static lv_obj_t *list_row(lv_obj_t *parent, lv_event_cb_t callback, void *data) 
     lv_obj_add_style(obj, &st_list, 0); lv_obj_add_style(obj, &st_btn_pressed, LV_STATE_PRESSED);
     lv_obj_add_style(obj, &st_list_checked, LV_STATE_CHECKED); lv_obj_add_style(obj, &st_disabled, LV_STATE_DISABLED);
     lv_obj_t *icon = lv_label_create(obj); lv_obj_set_width(icon, 22);
-    lv_obj_t *name = lv_label_create(obj); grow(name); lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_t *name = lv_label_create(obj); grow(name); label_ellipsis(name);
     lv_obj_t *meta = lv_label_create(obj); lv_obj_add_style(meta, &st_caption, 0);
     (void)icon;
+    lv_obj_add_event_cb(obj, sound_tap, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
     return obj;
 }
-static void home_apps(lv_obj_t *home, unsigned first, int top) {
+#include "m3_theme_ui.inc"
+static void home_apps(lv_obj_t *home, unsigned first, unsigned count, int top) {
     _Static_assert(sizeof(app_icons) / sizeof(app_icons[0]) == APP_COUNT - 1, "one icon per app");
-    unsigned end = first + HOME_APPS_PER_PAGE;
+    unsigned end = first + count;
     if (end > sizeof(app_icons) / sizeof(app_icons[0])) end = sizeof(app_icons) / sizeof(app_icons[0]);
     for (unsigned i = first; i < end; ++i) {
-        int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * 148;
+        int x = 42 + (int)((i - first) % 3) * 148, y = top + (int)((i - first) / 3) * (first ? 180 : 148);
         lv_obj_t *icon = lv_button_create(home); lv_obj_remove_style_all(icon);
         lv_obj_set_pos(icon, x, y); lv_obj_set_size(icon, 76, 76);
         lv_obj_set_style_radius(icon, 22, 0); lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
@@ -2315,10 +2609,10 @@ static void home_apps(lv_obj_t *home, unsigned first, int top) {
         lv_obj_add_flag(icon, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
         lv_obj_add_event_cb(icon, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)app_icons[i].app);
         draw_app_icon(icon, i);
-        lv_obj_t *name = text(home, app_names[app_icons[i].app], TEXT);
+        lv_obj_t *name = text(home, app_names[app_icons[i].app], ON_WALL);
         lv_obj_set_pos(name, x - 18, y + 84); lv_obj_set_width(name, 112);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        label_ellipsis(name);
     }
 }
 static void build_home_main(lv_obj_t *home) {
@@ -2326,32 +2620,30 @@ static void build_home_main(lv_obj_t *home) {
     lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0);
     lv_obj_set_style_pad_all(home, 0, 0);
     lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(home, lv_color_hex(0x0b1424), 0);
-    lv_obj_set_style_bg_grad_color(home, lv_color_hex(0x1d0f2c), 0);
-    lv_obj_set_style_bg_grad_dir(home, LV_GRAD_DIR_VER, 0);
-    /* Clip decorative circles in a dedicated back layer. Content is a later
-     * sibling, so neither wallpaper geometry nor child order can cover widgets. */
-    lv_obj_t *wallpaper = bare(home); lv_obj_set_size(wallpaper, 480, 660);
-    lv_obj_set_pos(wallpaper, 0, 0);
-    lv_obj_t *orb = icon_part(wallpaper, -140, 300, 460, 460, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(0x0891b2), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_20, 0);
-    orb = icon_part(wallpaper, 250, -120, 340, 340, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(orb, lv_color_hex(MAGENTA), 0); lv_obj_set_style_bg_opa(orb, LV_OPA_10, 0);
     lv_obj_t *foreground = bare(home); lv_obj_set_size(foreground, 480, 660);
     lv_obj_set_pos(foreground, 0, 0); lv_obj_add_flag(foreground, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
     home = foreground;
-    home_clock = label(home, "--:--", 0xffffff); lv_obj_set_pos(home_clock, 0, 34);
+    home_clock = label(home, "--:--", ON_WALL); lv_obj_set_pos(home_clock, 0, 34);
     lv_obj_set_style_text_align(home_clock, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(home_clock, &m3_font_clock, 0);
-    home_date = label(home, "", 0xc8d2e0); lv_obj_set_pos(home_date, 0, 120);
+    home_date = label(home, "", ON_WALL_MUTED); lv_obj_set_pos(home_date, 0, 120);
     lv_obj_set_style_text_align(home_date, LV_TEXT_ALIGN_CENTER, 0);
+    label_ellipsis(home_date);
+    home_weather = label(home, "", ON_WALL); lv_obj_set_pos(home_weather, 20, 150); lv_obj_set_width(home_weather, 440);
+    label_ellipsis(home_weather); lv_obj_set_style_text_align(home_weather, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(home_clock, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(home_clock, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WEATHER);
+    lv_obj_add_flag(home_date, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(home_date, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WEATHER);
+    lv_obj_add_flag(home_weather, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(home_weather, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WEATHER);
     /* Glass status card: network state and now playing; tap for Wi-Fi details. */
     lv_obj_t *status_card = lv_button_create(home); lv_obj_remove_style_all(status_card);
-    lv_obj_set_pos(status_card, 20, 166); lv_obj_set_size(status_card, 440, 84);
-    lv_obj_set_style_bg_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_bg_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_pos(status_card, 20, 194); lv_obj_set_size(status_card, 440, 84);
+    lv_obj_set_style_bg_color(status_card, lv_color_hex(ON_WALL), 0); lv_obj_set_style_bg_opa(status_card, LV_OPA_10, 0);
     lv_obj_set_style_bg_opa(status_card, LV_OPA_20, LV_STATE_PRESSED);
     lv_obj_set_style_radius(status_card, 22, 0);
-    lv_obj_set_style_border_color(status_card, lv_color_hex(0xffffff), 0); lv_obj_set_style_border_opa(status_card, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(status_card, lv_color_hex(ON_WALL), 0); lv_obj_set_style_border_opa(status_card, LV_OPA_10, 0);
     lv_obj_set_style_border_width(status_card, 1, 0);
     lv_obj_add_event_cb(status_card, launch_app, LV_EVENT_CLICKED, (void *)(uintptr_t)APP_WIFI);
     lv_obj_t *badge = bare(status_card); lv_obj_set_pos(badge, 16, 16); lv_obj_set_size(badge, 52, 52);
@@ -2359,13 +2651,13 @@ static void build_home_main(lv_obj_t *home) {
     lv_obj_set_style_bg_color(badge, lv_color_hex(0x0b1220), 0); lv_obj_set_style_bg_opa(badge, LV_OPA_60, 0);
     home_net_icon = lv_label_create(badge); lv_label_set_text(home_net_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(home_net_icon, &lv_font_montserrat_20, 0); lv_obj_center(home_net_icon);
-    home_net = label(status_card, "", TEXT); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
-    lv_label_set_long_mode(home_net, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    home_detail = label(status_card, "", 0xaab6c6); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
-    lv_label_set_long_mode(home_detail, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, 0xaab6c6); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
+    home_net = label(status_card, "", ON_WALL); lv_obj_set_pos(home_net, 84, 18); lv_obj_set_width(home_net, 340);
+    label_ellipsis(home_net);
+    home_detail = label(status_card, "", ON_WALL_MUTED); lv_obj_set_pos(home_detail, 84, 44); lv_obj_set_width(home_detail, 340);
+    label_ellipsis(home_detail);
+    lv_obj_t *chevron = label(status_card, LV_SYMBOL_RIGHT, ON_WALL_MUTED); lv_obj_set_width(chevron, LV_SIZE_CONTENT);
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -16, 0);
-    home_apps(home, 0, 296);
+    home_apps(home, 0, HOME_PRIMARY_APPS, 296);
 }
 static m3_text_t home_page_title(unsigned index) {
     return index == 0 ? T_CAL_TITLE : index == 1 ? T_APP_HOME : index == HOME_PHOTOS ? T_PHOTO_TITLE : T_HOME_MORE;
@@ -2378,8 +2670,9 @@ static void home_page_update(void) {
         lv_obj_set_style_bg_color(mark, lv_color_hex(i == home_index ? CYAN : 0x526175), 0);
         lv_obj_center(mark);
     }
-    set_text(home_page_name, tr(home_page_title(home_index)));
+    set_text(home_page_name, home_index >= 2 && home_index < HOME_PHOTOS ? "" : tr(home_page_title(home_index)));
     m3_photos_activate(current_app == APP_HOME && home_index == HOME_PHOTOS);
+    theme_wallpaper_sync();
 }
 static void home_tile_changed(lv_event_t *event) {
     (void)event;
@@ -2426,22 +2719,22 @@ static void update_calendar(void) {
         set_text(lv_obj_get_child(calendar_cells[i], 0), day ? text : "");
         lv_obj_set_style_bg_opa(calendar_cells[i], today ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         set_bg(calendar_cells[i], CYAN);
-        set_ink(lv_obj_get_child(calendar_cells[i], 0), today ? ON_ACCENT : i % 7 == 0 ? MAGENTA : i % 7 == 6 ? CYAN : TEXT);
+        set_ink(lv_obj_get_child(calendar_cells[i], 0), today ? ON_ACCENT : i % 7 == 0 ? MAGENTA : i % 7 == 6 ? CYAN : ON_WALL);
     }
 }
 static void build_home_calendar(lv_obj_t *tile) {
-    lv_obj_t *heading = text(tile, T_CAL_TITLE, TEXT); lv_obj_set_pos(heading, 24, 22);
+    lv_obj_t *heading = text(tile, T_CAL_TITLE, ON_WALL); lv_obj_set_pos(heading, 24, 22);
     lv_obj_set_width(heading, 432);
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    label_ellipsis(heading);
+    lv_obj_add_style(heading, &st_title, 0);
     lv_obj_t *previous = icon_button(tile, LV_SYMBOL_LEFT, calendar_move, (void *)(intptr_t)-1);
     lv_obj_set_pos(previous, 24, 72); lv_obj_set_size(previous, 44, 44);
     lv_obj_t *next = icon_button(tile, LV_SYMBOL_RIGHT, calendar_move, (void *)(intptr_t)1);
     lv_obj_set_pos(next, 412, 72); lv_obj_set_size(next, 44, 44);
-    calendar_heading = label(tile, "-- / --", TEXT); lv_obj_set_pos(calendar_heading, 76, 84); lv_obj_set_width(calendar_heading, 328);
+    calendar_heading = label(tile, "-- / --", ON_WALL); lv_obj_set_pos(calendar_heading, 76, 84); lv_obj_set_width(calendar_heading, 328);
     lv_obj_set_style_text_align(calendar_heading, LV_TEXT_ALIGN_CENTER, 0);
     for (unsigned i = 0; i < 7; ++i) {
-        calendar_weekdays[i] = label(tile, "", i == 0 ? MAGENTA : i == 6 ? CYAN : MUTED);
+        calendar_weekdays[i] = label(tile, "", i == 0 ? MAGENTA : i == 6 ? CYAN : ON_WALL_MUTED);
         lv_obj_set_pos(calendar_weekdays[i], 26 + i * 62, 152); lv_obj_set_width(calendar_weekdays[i], 56);
         lv_obj_set_style_text_align(calendar_weekdays[i], LV_TEXT_ALIGN_CENTER, 0);
     }
@@ -2449,12 +2742,12 @@ static void build_home_calendar(lv_obj_t *tile) {
         calendar_cells[i] = bare(tile); lv_obj_set_size(calendar_cells[i], 54, 48);
         lv_obj_set_pos(calendar_cells[i], 27 + (i % 7) * 62, 188 + (i / 7) * 55);
         lv_obj_set_style_radius(calendar_cells[i], 18, 0);
-        lv_obj_t *day = label(calendar_cells[i], "", TEXT); lv_obj_set_width(day, 54);
+        lv_obj_t *day = label(calendar_cells[i], "", ON_WALL); lv_obj_set_width(day, 54);
         lv_obj_set_style_text_align(day, LV_TEXT_ALIGN_CENTER, 0); lv_obj_center(day);
     }
     lv_obj_t *today = button(tile, NULL, T_CAL_TODAY, BTN_PRIMARY, calendar_move, NULL);
     lv_obj_set_pos(today, 150, 552); lv_obj_set_size(today, 180, 44);
-    calendar_hint = label(tile, tr(T_CAL_WAIT), MUTED); lv_obj_set_pos(calendar_hint, 20, 618); lv_obj_set_width(calendar_hint, 440);
+    calendar_hint = label(tile, tr(T_CAL_WAIT), ON_WALL_MUTED); lv_obj_set_pos(calendar_hint, 20, 618); lv_obj_set_width(calendar_hint, 440);
     lv_obj_set_style_text_align(calendar_hint, LV_TEXT_ALIGN_CENTER, 0);
 }
 static void photo_step(lv_event_t *event) { m3_photos_step((int)(intptr_t)lv_event_get_user_data(event)); }
@@ -2484,32 +2777,36 @@ static void update_photos(void) {
     else { lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(photo_empty, LV_OBJ_FLAG_HIDDEN); }
 }
 static void build_home_photos(lv_obj_t *tile) {
-    lv_obj_t *heading = text(tile, T_PHOTO_TITLE, TEXT); lv_obj_set_pos(heading, 24, 14);
+    lv_obj_t *heading = text(tile, T_PHOTO_TITLE, ON_WALL); lv_obj_set_pos(heading, 24, 14);
     lv_obj_set_width(heading, 432);
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
+    label_ellipsis(heading);
+    lv_obj_add_style(heading, &st_title, 0);
     photo_canvas = lv_canvas_create(tile); lv_obj_set_pos(photo_canvas, 24, 68);
     lv_obj_set_size(photo_canvas, M3_PHOTO_W, M3_PHOTO_H);
     lv_obj_remove_flag(photo_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(photo_canvas, LV_OBJ_FLAG_HIDDEN);
-    photo_empty = label(tile, tr(T_PHOTO_EMPTY), MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
+    photo_empty = label(tile, tr(T_PHOTO_EMPTY), ON_WALL_MUTED); lv_obj_set_pos(photo_empty, 36, 250); lv_obj_set_width(photo_empty, 408);
     lv_obj_set_style_text_align(photo_empty, LV_TEXT_ALIGN_CENTER, 0);
-    photo_name = label(tile, "", TEXT); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
-    lv_label_set_long_mode(photo_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    photo_info = label(tile, tr(T_PHOTO_HINT), MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
-    lv_label_set_long_mode(photo_info, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    photo_name = label(tile, "", ON_WALL); lv_obj_set_pos(photo_name, 24, 554); lv_obj_set_width(photo_name, 432);
+    label_ellipsis(photo_name);
+    photo_info = label(tile, tr(T_PHOTO_HINT), ON_WALL_MUTED); lv_obj_set_pos(photo_info, 24, 582); lv_obj_set_width(photo_info, 432);
+    label_ellipsis(photo_info);
     lv_obj_t *previous = button(tile, LV_SYMBOL_PREV, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)-1);
     lv_obj_set_pos(previous, 24, 614); lv_obj_set_size(previous, 64, 40);
     photo_pause = button(tile, NULL, T_MUSIC_PAUSE, BTN_SECONDARY, photo_toggle, NULL);
     lv_obj_set_pos(photo_pause, 100, 614); lv_obj_set_size(photo_pause, 150, 40);
     lv_obj_t *next = button(tile, LV_SYMBOL_NEXT, T_NONE, BTN_SECONDARY, photo_step, (void *)(intptr_t)1);
     lv_obj_set_pos(next, 262, 614); lv_obj_set_size(next, 64, 40);
-    lv_obj_t *refresh = button(tile, NULL, T_MUSIC_REFRESH, BTN_SECONDARY, photo_refresh, NULL);
-    lv_obj_set_pos(refresh, 338, 614); lv_obj_set_size(refresh, 118, 40);
+    lv_obj_t *refresh = refresh_button(tile,T_PHOTO_REFRESH,photo_refresh,NULL);
+    lv_obj_set_pos(refresh,408,610); lv_obj_set_size(refresh,48,44);
 }
 static void build_home(lv_obj_t *home) {
     lv_obj_set_style_layout(home, LV_LAYOUT_NONE, 0); lv_obj_set_style_pad_all(home, 0, 0);
     lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLLABLE);
+    /* One fixed wallpaper below all transparent tiles keeps swipes continuous. */
+    home_wallpaper = bare(home); lv_obj_set_size(home_wallpaper, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(home_wallpaper, 0, 0);
+    m3_wallpaper_build(home_wallpaper, ui_theme.wallpaper, CYAN, MAGENTA);
     home_tiles = lv_tileview_create(home); lv_obj_remove_style_all(home_tiles);
     lv_obj_set_pos(home_tiles, 0, 0); lv_obj_set_size(home_tiles, 480, 660);
     lv_obj_set_scrollbar_mode(home_tiles, LV_SCROLLBAR_MODE_OFF);
@@ -2524,16 +2821,11 @@ static void build_home(lv_obj_t *home) {
         lv_obj_remove_flag(home_sheets[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(home_sheets[i], LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
         lv_obj_set_style_bg_color(home_sheets[i], lv_color_hex(0x0b1424), 0);
-        lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_opa(home_sheets[i], LV_OPA_TRANSP, 0);
     }
     build_home_calendar(home_sheets[0]); build_home_main(home_sheets[1]);
     for (unsigned i = 2; i < HOME_PHOTOS; ++i) {
-        lv_obj_t *heading = text(home_sheets[i], T_HOME_MORE, TEXT); lv_obj_set_pos(heading, 24, 30);
-        lv_obj_set_width(heading, 432);
-        lv_label_set_long_mode(heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_style_text_font(heading, FONT_TITLE, 0);
-        home_apps(home_sheets[i], (i - 1) * HOME_APPS_PER_PAGE, 116);
-        lv_obj_t *hint = text(home_sheets[i], T_HOME_SLIDE, MUTED); lv_obj_set_pos(hint, 24, 600);
+        home_apps(home_sheets[i], HOME_PRIMARY_APPS + (i - 2) * HOME_APPS_PER_PAGE, HOME_APPS_PER_PAGE, 76);
     }
     build_home_photos(home_sheets[HOME_PHOTOS]);
     for (unsigned i = 0; i < HOME_PAGE_COUNT; ++i) {
@@ -2544,7 +2836,7 @@ static void build_home(lv_obj_t *home) {
         lv_obj_t *mark = bare(home_dots[i]); lv_obj_set_size(mark, 8, 6);
         lv_obj_set_style_radius(mark, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, 0);
     }
-    home_page_name = label(home, "", MUTED); lv_obj_set_pos(home_page_name, 0, 694);
+    home_page_name = label(home, "", ON_WALL_MUTED); lv_obj_set_pos(home_page_name, 0, 694);
     lv_obj_set_style_text_align(home_page_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_event_cb(home_tiles, home_tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
     lv_tileview_set_tile_by_index(home_tiles, 1, 0, LV_ANIM_OFF);
@@ -2609,6 +2901,26 @@ static void build_wifi(lv_obj_t *net) {
     lv_obj_add_flag(static_fields, LV_OBJ_FLAG_HIDDEN);
     wifi_actions[1] = button(box, LV_SYMBOL_OK, T_WIFI_CONNECT, BTN_PRIMARY, wifi_action, (void *)(uintptr_t)M3_WIFI_CONNECT);
     wifi_actions[2] = button(box, LV_SYMBOL_GPS, T_WIFI_HOTSPOT, BTN_SECONDARY, wifi_action, (void *)(uintptr_t)M3_WIFI_SETUP);
+    box = card(net, T_WIFI_SAVED_NETWORKS);
+    wifi_saved_count = label(box, "", CYAN);
+    caption(box, T_WIFI_SAVED_HINT);
+    for (unsigned i = 0; i < M3_WIFI_PROFILE_LIMIT; ++i) {
+        wifi_saved_rows[i] = row(box);
+        wifi_saved_connect[i] = lv_button_create(wifi_saved_rows[i]);
+        lv_obj_remove_style_all(wifi_saved_connect[i]);
+        lv_obj_add_style(wifi_saved_connect[i], &st_btn, 0);
+        lv_obj_add_style(wifi_saved_connect[i], &st_btn_pressed, LV_STATE_PRESSED);
+        lv_obj_add_style(wifi_saved_connect[i], &st_disabled, LV_STATE_DISABLED);
+        grow(wifi_saved_connect[i]); lv_obj_set_height(wifi_saved_connect[i], 48);
+        wifi_saved_names[i] = label(wifi_saved_connect[i], "", TEXT);
+        lv_obj_center(wifi_saved_names[i]);
+        lv_obj_set_width(wifi_saved_names[i], LV_PCT(100));
+        label_ellipsis(wifi_saved_names[i]);
+        lv_obj_add_event_cb(wifi_saved_connect[i], wifi_saved_action, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        wifi_saved_remove[i] = icon_button(wifi_saved_rows[i], LV_SYMBOL_TRASH, wifi_saved_action,
+            (void *)(uintptr_t)(i + M3_WIFI_PROFILE_LIMIT));
+        lv_obj_add_flag(wifi_saved_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
     box = card(net, T_SEC_HELP);
     caption(box, T_WIFI_HELP);
 }
@@ -2620,7 +2932,7 @@ static void build_files(lv_obj_t *files) {
     icon_button(line, LV_SYMBOL_UP, parent_folder, NULL);
     lv_obj_t *texts = bare(line); grow(texts); lv_obj_set_height(texts, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 4, 0);
-    file_path = label(texts, "", TEXT); lv_label_set_long_mode(file_path, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    file_path = label(texts, "", TEXT); label_ellipsis(file_path);
     file_info = text(texts, T_FILES_READING, MUTED);
     file_bar = bar(box, AMBER, 6);
     box = card(files, T_NONE);
@@ -2642,6 +2954,8 @@ static void build_files(lv_obj_t *files) {
     caption(files, T_FILES_HINT);
     build_file_actions(files);
 }
+#include "m3_reader_ui.inc"
+
 static void build_recorder(lv_obj_t *audio, unsigned volume) {
     lv_obj_t *box = card(audio, T_APP_RECORDER);
     recorder_time = label(box, "00:00 / 30:00", TEXT);
@@ -2669,7 +2983,7 @@ static void radio_filter(lv_event_t *event) {
 static void build_radio(lv_obj_t *radio, unsigned volume) {
     lv_obj_t *box = card(radio, T_NOW_PLAYING);
     radio_now = label(box, "", TEXT); lv_obj_add_style(radio_now, &st_title, 0);
-    lv_label_set_long_mode(radio_now, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(radio_now);
     radio_info = text(box, T_RADIO_IDLE, MUTED);
     radio_bar = bar(box, MAGENTA, 6);
     lv_obj_t *line = row(box);
@@ -2677,6 +2991,10 @@ static void build_radio(lv_obj_t *radio, unsigned volume) {
     grow(button(line, LV_SYMBOL_STOP, T_AUDIO_STOP, BTN_DANGER, stop_audio, NULL));
     box = card(radio, T_SEC_VOLUME);
     volume_row(box, 1, volume);
+    box = card(radio, T_RADIO_TRANSPORT);
+    static const m3_text_t transport[] = {T_RADIO_DIRECT, T_RADIO_ECO, T_RADIO_BALANCED, T_RADIO_HIGH};
+    radio_transport = segmented(box, transport, NULL, 4, 0, NULL);
+    caption(box, T_RADIO_RELAY_HINT);
     static const m3_text_t countries[] = {T_RADIO_WORLD, T_RADIO_KR, T_RADIO_JP};
     radio_region = segmented(radio, countries, NULL, 3, 1, radio_filter);
     box = card(radio, T_SEC_STATIONS);
@@ -2791,8 +3109,8 @@ static void build_games(lv_obj_t *games) {
 }
 static void build_tts(lv_obj_t *tts, unsigned volume) {
     lv_obj_t *box = card(tts, T_SEC_ENGINE);
-    static const m3_text_t engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE};
-    tts_provider = segmented(box, engines, NULL, 3, 0, tts_provider_changed);
+    static const m3_text_t engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE, T_TTS_AZURE};
+    tts_provider = segmented(box, engines, NULL, 4, m3_audio_tts_selected(), tts_provider_changed);
     caption(box, T_TTS_ENGINE_HINT);
     box = card(tts, T_SEC_TEXT);
     tts_text = input_field(box, T_NONE, 128, INPUT_KOREAN, true);
@@ -2861,13 +3179,13 @@ static void build_agent(lv_obj_t *agent) {
 static void build_music(lv_obj_t *music, unsigned volume) {
     lv_obj_t *box = card(music, T_NOW_PLAYING);
     music_title = label(box, "", TEXT); lv_obj_add_style(music_title, &st_title, 0);
-    lv_label_set_long_mode(music_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(music_title);
     lv_obj_t *visual_row = bare(box); lv_obj_set_size(visual_row, LV_PCT(100), 200);
     lv_obj_t *visual = bare(visual_row); lv_obj_set_size(visual, 200, 200); lv_obj_center(visual);
     lv_obj_add_flag(visual, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(visual, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(visual, music_swipe_event, LV_EVENT_GESTURE, NULL);
-    static const uint32_t colors[] = {CYAN, GREEN, MAGENTA};
+    const uint32_t colors[] = {CYAN, GREEN, MAGENTA};
     for (unsigned i = 0; i < 24; ++i) {
         music_rays[i] = lv_line_create(visual); lv_obj_set_pos(music_rays[i], 0, 0);
         lv_obj_set_style_line_color(music_rays[i], lv_color_hex(colors[i / 8]), 0);
@@ -2907,13 +3225,13 @@ static void build_music(lv_obj_t *music, unsigned volume) {
     box = card(music, T_SEC_MEDIA); music_library = box;
     static const m3_text_t sources[] = {T_STORAGE_SD, T_STORAGE_FLASH};
     music_source = segmented(box, sources, NULL, 2, 0, music_refresh_event);
-    button(box, LV_SYMBOL_REFRESH, T_MUSIC_REFRESH, BTN_SECONDARY, music_refresh_event, NULL);
+    refresh_button(box,T_MUSIC_REFRESH,music_refresh_event,NULL);
 
     music_empty = label(box, tr(T_MUSIC_EMPTY), MUTED);
     for (unsigned i = 0; i < M3_MUSIC_ROWS; ++i) {
         music_rows[i] = button(box, LV_SYMBOL_PLAY, T_NONE, BTN_SECONDARY, music_track_event, (void *)(uintptr_t)i);
         music_labels[i] = lv_obj_get_child(music_rows[i], 0);
-        lv_obj_set_width(music_labels[i], LV_PCT(94)); lv_label_set_long_mode(music_labels[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(music_labels[i], LV_PCT(94)); label_ellipsis(music_labels[i]);
         lv_obj_set_style_text_align(music_labels[i], LV_TEXT_ALIGN_LEFT, 0); lv_obj_add_flag(music_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
     line = row(box);
@@ -2962,7 +3280,7 @@ static void build_tube(lv_obj_t *tube) {
         lv_obj_center(chip_text);
     }
     lv_obj_t *line = row(tube_search_view);
-    tube_heading = label(line, "", TEXT); grow(tube_heading); lv_label_set_long_mode(tube_heading, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_heading = label(line, "", TEXT); grow(tube_heading); label_ellipsis(tube_heading);
     tube_back_search = button(line, LV_SYMBOL_LEFT, T_TUBE_BACK_SEARCH, BTN_SECONDARY, tube_back_to_search, NULL);
     lv_obj_set_size(tube_back_search, LV_SIZE_CONTENT, 40); lv_obj_set_style_pad_hor(tube_back_search, 14, 0);
     lv_obj_add_flag(tube_back_search, LV_OBJ_FLAG_HIDDEN);
@@ -2989,9 +3307,9 @@ static void build_tube(lv_obj_t *tube) {
         lv_obj_t *texts = bare(item->button); grow(texts); lv_obj_set_height(texts, M3_TUBE_THUMB_H);
         lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(texts, 3, 0);
         item->title = label(texts, "", TEXT); lv_obj_set_height(item->title, 42);
-        lv_label_set_long_mode(item->title, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_style_text_line_space(item->title, 2, 0);
-        item->channel = label(texts, "", MUTED); lv_label_set_long_mode(item->channel, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->channel, 20);
-        item->meta = label(texts, "", MUTED); lv_label_set_long_mode(item->meta, LV_LABEL_LONG_SCROLL_CIRCULAR); lv_obj_set_height(item->meta, 20);
+        label_ellipsis(item->title); lv_obj_set_style_text_line_space(item->title, 2, 0);
+        item->channel = label(texts, "", MUTED); label_ellipsis(item->channel);
+        item->meta = label(texts, "", MUTED); label_ellipsis(item->meta);
         lv_obj_add_flag(item->button, LV_OBJ_FLAG_HIDDEN);
     }
     tube_pager = row(tube_search_view);
@@ -3032,7 +3350,7 @@ static void build_tube(lv_obj_t *tube) {
     lv_obj_t *list_button = icon_button(line, LV_SYMBOL_LIST, tube_close, NULL); lv_obj_set_size(list_button, 64, 56);
     tube_title = label(body, "", TEXT); lv_obj_set_style_text_line_space(tube_title, 4, 0);
     line = row(body);
-    tube_channel = label(line, "", MUTED); grow(tube_channel); lv_label_set_long_mode(tube_channel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    tube_channel = label(line, "", MUTED); grow(tube_channel); label_ellipsis(tube_channel);
     tube_channel_button = button(line, LV_SYMBOL_LIST, T_TUBE_CHANNEL, BTN_SECONDARY, tube_channel_event, NULL);
     lv_obj_set_size(tube_channel_button, LV_SIZE_CONTENT, 44); lv_obj_set_style_pad_hor(tube_channel_button, 14, 0);
     tube_player_status = label(body, "", MUTED);
@@ -3049,6 +3367,14 @@ static void build_monitor(lv_obj_t *monitor) {
     lv_obj_t *state_row = row(box);
     web_dot = dot(state_row, AMBER);
     web_state = label(state_row, "", TEXT); grow(web_state);
+    lv_obj_t *controls = row(box);
+    web_controls[M3_WEB_STOP_DOMAIN] = grow(button(controls, NULL, T_WEB_STOP_DOMAIN, BTN_SECONDARY, web_control, (void *)M3_WEB_STOP_DOMAIN));
+    web_controls[M3_WEB_STOP_ALL] = grow(button(controls, NULL, T_WEB_STOP_ALL, BTN_DANGER, web_control, (void *)M3_WEB_STOP_ALL));
+    controls = row(box);
+    web_controls[M3_WEB_START_DOMAIN] = grow(button(controls, NULL, T_WEB_START_DOMAIN, BTN_SECONDARY, web_control, (void *)M3_WEB_START_DOMAIN));
+    web_controls[M3_WEB_START_ALL] = grow(button(controls, NULL, T_WEB_START_ALL, BTN_PRIMARY, web_control, (void *)M3_WEB_START_ALL));
+    caption(box, T_WEB_CONTROL_HINT);
+    web_control_info = label(box, "", MUTED);
     /* 32 px white quiet zone around the 216 px modules, independent of dark theme. */
     lv_obj_t *qr_row = row(box);
     lv_obj_set_flex_align(qr_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -3059,7 +3385,7 @@ static void build_monitor(lv_obj_t *monitor) {
     lv_qrcode_set_dark_color(web_qr, lv_color_hex(0x000000)); lv_qrcode_set_light_color(web_qr, lv_color_hex(0xffffff));
     lv_obj_center(web_qr); lv_obj_add_flag(web_frame, LV_OBJ_FLAG_HIDDEN);
     web_url = label(box, "", CYAN);
-    lv_label_set_long_mode(web_url, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(web_url);
     web_hint = label(box, "", MUTED); lv_label_set_long_mode(web_hint, LV_LABEL_LONG_WRAP);
     web_retry = button(box, NULL, T_WEB_RETRY, BTN_SECONDARY, web_retry_ipv6, NULL);
     lv_obj_add_flag(web_retry, LV_OBJ_FLAG_HIDDEN);
@@ -3081,6 +3407,51 @@ static void build_monitor(lv_obj_t *monitor) {
     box = card(monitor, T_SEC_SERVICES);
     monitor_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(monitor_info, 4, 0);
 }
+static void sound_changed(lv_event_t *event) {
+    unsigned channel = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (channel >= 3) return;
+    m3_feedback_settings_t p; m3_feedback_get(&p);
+    bool enabled = lv_obj_has_state(sound_switches[channel], LV_STATE_CHECKED);
+    unsigned volume = lv_slider_get_value(sound_sliders[channel]);
+    if (channel == 0) { p.boot_enabled = enabled; p.boot_volume = volume; }
+    else if (channel == 1) { p.effects_enabled = enabled; p.effects_volume = volume; }
+    else { p.guidance_enabled = enabled; p.guidance_volume = volume; }
+    m3_feedback_update(&p);
+    char value[16]; snprintf(value, sizeof(value), "%u%%", volume); set_text(sound_values[channel], value);
+}
+static void sound_preview(lv_event_t *event) {
+    unsigned channel = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    m3_feedback_clear();
+    m3_feedback_emit(channel == 0 ? M3_CUE_BOOT : channel == 1 ? M3_CUE_TAP : M3_CUE_READY, m3_i18n_language());
+}
+static void guidance_changed(lv_event_t *event) {
+    (void)event; m3_feedback_settings_t p; m3_feedback_get(&p);
+    p.guidance_mode = segment_value(guidance_mode); m3_feedback_update(&p);
+    m3_feedback_clear(); m3_feedback_emit(M3_CUE_ACCESSIBILITY, m3_i18n_language());
+}
+static void accessibility_open(lv_event_t *event) {
+    (void)event;
+    bool hidden = lv_obj_has_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+    if (hidden) {
+        lv_obj_remove_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_view(accessibility_panel, ui_animation());
+        m3_feedback_emit(M3_CUE_ACCESSIBILITY, m3_i18n_language());
+    } else lv_obj_add_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void sound_control(lv_obj_t *box, m3_text_t name, unsigned channel, bool enabled, unsigned volume) {
+    lv_obj_t *line = row(box); grow(text(line, name, TEXT));
+    sound_switches[channel] = lv_switch_create(line); lv_obj_set_size(sound_switches[channel], 60, 32);
+    if (enabled) lv_obj_add_state(sound_switches[channel], LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sound_switches[channel], sound_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)channel);
+    sound_values[channel] = label(box, "", CYAN);
+    char value[16]; snprintf(value, sizeof(value), "%u%%", volume); set_text(sound_values[channel], value);
+    sound_sliders[channel] = lv_slider_create(box); style_slider(sound_sliders[channel]);
+    lv_slider_set_range(sound_sliders[channel], 0, 100);
+    lv_slider_set_value(sound_sliders[channel], volume, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sound_sliders[channel], sound_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)channel);
+    button(box, LV_SYMBOL_PLAY, T_SOUND_PREVIEW, BTN_SECONDARY, sound_preview, (void *)(uintptr_t)channel);
+}
+#include "m3_sound_ui.inc"
 static void settings_changed(lv_event_t *event) {
     unsigned kind = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     m3_preferences_t p; m3_preferences_get(&p);
@@ -3090,6 +3461,65 @@ static void settings_changed(lv_event_t *event) {
     else if (kind == 3) { m3_audio_volume(lv_obj_has_state(mute_switch, LV_STATE_CHECKED) ? 0 : p.last_volume); return; }
     m3_preferences_update(&p);
 }
+static void typography_changed(lv_event_t *event) {
+    (void)event;
+    m3_typography_t p = {1, segment_value(font_family_tabs), lv_slider_get_value(font_size_slider), 0};
+    if (m3_typography_update(&p)) apply_typography();
+}
+static void typography_lines(lv_obj_t *obj) {
+    if (lv_obj_check_type(obj, &lv_textarea_class) && lv_textarea_get_one_line(obj)) {
+        int height = lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height + 28;
+        lv_obj_set_height(obj, height < 52 ? 52 : height);
+    }
+    if (lv_obj_check_type(obj, &lv_label_class) && lv_label_get_long_mode(obj) == LV_LABEL_LONG_DOT) {
+        bool job = false;
+        for (unsigned i = 0; i < 6; ++i) if (obj == job_labels[i]) job = true;
+        if (!job) lv_obj_set_height(obj, lv_obj_get_style_text_font(obj, LV_PART_MAIN)->line_height);
+    }
+    for (unsigned i = 0; i < lv_obj_get_child_count(obj); ++i) typography_lines(lv_obj_get_child(obj, i));
+}
+static void apply_typography(void) {
+    m3_typography_get(&ui_typography);
+    const lv_font_t *font = m3_system_font(ui_typography.pixels, ui_typography.family);
+    if (applied_font_family != ui_typography.family || applied_font_pixels != ui_typography.pixels) {
+        applied_font_family = ui_typography.family; applied_font_pixels = ui_typography.pixels;
+        lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
+        lv_obj_set_style_text_font(screen, font, 0);
+        lv_style_set_text_font(&st_title, m3_system_font(ui_typography.pixels + 4, ui_typography.family));
+        const lv_font_t *compact = m3_system_font(ui_typography.pixels > 20 ? 20 : ui_typography.pixels, ui_typography.family);
+        lv_style_set_text_font(&st_caption, compact);
+        lv_obj_set_style_text_font(shade, compact, 0);
+        lv_obj_report_style_change(&st_title); lv_obj_report_style_change(&st_caption);
+        lv_obj_set_style_text_font(font_preview, font, 0);
+        typography_lines(screen);
+        int status_y = (44 - font->line_height) / 2;
+        lv_obj_set_y(status_clock, status_y); lv_obj_set_y(status, status_y);
+        lv_obj_invalidate(screen);
+    }
+    if (segment_value(font_family_tabs) != ui_typography.family) segment_select(font_family_tabs, ui_typography.family);
+    if (!lv_obj_has_state(font_size_slider, LV_STATE_PRESSED)) lv_slider_set_value(font_size_slider, ui_typography.pixels, LV_ANIM_OFF);
+    char value[24]; snprintf(value, sizeof(value), "%u px", ui_typography.pixels); set_text(font_size_value, value);
+}
+static void wake_mode_changed(lv_event_t *event) {
+    (void)event;
+    m3_preferences_t p; m3_preferences_get(&p);
+    p.wake_mode = segment_value(wake_tabs);
+    m3_preferences_update(&p);
+}
+static void system_restart(lv_event_t *event) {
+    unsigned action = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (action == 0) {
+        lv_obj_remove_flag(restart_confirm, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_view(restart_confirm, LV_ANIM_OFF); return;
+    }
+    lv_obj_add_flag(restart_confirm, LV_OBJ_FLAG_HIDDEN);
+    if (action == 1) return;
+    m3_preferences_t p; m3_preferences_get(&p);
+    m3_mode_result_t result = m3_preferences_restart_with(&p);
+    set_text(restart_info, tr(result == M3_MODE_OK ? T_SET_RESTARTING : result == M3_MODE_BUSY ? T_RESTART_BUSY :
+        result == M3_MODE_RESTART_FAILED ? T_SET_RESTART_MANUAL : T_SET_SAVE_FAILED));
+    lv_obj_scroll_to_view(restart_info, LV_ANIM_OFF);
+}
 static void apply_operation_mode(lv_event_t *event) {
     (void)event;
     m3_mode_result_t result = m3_preferences_request_mode(lv_obj_has_state(focus_switch, LV_STATE_CHECKED));
@@ -3098,7 +3528,8 @@ static void apply_operation_mode(lv_event_t *event) {
 }
 static void update_preferences(void) {
     m3_preferences_get(&ui_preferences);
-    if (applied_brightness != ui_preferences.brightness) {
+    apply_typography();
+    if (!screen_blanked && applied_brightness != ui_preferences.brightness) {
         applied_brightness = ui_preferences.brightness;
         if (m3_board_set_brightness(applied_brightness) != ESP_OK) set_text(settings_info, tr(T_SET_BRIGHTNESS_ERROR));
     }
@@ -3127,6 +3558,8 @@ static void update_preferences(void) {
     else lv_obj_remove_state(mute_switch, LV_STATE_CHECKED);
     if (ui_preferences.animations) lv_obj_add_state(animation_switch, LV_STATE_CHECKED);
     else lv_obj_remove_state(animation_switch, LV_STATE_CHECKED);
+    if (segment_value(wake_tabs) != ui_preferences.wake_mode) segment_select(wake_tabs, ui_preferences.wake_mode);
+    theme_wallpaper_sync();
 }
 static lv_obj_t *settings_switch(lv_obj_t *box, m3_text_t title, bool checked, unsigned kind) {
     lv_obj_t *line = row(box); grow(text(line, title, TEXT));
@@ -3135,9 +3568,31 @@ static lv_obj_t *settings_switch(lv_obj_t *box, m3_text_t title, bool checked, u
     if (kind < 4) lv_obj_add_event_cb(toggle, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)kind);
     return toggle;
 }
+enum { SET_TAB_DISPLAY, SET_TAB_THEME, SET_TAB_SOUND, SET_TAB_SYSTEM, SET_TAB_COUNT };
+static lv_obj_t *settings_tabs, *settings_pages[SET_TAB_COUNT];
+static void settings_tab_changed(lv_event_t *event) {
+    (void)event; unsigned tab = segment_value(settings_tabs);
+    for (unsigned i = 0; i < SET_TAB_COUNT; ++i) {
+        if (i == tab) lv_obj_remove_flag(settings_pages[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(settings_pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_scroll_to_y(pages[APP_SYSTEM], 0, LV_ANIM_OFF);
+}
+/* Settings are grouped into Display, Theme, Sound and System tabs; only one is shown. */
+static void settings_tab_pages(lv_obj_t *system) {
+    static const m3_text_t names[SET_TAB_COUNT] = {T_SET_SCREEN, T_THEME, T_SET_SOUND, T_SET_TAB_SYSTEM};
+    settings_tabs = segmented(system, names, NULL, SET_TAB_COUNT, SET_TAB_DISPLAY, settings_tab_changed);
+    for (unsigned i = 0; i < SET_TAB_COUNT; ++i) {
+        settings_pages[i] = bare(system); lv_obj_set_size(settings_pages[i], LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(settings_pages[i], LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_row(settings_pages[i], 14, 0);
+        if (i != SET_TAB_DISPLAY) lv_obj_add_flag(settings_pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
 static void build_settings(lv_obj_t *system) {
     m3_preferences_t p; m3_preferences_get(&p);
-    lv_obj_t *box = card(system, T_SET_SCREEN);
+    settings_tab_pages(system);
+    lv_obj_t *display = settings_pages[SET_TAB_DISPLAY], *sound_tab = settings_pages[SET_TAB_SOUND], *info = settings_pages[SET_TAB_SYSTEM];
+    lv_obj_t *box = card(display, T_SET_SCREEN);
     text(box, T_SET_BRIGHTNESS, TEXT);
     brightness_value = label(box, "", CYAN);
     brightness_slider = lv_slider_create(box); style_slider(brightness_slider);
@@ -3145,10 +3600,43 @@ static void build_settings(lv_obj_t *system) {
     lv_obj_set_width(brightness_slider, LV_PCT(100));
     lv_obj_add_event_cb(brightness_slider, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)0);
     caption(box, T_SET_BRIGHTNESS_HINT);
-    box = card(system, T_SET_SOUND);
+    text(box, T_SET_WAKE, TEXT);
+    static const m3_text_t wake_choices[] = {T_WAKE_HOLD, T_WAKE_DOUBLE_TAP};
+    wake_tabs = segmented(box, wake_choices, NULL, 2, p.wake_mode, wake_mode_changed);
+    caption(box, T_SET_WAKE_HINT);
+    theme_card(settings_pages[SET_TAB_THEME]);
+    box = card(display, T_SET_FONT);
+    static const m3_text_t font_names[] = {T_READER_GOTHIC, T_READER_GOTHIC_BOLD, T_READER_MYEONGJO};
+    font_family_tabs = segmented(box, font_names, NULL, M3_READER_FONT_COUNT, ui_typography.family, typography_changed);
+    text(box, T_SET_FONT_SIZE, TEXT); font_size_value = label(box, "", CYAN);
+    font_size_slider = lv_slider_create(box); style_slider(font_size_slider);
+    lv_obj_set_width(font_size_slider, LV_PCT(100));
+    lv_slider_set_range(font_size_slider, M3_SYSTEM_FONT_MIN, M3_SYSTEM_FONT_MAX);
+    lv_slider_set_value(font_size_slider, ui_typography.pixels, LV_ANIM_OFF);
+    lv_obj_add_event_cb(font_size_slider, typography_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    caption(box, T_SET_FONT_PREVIEW);
+    font_preview = text(box, T_SET_FONT_SAMPLE, TEXT);
+    lv_label_set_long_mode(font_preview, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(font_preview, 6, 0);
+    caption(box, T_SET_FONT_HINT);
+    box = card(sound_tab, T_SET_SOUND);
     volume_row(box, 5, p.volume);
     mute_switch = settings_switch(box, T_SET_MUTE, p.volume == 0, 3);
-    box = card(system, T_SET_PERFORMANCE);
+    sound_card = box;
+    m3_feedback_settings_t sound; m3_feedback_get(&sound);
+    caption(box, T_SOUND_HINT);
+    sound_pack_list(box);
+    sound_control(box, T_SOUND_BOOT, 0, sound.boot_enabled, sound.boot_volume);
+    sound_control(box, T_SOUND_EFFECTS, 1, sound.effects_enabled, sound.effects_volume);
+    sound_control(box, T_SOUND_GUIDANCE, 2, sound.guidance_enabled, sound.guidance_volume);
+    button(box, LV_SYMBOL_SETTINGS, T_ACCESSIBILITY, BTN_SECONDARY, accessibility_open, NULL);
+    accessibility_panel = card(sound_tab, T_ACCESSIBILITY);
+    static const m3_text_t guidance_options[] = {T_GUIDANCE_VOICE, T_GUIDANCE_TONES};
+    guidance_mode = segmented(accessibility_panel, guidance_options, NULL, 2, sound.guidance_mode, guidance_changed);
+    caption(accessibility_panel, T_GUIDANCE_HINT);
+    button(accessibility_panel, LV_SYMBOL_PLAY, T_SOUND_PREVIEW, BTN_SECONDARY, sound_preview, (void *)2);
+    lv_obj_add_flag(accessibility_panel, LV_OBJ_FLAG_HIDDEN);
+    box = card(display, T_SET_PERFORMANCE);
     text(box, T_SET_FPS, TEXT); fps_value = label(box, "", CYAN);
     fps_slider = lv_slider_create(box); style_slider(fps_slider);
     lv_slider_set_range(fps_slider, 5, 60); lv_slider_set_value(fps_slider, p.max_fps, LV_ANIM_OFF);
@@ -3156,26 +3644,41 @@ static void build_settings(lv_obj_t *system) {
     lv_obj_add_event_cb(fps_slider, settings_changed, LV_EVENT_VALUE_CHANGED, (void *)1);
     animation_switch = settings_switch(box, T_SET_ANIMATIONS, p.animations, 2);
     caption(box, T_SET_FPS_HINT);
-    box = card(system, T_SET_OPERATION);
+    box = card(info, T_SET_OPERATION);
     focus_switch = settings_switch(box, T_SET_WEB_FOCUS, p.web_focus, 4);
     caption(box, T_SET_FOCUS_HINT);
     button(box, LV_SYMBOL_REFRESH, T_SET_APPLY_MODE, BTN_PRIMARY, apply_operation_mode, NULL);
     settings_info = text(box, T_SET_AUTO_SAVE, MUTED);
-    box = card(system, T_SEC_LANGUAGE);
+    box = card(info, T_SYSTEM_RESTART);
+    caption(box, T_RESTART_HINT);
+    button(box, LV_SYMBOL_REFRESH, T_SYSTEM_RESTART, BTN_SECONDARY, system_restart, (void *)0);
+    restart_confirm = bare(box);
+    lv_obj_set_size(restart_confirm, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(restart_confirm, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(restart_confirm, 12, 0);
+    caption(restart_confirm, T_RESTART_CONFIRM);
+    lv_obj_t *actions = row(restart_confirm);
+    grow(button(actions, LV_SYMBOL_CLOSE, T_RESTART_CANCEL, BTN_SECONDARY, system_restart, (void *)1));
+    grow(button(actions, LV_SYMBOL_REFRESH, T_RESTART_NOW, BTN_PRIMARY, system_restart, (void *)2));
+    lv_obj_add_flag(restart_confirm, LV_OBJ_FLAG_HIDDEN);
+    restart_info = label(box, "", MUTED);
+    box = card(display, T_SEC_LANGUAGE);
     static const m3_text_t languages[] = {T_LANG_KO, T_LANG_EN, T_LANG_JA};
     language_tabs = segmented(box, languages, NULL, M3_LANG_COUNT, m3_i18n_language(), language_changed);
-    box = card(system, T_SEC_VOICE);
+    box = card(sound_tab, T_SEC_VOICE);
     m3_voice_state_t initial_voice; m3_voice_state(&initial_voice);
-    /* Index order matches m3_voice_set_provider(): 0 OpenAI mini-transcribe, 1 Gemini 3.1, 2 Gemini 3.5. */
-    static const char *const recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5"};
-    voice_provider = segmented(box, NULL, recognizers, 3, initial_voice.provider, voice_provider_changed);
+    /* Index order matches m3_voice_set_provider(): 0 OpenAI mini-transcribe, 1 Gemini 3.1, 2 Gemini 3.5, 3 Azure. */
+    static const char *const recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5", "Azure"};
+    voice_provider = segmented(box, NULL, recognizers, 4, initial_voice.provider, voice_provider_changed);
     caption(box, T_STT_HINT);
     voice_key = input_field(box, T_STT_KEY, 255, INPUT_TEXT, false);
     lv_textarea_set_password_mode(voice_key, true);
     button(box, LV_SYMBOL_SAVE, T_STT_KEY_SAVE, BTN_SECONDARY, voice_save_key, NULL);
     voice_key_info = label(box, "", MUTED);
     voice_key_status();
-    box = card(system, T_SEC_ABOUT);
+    box = card(info, T_SET_FLASH_USAGE);
+    m3_flash_usage_view_build(box, &(m3_flash_view_style_t){TEXT, MUTED, CYAN, SURFACE_HI, &st_btn, &st_btn_pressed});
+    box = card(info, T_SEC_ABOUT);
     system_info = label(box, "", MUTED); lv_obj_set_style_text_line_space(system_info, 4, 0);
 }
 static void build_voice_panel(lv_obj_t *screen) {
@@ -3220,15 +3723,15 @@ static void build_voice_panel(lv_obj_t *screen) {
     lv_obj_add_flag(voice_panel, LV_OBJ_FLAG_HIDDEN);
 }
 static void style_keyboard(void) {
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x0d121a), 0); lv_obj_set_style_bg_opa(keyboard, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_BG), 0); lv_obj_set_style_bg_opa(keyboard, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(keyboard, 0, 0); lv_obj_set_style_radius(keyboard, 0, 0);
     lv_obj_set_style_pad_all(keyboard, 6, 0); lv_obj_set_style_pad_gap(keyboard, 6, 0);
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x2a3445), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_ITEM), LV_PART_ITEMS);
     lv_obj_set_style_text_color(keyboard, lv_color_hex(TEXT), LV_PART_ITEMS);
     lv_obj_set_style_radius(keyboard, 8, LV_PART_ITEMS); lv_obj_set_style_border_width(keyboard, 0, LV_PART_ITEMS);
     lv_obj_set_style_shadow_width(keyboard, 0, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x18202c), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(keyboard, lv_color_hex(0xc3cede), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(KEY_CHECKED), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(KEY_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(keyboard, lv_color_hex(CYAN), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_text_color(keyboard, lv_color_hex(ON_ACCENT), LV_PART_ITEMS | LV_STATE_PRESSED);
 }
@@ -3236,6 +3739,7 @@ static void style_keyboard(void) {
 static void apply_language(void) {
     for (unsigned i = 0; i < binding_count; ++i) bind_apply(i);
     for (unsigned i = 0; i < segment_count; ++i) segment_refresh(&segments[i]);
+    m3_flash_usage_view_refresh();
     lv_label_set_text(app_title, tr(app_names[current_app]));
     seen_agent = seen_voice = seen_wifi = seen_scan = seen_files = ~0u;
     web_qr_dirty = true;
@@ -3247,12 +3751,14 @@ esp_err_t m3_ui_start(void) {
     if (!m3_board_display() || !lvgl_port_lock(1000)) return ESP_ERR_INVALID_STATE;
     m3_i18n_load();
     m3_preferences_get(&ui_preferences);
-    styles_init();
+    m3_typography_get(&ui_typography);
+    m3_theme_load(&ui_theme); theme_resolve();
+    styles_init(); theme_styles();
     lv_obj_t *screen = lv_display_get_screen_active(m3_board_display());
-    lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), true, &m3_font_korean);
+    lv_theme_t *theme = lv_theme_default_init(m3_board_display(), lv_color_hex(CYAN), lv_color_hex(MAGENTA), theme_dark(), &m3_font_korean);
     lv_display_set_theme(m3_board_display(), theme);
     lv_obj_set_style_bg_color(screen, lv_color_hex(INK), 0);
-    lv_obj_set_style_text_font(screen, &m3_font_korean, 0);
+    lv_obj_set_style_text_font(screen, m3_system_font(ui_typography.pixels, ui_typography.family), 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(TEXT), 0);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     /* Status bar: time left, network/audio state right. Pull down for the activity shade. */
@@ -3262,19 +3768,41 @@ esp_err_t m3_ui_start(void) {
     lv_obj_add_flag(status_strip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(status_strip, shade_touch, LV_EVENT_ALL, NULL);
     status_clock = label(status_strip, "--:--", TEXT); lv_obj_set_pos(status_clock, 22, 13); lv_obj_set_width(status_clock, 80);
-    status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 150, 13); lv_obj_set_width(status, 230);
+    status = label(status_strip, "", MUTED); lv_obj_set_pos(status, 108, 13); lv_obj_set_width(status, 150);
+    label_ellipsis(status);
     lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
-    status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 392, 13);
+    status_audio = label(status_strip, LV_SYMBOL_AUDIO, CYAN); lv_obj_set_pos(status_audio, 270, 13);
+    lv_obj_set_style_text_font(status_audio, &lv_font_montserrat_20, 0);
     lv_obj_set_width(status_audio, 20); lv_obj_add_flag(status_audio, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 420, 8); lv_obj_set_size(signal, 44, 28);
+    lv_obj_t *signal = bare(status_strip); lv_obj_set_pos(signal, 294, 8); lv_obj_set_size(signal, 44, 28);
     for (unsigned i = 0; i < 4; ++i) wifi_levels[i] = icon_part(signal, 8 + i * 8, 22 - (i + 1) * 5, 5, (i + 1) * 5, 2);
+    /* Vector plug and battery work with all language fonts; no emoji glyphs. */
+    power_plug = bare(status_strip); lv_obj_set_pos(power_plug, 342, 10); lv_obj_set_size(power_plug, 20, 26);
+    glyph_part(power_plug, 4, 1, 3, 7, 1); glyph_part(power_plug, 12, 1, 3, 7, 1);
+    glyph_part(power_plug, 2, 8, 15, 9, 3); glyph_part(power_plug, 8, 17, 3, 7, 1);
+    power_battery = bare(status_strip); lv_obj_set_pos(power_battery, 366, 13); lv_obj_set_size(power_battery, 33, 18);
+    lv_obj_t *outline = bare(power_battery); lv_obj_set_size(outline, 28, 18);
+    lv_obj_set_style_border_width(outline, 2, 0); lv_obj_set_style_border_color(outline, lv_color_hex(TEXT), 0);
+    lv_obj_set_style_border_opa(outline, LV_OPA_COVER, 0); lv_obj_set_style_radius(outline, 3, 0);
+    glyph_part(power_battery, 29, 5, 3, 8, 1);
+    power_fill = icon_part(power_battery, 3, 3, 22, 12, 1);
+    power_charge = label(power_battery, LV_SYMBOL_CHARGE, CYAN);
+    lv_obj_set_style_text_font(power_charge, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(power_charge, 9, 1);
+    lv_obj_set_style_text_color(power_charge, lv_color_hex(ON_ACCENT), 0);
+    lv_obj_set_style_bg_color(power_charge, lv_color_hex(CYAN), 0);
+    lv_obj_set_style_bg_opa(power_charge, LV_OPA_COVER, 0);
+    power_percent = label(status_strip, "--", MUTED); lv_obj_set_pos(power_percent, 404, 13);
+    lv_obj_set_style_text_font(power_percent, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(power_percent, 62); lv_obj_set_style_text_align(power_percent, LV_TEXT_ALIGN_RIGHT, 0);
+    update_power(&snapshot.power);
     /* App header: back control and title. */
     back_button = button(screen, LV_SYMBOL_LEFT, T_NONE, BTN_SECONDARY, go_home, NULL);
     lv_obj_set_pos(back_button, 16, 48); lv_obj_set_size(back_button, 44, 44);
     lv_obj_set_style_radius(back_button, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_pad_all(back_button, 0, 0);
     lv_obj_set_ext_click_area(back_button, 10);
     app_title = label(screen, "", TEXT); lv_obj_set_pos(app_title, 74, 58); lv_obj_set_width(app_title, 390);
-    lv_label_set_long_mode(app_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    label_ellipsis(app_title);
     lv_obj_add_style(app_title, &st_title, 0);
     viewport = lv_obj_create(screen); lv_obj_remove_style_all(viewport); lv_obj_set_pos(viewport, 0, CONTENT_TOP);
     lv_obj_set_size(viewport, 480, HOME_TOP - CONTENT_TOP);
@@ -3317,8 +3845,17 @@ esp_err_t m3_ui_start(void) {
     build_music(pages[APP_MUSIC], initial_audio.volume);
     build_gallery(pages[APP_GALLERY], initial_audio.volume);
     build_calculator(pages[APP_CALCULATOR]);
+    build_reader(pages[APP_READER]);
+    build_weather(pages[APP_WEATHER]);
     radio_select(7);
     create_shade(screen);
+    screen_shield = lv_obj_create(lv_layer_top()); lv_obj_remove_style_all(screen_shield);
+    lv_obj_set_pos(screen_shield, 0, 0); lv_obj_set_size(screen_shield, M3_WIDTH, M3_HEIGHT);
+    lv_obj_set_style_bg_color(screen_shield, lv_color_hex(0), 0);
+    lv_obj_set_style_bg_opa(screen_shield, LV_OPA_COVER, 0);
+    lv_obj_add_flag(screen_shield, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(screen_shield, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+    screen_timer = lv_timer_create(screen_wake_tick, 30, NULL);
     show_app(APP_HOME);
     lv_timer_create(update_metrics, 250, NULL);
     lv_timer_create(music_visual_update, 40, NULL);

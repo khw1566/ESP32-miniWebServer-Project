@@ -1,6 +1,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
 const root=path.resolve(__dirname,'..'),common=path.join(__dirname,'firmware_common');
-const read=f=>fs.readFileSync(f,'utf8');
+// Git can check out synchronized copies with CRLF on Windows.
+const read=f=>fs.readFileSync(f,'utf8').replace(/\r\n/g,'\n');
 const html=read(path.join(common,'wifi_setup.html'));
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 class Element {
@@ -43,7 +44,13 @@ async function run(){
   const failure=setup({ok:false,data:{message:'NVS write failed'}});failure.el('ssid').value='Test';failure.el('pass').value='password1';await failure.context.saveSettings({preventDefault(){}});assert.equal(failure.el('pass').value,'password1');assert.equal(failure.el('save').disabled,false);assert.equal(failure.el('scan').disabled,false);assert.equal(failure.el('setupForm').hidden,false);assert(failure.el('status').textContent.includes('NVS'));
   const scan=setup({ok:true,data:{networks:[{ssid:'<script>alert(1)</script>',rssi:-45}]}});await scan.context.scanWifi();assert.equal(scan.el('networks').children[0].value,'<script>alert(1)</script>');assert.equal(scan.el('scan').disabled,false);
   for(const project of fs.readdirSync(root).filter(n=>n.startsWith('mini-WEB'))){
-    const main=path.join(root,project,'main');
+    let main=path.join(root,project,'main');
+    // The S3 Zero board profile intentionally reuses the maintained S3 component.
+    if(project==='mini-WEB (S3-Zero-ESP-IDF_ver)'){
+      const cmake=read(path.join(root,project,'CMakeLists.txt'));
+      assert(cmake.includes('set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../mini-WEB (S3-ESP-IDF_ver)/main")'));
+      main=path.join(root,'mini-WEB (S3-ESP-IDF_ver)','main');
+    }
     for(const file of ['network_settings.inc','web_network_setup.inc'])assert.equal(read(path.join(main,file)),read(path.join(common,file)),`${project}/${file} stale`);
     assert.equal(read(path.join(main,'include/network_settings.h')),read(path.join(common,'network_settings.h')));
     const embedded=read(path.join(main,'web_wifi_setup_html.inc'));

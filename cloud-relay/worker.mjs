@@ -3,7 +3,7 @@ export function publicPath(raw) {
   if (typeof raw !== 'string' || raw.length > 180) return false;
   return raw === '/' || (/^\/[A-Za-z0-9_./-]+$/.test(raw) &&
     !raw.includes('..') && !raw.includes('//') && !raw.split('/').some(p => p.startsWith('.')) &&
-    !/^\/(api|admin|setup|ai|__relay)(\/|\.|$)/i.test(raw) &&
+    !/^\/(api|admin|setup|ai|ai_studio|__relay)(\/|\.|$)/i.test(raw) &&
     /\.(html?|css|js|json|txt|svg|png|jpe?g|gif|webp|ico|mp4|webm|mp3|wav|m4a|pdf|woff2?|ttf)$/i.test(raw));
 }
 export function mediaName(name) {
@@ -21,6 +21,7 @@ async function validToken(request, expected) {
 const response = (status, text = '') => new Response(status === 204 ? null : text, {
   status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }
 });
+const relayHost = env => env.RELAY_HOST || `relay.${env.PUBLIC_DOMAIN}`;
 async function limitedBody(request, limit) {
   if (!request.body) return new Uint8Array();
   const reader = request.body.getReader(); const chunks = []; let length = 0;
@@ -42,8 +43,8 @@ export default {
     let registry;
     try { registry = JSON.parse(env.DEVICE_REGISTRY || '{}'); } catch { return response(503); }
     let id;
-    if (url.hostname === `relay.${domain}`) {
-      const match = /^\/v1\/devices\/([a-z0-9-]{1,32})\/(poll|result\/[a-f0-9-]+\/(start|chunk|end|abort|ack))$/.exec(url.pathname);
+    if (url.hostname === relayHost(env)) {
+      const match = /^\/v[12]\/devices\/([a-z0-9-]{1,32})\/(poll|result\/[a-f0-9-]+\/(start|chunk|end|abort|ack|stream))$/.exec(url.pathname);
       if (!match || url.search) return response(404);
       id = match[1];
       if (!registry[id]) return response(401);
@@ -61,6 +62,7 @@ export class RelayDevice {
     this.env = env; this.queue = []; this.jobs = new Map(); this.poll = null;
     this.active = null; this.lastSeen = 0; this.uploadSession = null;
     this.pollMs = 20000; this.requestMs = 60000;
+    this.streamV2 = false; this.streamIdleMs = 15000; this.streamMaxMs = 600000;
   }
   release(job) {
     clearTimeout(job.timer); this.jobs.delete(job.id);
@@ -68,6 +70,8 @@ export class RelayDevice {
     if (this.active === job) this.active = null;
   }
   fail(job, status = 504) {
+    if (!this.jobs.has(job.id)) return;
+    if (job.abortStream) { job.abortStream(status); return; }
     this.release(job);
     if (job.writer) job.writer.abort(new Error('Relay disconnected')).catch(() => {});
     else job.resolve(response(status, '보드의 응답을 받지 못했습니다. 잠시 후 다시 접속하세요.'));
@@ -79,6 +83,9 @@ export class RelayDevice {
     const poll = this.poll; this.poll = null; clearTimeout(poll.timer);
     this.active = job; job.delivered = true;
     const message = job.kind === 'upload' ? { id: job.id, kind: 'upload', ...job.command } : { id: job.id, path: job.path, range: job.range };
+    if (job.kind !== 'upload' && this.streamV2) {
+      job.transport = 'stream-v2'; message.transport = 'stream-v2';
+    }
     poll.resolve(Response.json(message, { headers: { 'cache-control': 'no-store' } }));
   }
   async fetch(request) {
@@ -86,14 +93,16 @@ export class RelayDevice {
   }
   async handle(request) {
     const url = new URL(request.url);
-    if (url.hostname === `relay.${this.env.PUBLIC_DOMAIN}`) {
-      const match = /^\/v1\/devices\/([a-z0-9-]+)\/(poll|result\/([a-f0-9-]+)\/(start|chunk|end|abort|ack))$/.exec(url.pathname);
+    if (url.hostname === relayHost(this.env)) {
+      const match = /^\/v([12])\/devices\/([a-z0-9-]+)\/(poll|result\/([a-f0-9-]+)\/(start|chunk|end|abort|ack|stream))$/.exec(url.pathname);
       if (!match) return response(404);
-      const expected = JSON.parse(this.env.DEVICE_REGISTRY || '{}')[match[1]]?.tokenHash;
+      if ((match[1] === '2') !== (match[5] === 'stream')) return response(404);
+      const expected = JSON.parse(this.env.DEVICE_REGISTRY || '{}')[match[2]]?.tokenHash;
       if (!await validToken(request, expected)) return response(401);
       this.lastSeen = Date.now();
-      if (match[2] === 'poll') {
+      if (match[3] === 'poll') {
         if (request.method !== 'GET') return response(405);
+        this.streamV2 = request.headers.get('x-relay-capabilities')?.split(',').map(s => s.trim()).includes('stream-v2') === true;
         // A board keeps one poll open, so a new poll means its previous connection
         // is gone (reboot, Wi-Fi drop). Release the stale poll and redeliver a job
         // that never started, instead of refusing the board for up to a minute.
@@ -110,11 +119,12 @@ export class RelayDevice {
         });
       }
       if (request.method !== 'POST') return response(405);
-      const job = this.jobs.get(match[3]); const action = match[4];
+      const job = this.jobs.get(match[4]); const action = match[5];
       if (!job || !job.delivered) return response(410);
       if (job.busy) return response(409);
       job.busy = true;
       try {
+        if (action === 'stream') return await this.downloadStream(request, job);
         const data = await limitedBody(request, action === 'chunk' ? 2048 : 1024);
         if (!this.jobs.has(job.id)) return response(410);
         if (action === 'ack') {
@@ -174,7 +184,7 @@ export class RelayDevice {
     let range = request.headers.get('range') || '';
     if (range && (range.length >= 80 || !/^bytes=(\d+-\d*|-\d+)$/.test(range))) return response(416);
     // Browser media reads use bounded windows so one relay request stays short.
-    if(/\.(mp4|webm|mp3|wav|m4a)$/i.test(url.pathname) && /^bytes=\d+-\d*$/.test(range)) {
+    if(!this.streamV2 && /\.(mp4|webm|mp3|wav|m4a)$/i.test(url.pathname) && /^bytes=\d+-\d*$/.test(range)) {
       const [start,end]=range.slice(6).split('-').map(Number);
       if(!Number.isSafeInteger(start) || (range.split('-')[1] && !Number.isSafeInteger(end))) return response(416);
       const cap=start+262143;
@@ -186,6 +196,76 @@ export class RelayDevice {
       job.timer = setTimeout(() => this.fail(job), this.requestMs);
       this.dispatch();
     });
+  }
+  async downloadStream(request, job) {
+    if (job.kind === 'upload' || job.transport !== 'stream-v2' || job.writer) return response(409);
+    const rawLength = request.headers.get('content-length');
+    const rawStatus = request.headers.get('x-relay-status');
+    if (!/^\d{1,9}$/.test(rawLength || '') || !/^(200|206|404|416|503)$/.test(rawStatus || '')) throw new Error('Invalid stream metadata');
+    const length = Number(rawLength), status = Number(rawStatus);
+    if (length > 64 * 1024 * 1024) throw new Error('Stream too large');
+    const headers = new Headers({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer', 'content-length': String(length), 'x-relay-transport': 'stream-v2' });
+    for (const key of ['content-type', 'content-range', 'accept-ranges']) {
+      const value = request.headers.get(key);
+      if (value !== null) {
+        if (value.length > 160 || /[\r\n\0]/.test(value)) throw new Error('Invalid stream header');
+        headers.set(key, value);
+      }
+    }
+    const range = headers.get('content-range');
+    if (status === 206) {
+      const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(range || '');
+      if (!job.range || !match || !match.slice(1).every(n => Number.isSafeInteger(Number(n))) ||
+          Number(match[2]) < Number(match[1]) || Number(match[2]) >= Number(match[3]) ||
+          Number(match[2]) - Number(match[1]) + 1 !== length) throw new Error('Invalid partial stream');
+      const total = Number(match[3]), requested = /^bytes=(\d*)-(\d*)$/.exec(job.range);
+      if (!requested || !requested.slice(1).filter(Boolean).every(n => Number.isSafeInteger(Number(n)))) throw new Error('Invalid requested range');
+      const first = requested[1] ? Number(requested[1]) : Math.max(0, total - Number(requested[2]));
+      const last = requested[1] && requested[2] ? Math.min(Number(requested[2]), total - 1) : total - 1;
+      if (first !== Number(match[1]) || last !== Number(match[2])) throw new Error('Incorrect range slice');
+    } else if (status === 416) {
+      if (!/^bytes \*\/\d+$/.test(range || '')) throw new Error('Invalid range rejection');
+    } else if (range) throw new Error('Unexpected content range');
+    const reader = request.body?.getReader();
+    let finished = false, output, acknowledge;
+    const completion = new Promise(resolve => { acknowledge = resolve; });
+    const started = Date.now();
+    const finish = (ok, code = 400) => {
+      if (finished) return;
+      finished = true; this.release(job); delete job.abortStream;
+      if (ok) { reader?.releaseLock(); output.close(); acknowledge(response(204)); }
+      else {
+        if (reader) reader.cancel('Relay stream ended').then(() => reader.releaseLock()).catch(() => {});
+        try { output.error(new Error('Incomplete relay stream')); } catch {}
+        acknowledge(response(code));
+      }
+      this.dispatch();
+    };
+    const progress = () => {
+      clearTimeout(job.timer);
+      job.timer = setTimeout(() => finish(false, 504), Math.max(1, Math.min(this.streamIdleMs, this.streamMaxMs - (Date.now() - started))));
+    };
+    const body = new ReadableStream({
+      start: controller => { output = controller; },
+      pull: async controller => {
+        try {
+          const { done, value } = reader ? await reader.read() : { done: true };
+          if (finished) return;
+          if (done) { finish(job.bytes === length); return; }
+          if (!(value instanceof Uint8Array) || job.bytes + value.byteLength > length) { finish(false); return; }
+          job.bytes += value.byteLength; this.lastSeen = Date.now(); progress();
+          controller.enqueue(value);
+        } catch { finish(false); }
+      },
+      cancel: () => finish(false, 410),
+    // At most one incoming chunk is queued; prefetch also detects EOF when a
+    // Content-Length client stops reading immediately after the final byte.
+    }, { highWaterMark: 1 });
+    job.abortStream = code => finish(false, code);
+    progress();
+    job.resolve(new Response(body, { status, headers }));
+    return completion;
   }
   async upload(request, url) {
     if (request.method !== 'POST' || url.search) return response(405);

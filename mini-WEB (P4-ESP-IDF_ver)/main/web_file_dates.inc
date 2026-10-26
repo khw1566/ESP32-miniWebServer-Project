@@ -55,11 +55,3 @@ static esp_err_t file_dates_clear(void) {
     err = nvs_erase_all(h); if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h); return err;
 }
-static int64_t file_date_request(httpd_req_t *req) {
-    char header[32], *end;
-    if (httpd_req_get_hdr_value_str(req, "X-Modified-At", header, sizeof(header)) == ESP_OK) {
-        double value = strtod(header, &end);
-        if (end != header && *end == 0 && file_date_valid(value)) return file_date_valid(value);
-    }
-    return file_date_now();
-}

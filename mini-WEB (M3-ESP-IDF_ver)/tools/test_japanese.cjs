@@ -66,8 +66,9 @@ assert.equal(decode(output),ja.statuses['Radio stream ended / network timeout'],
 status.language=1;assert.equal(status.translate(input,output,256),input);
 
 function array(src,name){return new RegExp('\\b'+name+'\\[\\] = \\{([\\s\\S]*?)\\};').exec(src)[1].split(',').map(x=>x.trim()).filter(Boolean).map(Number);}
+function fontBitmap(src){return /\bbitmap_packed\[\] = \{/.test(src)?require('zlib').inflateSync(Buffer.from(array(src,'bitmap_packed'))):array(src,'bitmap');}
 const korean=read('main/m3_font_korean.c'),cjk=read('main/m3_font_cjk.c'),large=read('main/m3_font_large.c');
-const kb=Uint8Array.from(array(korean,'bitmap')),cb=Uint8Array.from(array(cjk,'bitmap')),
+const kb=Uint8Array.from(fontBitmap(korean)),cb=Uint8Array.from(fontBitmap(cjk)),
  cps=[...array(cjk,'codepoints'),...array(cjk,'upper_codepoints')],offsets=array(cjk,'offsets'),index=new Map(cps.map((cp,i)=>[cp,i]));
 const smallFonts={korean:{dsc:kb},cjk:{dsc:cb},latin:{}};
 function base(cp,out){let i;
@@ -89,7 +90,7 @@ for(const cp of [...cps,...Array.from({length:11172},(_,i)=>i+0xAC00)]){const d=
 assert(!font.describe(65,{gid:{}}),'ASCII uses Montserrat 20');
 const draw={...font,lv_draw_buf_width_to_stride:w=>(w+3)&~3,LV_COLOR_FORMAT_A8:8};vm.createContext(draw);
 let bitmapBody=types(body(large,'bitmap')).replace('lv_font_glyph_dsc_t base;','let base={};').replaceAll('&base','base')
- .replace('const uint8_t *source = (const uint8_t *)base.resolved_font->dsc + base.gid.index;','let source=base.resolved_font.dsc.subarray(base.gid.index);')
+ .replace('const uint8_t *data = m3_font_blob_data(base.resolved_font);\n    if (!data) return null;\n    const uint8_t *source = data + base.gid.index;','let source=base.resolved_font.dsc.subarray(base.gid.index);')
  .replace('uint8_t *target = buffer->data;','let target=buffer.data;').replaceAll('glyph->','glyph.').replaceAll('buffer->','buffer.')
  .replaceAll('y * base.box_h / glyph.box_h','Math.floor(y * base.box_h / glyph.box_h)').replaceAll('x * base.box_w / glyph.box_w','Math.floor(x * base.box_w / glyph.box_w)')
  .replace('0x80u','0x80').replace('target += stride','target=target.subarray(stride)');
@@ -101,11 +102,11 @@ for(const text of ['큰한글','日本語カレンダー','かなカナ','𠮟']
   assert.equal(buffer.data[y*stride+x],x<d.box_w?(src[b.gid.index+(bit>>3)]&(0x80>>(bit&7))?255:0):19);
  }
 }
-const ui=read('main/m3_ui.c');assert(!ui.includes('LV_LABEL_LONG_DOT'));assert(ui.includes('LV_LABEL_LONG_SCROLL_CIRCULAR'));
+const ui=read('main/m3_ui.c');assert(ui.includes('LV_LABEL_LONG_DOT'));assert(!ui.includes('LV_LABEL_LONG_SCROLL'));
 const label={text:'日本語の長いファイル名',resets:0},stable={strcmp:(a,b)=>a===b?0:1,lv_label_get_text:o=>o.text,lv_label_set_text:(o,t)=>{o.text=t;label.resets++;}};
 vm.createContext(stable);vm.runInContext('function set(obj,text){'+body(ui,'set_text')+'}',stable);
-for(let i=0;i<60;i++)stable.set(label,label.text);assert.equal(label.resets,0,'metrics refresh preserves marquee position');
+for(let i=0;i<60;i++)stable.set(label,label.text);assert.equal(label.resets,0,'metrics refresh does not rewrite truncated labels');
 stable.set(label,'次のファイル');assert.equal(label.resets,1);
 assert(ui.includes('T_LANG_KO, T_LANG_EN, T_LANG_JA'));assert(ui.includes('key_controls[8][64]'));
 assert(read('main/CMakeLists.txt').includes('"m3_font_large.c"'));assert(read('main/CMakeLists.txt').includes('"m3_kana.c"'));
-console.log('PASS: all Japanese UI selections/NVS restore, kana voiced/semivoiced/small forms, all large Hangul/CJK line bounds, actual scaled A8 pixels, title fallback and circular overflow policies.');
+console.log('PASS: all Japanese UI selections/NVS restore, kana voiced/semivoiced/small forms, all large Hangul/CJK line bounds, actual scaled A8 pixels, title fallback and ellipsis overflow policies.');

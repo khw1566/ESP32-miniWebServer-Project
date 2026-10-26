@@ -16,6 +16,7 @@
 #endif
 
 static const char *TAG = "M3_BOARD";
+#include "m3_power.h"
 static i2c_master_bus_handle_t bus;
 static lv_display_t *display;
 static bool touch_ready;
@@ -32,6 +33,22 @@ esp_err_t m3_board_set_brightness(unsigned percent) {
     esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, percent * 1023U / 100U);
     if (err == ESP_OK) err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     if (err != ESP_OK) { ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 1); backlight_pwm_ready = false; }
+    return err;
+}
+
+esp_err_t m3_board_set_screen_on(bool on) {
+    if (!backlight_pwm_ready) return gpio_set_level(M3_LCD_BACKLIGHT, on ? 1 : 0);
+    if (on) {
+        m3_preferences_t p; m3_preferences_get(&p);
+        return m3_board_set_brightness(p.brightness);
+    }
+    esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
+    if (err == ESP_OK) err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    if (err != ESP_OK) {
+        /* Keep the screen usable if dimming fails. */
+        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 1);
+        backlight_pwm_ready = false;
+    }
     return err;
 }
 
@@ -152,5 +169,6 @@ esp_err_t m3_board_init(void) {
         backlight_pwm_ready = false;
         ESP_LOGW(TAG, "Backlight PWM unavailable; retaining full brightness");
     }
+    m3_power_init(); /* Read-only diagnostic before service/audio workers. */
     return ESP_OK;
 }

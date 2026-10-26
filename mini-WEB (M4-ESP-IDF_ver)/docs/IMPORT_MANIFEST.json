@@ -1,0 +1,2380 @@
+{
+  "source_commit": "1fb6d9b8afd0f7cf45ef519d84c6cb7a5d9fa45b",
+  "reference": "C:/Users/work/Desktop/ARD_v1/ARD_ESP-IDF/JC1060P470C",
+  "files": [
+    {
+      "source": "CMakeLists.txt",
+      "sha256": "f926ce66fc9b932ee60eac0bcc575ceeb2d0f9483f1d317ea28a498523ee762a"
+    },
+    {
+      "source": "SD_ADMIN.md",
+      "sha256": "fab835badf7024bf65fa37314ab10eeb13d01878e475966c57155b46a06ef6d1"
+    },
+    {
+      "source": "assets/branding/logo-mark.svg",
+      "sha256": "370c9f6d4127dd02d6d9835c5c66fc380e065c64e0524cd43343205da6f99cef"
+    },
+    {
+      "source": "c6_sdkconfig.defaults",
+      "sha256": "29e89c8837de02c1bd9d632e3c6c5babea5915d621b66f0651c659c98008faef"
+    },
+    {
+      "source": "cmake/audio_codec_link_compat.cmake",
+      "sha256": "18a3ea4798d130d119d3caa466e5aeec5d96e7fce80db9b1df61b0a7746a90a4"
+    },
+    {
+      "source": "cmake/hosted_v2_migration.cmake",
+      "sha256": "c7e18b710acf6cbb05980de73a250847043c4d070a82b4b21b97ef5fd3f2a505"
+    },
+    {
+      "source": "cmake/memory_policy.cmake",
+      "sha256": "841ac8b27c215ea969aa2fe668863fb99f8d69fb6a2b49309954c8bbe446127e"
+    },
+    {
+      "source": "cmake/web_assets.cmake",
+      "sha256": "6dfb5aca6c6810b2b2fb48743491cdc0e73513a76ecda44ea3be7a00257e8b11"
+    },
+    {
+      "source": "components/espeak_ng/CMakeLists.txt",
+      "sha256": "8810e2d480ff7275fdfdb48e08d6d267622504671353cdfb9b76b82d1ff85088"
+    },
+    {
+      "source": "components/espeak_ng/COPYING",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "source": "components/espeak_ng/COPYING.UCD",
+      "sha256": "be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/endian.h",
+      "sha256": "d9d0517fa9a3b2caabbbe84c5c003526779b1056549e7f08dbd0ce3b30c26875"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/getopt.h",
+      "sha256": "95a2ba0e9f6765148c74bf54e237c18ea36d668a57d21c2003595c4a2d16b1e3"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/math.h",
+      "sha256": "c76fbdcddfc9a922b0a29e52ef20fdd28bf88804d5334a58597b14297792d0f8"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/stdint.h",
+      "sha256": "a8b70c0cc85d5dce8ade8edeb3e3d74868dbdd3cc43a90dff007a8cf4684b675"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/stdio.h",
+      "sha256": "cec378f30afd807d10c3153b92ab0dd0707f90be915edf34e428984d7b15d4ad"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/string.h",
+      "sha256": "839f6c027a2f67c30d8ac077fac945b7e3e7e19a88cb6889ecda261e38092c85"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/strings.h",
+      "sha256": "8ab483f7c6c556ac98072564845822cd82773cd14c2af5f95738dce986816d0a"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/unistd.h",
+      "sha256": "8212bc3d2ad7eaae5a96f13399f7842793c7887dcbbc34578d4e6cc94f75deaa"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/wchar.h",
+      "sha256": "f77dcf954b65de083734b702119304240c4e11c8179ada0a6afcfd804033fadb"
+    },
+    {
+      "source": "components/espeak_ng/include/compat/wctype.h",
+      "sha256": "1f70c90c9ba2ef7fef4d2d2e1734f047b1af697c0b0b0ed1d808491a92dc4ed1"
+    },
+    {
+      "source": "components/espeak_ng/include/config.h",
+      "sha256": "47086db5f88a85c5259e05170cad0c64a26d7ffe24740aa1c9fab4eedfeca046"
+    },
+    {
+      "source": "components/espeak_ng/include/espeak-ng/encoding.h",
+      "sha256": "cfdea69c66f1b309717894fa8682e761d7a49448e6a17abdd015bbd85e6de0d5"
+    },
+    {
+      "source": "components/espeak_ng/include/espeak-ng/espeak_ng.h",
+      "sha256": "cc4557b73e583bff99ae6703b9685d573713e6c28edecd44030e5def47384051"
+    },
+    {
+      "source": "components/espeak_ng/include/espeak-ng/speak_lib.h",
+      "sha256": "3218ca1573c58f0191830425ca2ebc823f63895de5967b0d1dced987830bfdce"
+    },
+    {
+      "source": "components/espeak_ng/include/ucd/ucd.h",
+      "sha256": "4d0f07930384e2a57a4abeb433bd3fef35a5904b2c5ce6ad6ee30f72ddfde67f"
+    },
+    {
+      "source": "components/espeak_ng/linker.lf",
+      "sha256": "e71d9c25915fbb4081b3babecf10a4f4ab53c76776a761a616356326bbbedc98"
+    },
+    {
+      "source": "components/espeak_ng/src/common.c",
+      "sha256": "b5a2fc40da61e23b55b7f79f8f8db93ec03f3bd5ede2ac4c02586ba564c335ab"
+    },
+    {
+      "source": "components/espeak_ng/src/common.h",
+      "sha256": "5e43e56b90fc333efb654f3edeffbd0308a432a3e942ab37e0d5172c78e3a152"
+    },
+    {
+      "source": "components/espeak_ng/src/compiledata.c",
+      "sha256": "710581e334aa6f0cfa82b2fde7bd5f134ea760f2918069c5a01f143ed62d7264"
+    },
+    {
+      "source": "components/espeak_ng/src/compiledict.c",
+      "sha256": "677bdc7bd7d17d6223428831e7df50c14abb5fe5a3d42871539b1807d5b53d17"
+    },
+    {
+      "source": "components/espeak_ng/src/compiledict.h",
+      "sha256": "e9f5bc591463b2fdfa38f1ec712ee148088b350131a7a2e11c77ad9063c2e45e"
+    },
+    {
+      "source": "components/espeak_ng/src/compilembrola.c",
+      "sha256": "47a5c540ab9c4d635251e29c7dfd01462c2b2d0945bd2332b8152a2e47fd322b"
+    },
+    {
+      "source": "components/espeak_ng/src/dictionary.c",
+      "sha256": "0b9bee67cca48b7149b0d19a1d0c8c320519d5e669de5f05e32b69e9edda4c71"
+    },
+    {
+      "source": "components/espeak_ng/src/dictionary.h",
+      "sha256": "05f2b11ae9bf880365fb1d1fa91e1604754787f3fe35fd94bc7741837698ca2d"
+    },
+    {
+      "source": "components/espeak_ng/src/encoding.c",
+      "sha256": "c1a81adb11f953eca4e5a52a83faa1ad0e96f63f2829510888f7d4e9f4a6b090"
+    },
+    {
+      "source": "components/espeak_ng/src/error.c",
+      "sha256": "42ea187e06c57ee97988ea6ce289ad597a75dc16396c2df6319168155a79725c"
+    },
+    {
+      "source": "components/espeak_ng/src/error.h",
+      "sha256": "92c4d98fc38b5f45bb1af37a37021026817a81860362c2f40497aa17d45194c1"
+    },
+    {
+      "source": "components/espeak_ng/src/espeak_api.c",
+      "sha256": "991f31a5aa592d46658095916246afa0489f63a36768359285887ab8afd49783"
+    },
+    {
+      "source": "components/espeak_ng/src/espeak_command.c",
+      "sha256": "2b39e0c76b8d6f63f2f6e2130d1596a3ee8533e6456db447dcd11164926a44ea"
+    },
+    {
+      "source": "components/espeak_ng/src/espeak_command.h",
+      "sha256": "1400958c57b5957f261050e86b9997e17cefd281cc66c641b5c3dc6e687b0a25"
+    },
+    {
+      "source": "components/espeak_ng/src/event.c",
+      "sha256": "2dae7e5aa8a8f83afd91bb74bfdc0ca9b541518d8d6b33c9e8bc93d84f4c5d6a"
+    },
+    {
+      "source": "components/espeak_ng/src/event.h",
+      "sha256": "ba1d010c2f9d762463143f3c4a0a9684bc5ed9110b9e2f87a4ed81577a8ccaaa"
+    },
+    {
+      "source": "components/espeak_ng/src/fifo.c",
+      "sha256": "2184ec0ecfb4c90007ce2959e929e3b533d72c3c09762350e8a7c8b065cacb94"
+    },
+    {
+      "source": "components/espeak_ng/src/fifo.h",
+      "sha256": "8ad047ef2cc73fe0d8fdb05d8496dc69d6ad765ba87547ce69211ad692cee7f0"
+    },
+    {
+      "source": "components/espeak_ng/src/ieee80.c",
+      "sha256": "9f7b27f991f1e3306bf5601c24de23a4de36ec3ca2c3a4c33afb332aac8e2230"
+    },
+    {
+      "source": "components/espeak_ng/src/ieee80.h",
+      "sha256": "3879b50453f629c2a0652930085503919107f84ea9eea76ace46137b4440baac"
+    },
+    {
+      "source": "components/espeak_ng/src/intonation.c",
+      "sha256": "8756820e189bb5c067dfd8db6d93c777376c035c8cece24234fecab1cc67e83a"
+    },
+    {
+      "source": "components/espeak_ng/src/intonation.h",
+      "sha256": "45651af0b2a1f4f8776821f33d0f1de10287994b210bf573d54a4abc34359d37"
+    },
+    {
+      "source": "components/espeak_ng/src/klatt.c",
+      "sha256": "1884460792e7255dd0a0208198401dd0e48a419760da7511327712c9cfba296c"
+    },
+    {
+      "source": "components/espeak_ng/src/klatt.h",
+      "sha256": "2728b7c61719f388b4d8baa767779cf6f432527c592c1943820397d1914a045b"
+    },
+    {
+      "source": "components/espeak_ng/src/langopts.c",
+      "sha256": "cbcecb540641636d9e087efc39aa7ae9b64f7d8937aec41dd4e8e87e56bd6d55"
+    },
+    {
+      "source": "components/espeak_ng/src/langopts.h",
+      "sha256": "5c7a802c5c2dbf2e0695358dce5aee4ac5375d580ef0e579a3b3c68664f11be6"
+    },
+    {
+      "source": "components/espeak_ng/src/mbrola.h",
+      "sha256": "366aa9ce7bf79f9ca8c36a386b5821388c1169e545bbd57a62cfe1b84767cdff"
+    },
+    {
+      "source": "components/espeak_ng/src/mbrowrap.c",
+      "sha256": "7dc86939c950c7302a2f05cb58aa7f72726d65de471db3355786d24e59994054"
+    },
+    {
+      "source": "components/espeak_ng/src/mbrowrap.h",
+      "sha256": "052d5e59dcf48300da7fc9e8d482d7a98bf1a099c46018fd06a5dc22bed00f4e"
+    },
+    {
+      "source": "components/espeak_ng/src/mnemonics.c",
+      "sha256": "052f74535078139599c7fb37bf8701720eaabc261d7fd7630ce73df48e63f059"
+    },
+    {
+      "source": "components/espeak_ng/src/mnemonics.h",
+      "sha256": "59455ca63c5540ef0ab46274e023a53f03119a20455f97d8c8b03e6f61b7743d"
+    },
+    {
+      "source": "components/espeak_ng/src/numbers.c",
+      "sha256": "d5b38aa70b4baa85cccd2484defa8bac4839ddfc846f251e917b6ce97c79ede0"
+    },
+    {
+      "source": "components/espeak_ng/src/numbers.h",
+      "sha256": "ec4f8b8bd660700fefd11cb596440e0d035be6252cc780018b2bcaadd472237f"
+    },
+    {
+      "source": "components/espeak_ng/src/phoneme.c",
+      "sha256": "75c7f9d13ace78c6f1abff7eed408ea1fc7f00848c346e6ba0ec92db654e6d95"
+    },
+    {
+      "source": "components/espeak_ng/src/phoneme.h",
+      "sha256": "9f9d91ed07885b227cce551cdbad9cf620c2945d44a8e90edf910af9646d7d75"
+    },
+    {
+      "source": "components/espeak_ng/src/phonemelist.c",
+      "sha256": "2f7ba6165108c91402e96388cf9b2e4cef048577ddad2814351ad25ea7772e82"
+    },
+    {
+      "source": "components/espeak_ng/src/phonemelist.h",
+      "sha256": "bc6542ab4aa332c1542de765de73f7731d239b52d4026ab0c0963b63890a6f79"
+    },
+    {
+      "source": "components/espeak_ng/src/readclause.c",
+      "sha256": "5d110a4478727f16509519de3c4c11c536577ae83c967a04ddd92d01bc712432"
+    },
+    {
+      "source": "components/espeak_ng/src/readclause.h",
+      "sha256": "556906a5c226aa3f6a4039328ad9f9d513fc1a6cea206cc6d1e26980cde0ae7f"
+    },
+    {
+      "source": "components/espeak_ng/src/sPlayer.c",
+      "sha256": "e67db1db85dddd72fa29de32cb7b48f5b220c12196cd079497333bc7c2256796"
+    },
+    {
+      "source": "components/espeak_ng/src/sPlayer.h",
+      "sha256": "d2266241fb5ef5f8b1b06fde38ff5e6791bde4ac06d047ac260a16e4849d4234"
+    },
+    {
+      "source": "components/espeak_ng/src/setlengths.c",
+      "sha256": "0eeaec2846ea158ebb49573c064b8aca022954371945791ad44c2d3be33da0d3"
+    },
+    {
+      "source": "components/espeak_ng/src/setlengths.h",
+      "sha256": "3052c91027c348009251ead97f3cb39ffd88194b82c9e559f91ec66687c86fa6"
+    },
+    {
+      "source": "components/espeak_ng/src/sintab.h",
+      "sha256": "c58ad93a2195532b37d67e9bcac552d77dd541856d4d55b9a94136f19c58d2a5"
+    },
+    {
+      "source": "components/espeak_ng/src/soundicon.c",
+      "sha256": "5e8bf4217f493ad47c4ce05a5ea7d0d34a8b6c68ae39501a0db779991270342c"
+    },
+    {
+      "source": "components/espeak_ng/src/soundicon.h",
+      "sha256": "77746328853f96051508aeca1ab4aec724ec95441290f9c9d6d9ded4751f1f30"
+    },
+    {
+      "source": "components/espeak_ng/src/spect.c",
+      "sha256": "3120ffefbcad67ab10e482d5f107296c7bcad87ece976a7eb51dd83c0824b123"
+    },
+    {
+      "source": "components/espeak_ng/src/spect.h",
+      "sha256": "5ccd98b047739662db9a81fd37428d1704c981dc96acacda3aee1e25c31ac1a6"
+    },
+    {
+      "source": "components/espeak_ng/src/speech.c",
+      "sha256": "70584c853082141ae4c1de6254e4601085ea0ca06054fb8055852fb2768a70bf"
+    },
+    {
+      "source": "components/espeak_ng/src/speech.h",
+      "sha256": "bd314598b9423b6a7d4aacf261d7012eef6467b7d1058910882bea9c78f722db"
+    },
+    {
+      "source": "components/espeak_ng/src/ssml.c",
+      "sha256": "59559af82f005f7e59c8fceb49db8e3dd9d9eca1f1df2211206a33e5db484a9a"
+    },
+    {
+      "source": "components/espeak_ng/src/ssml.h",
+      "sha256": "9a5d7cc062dc2fa1e004483849670cf12057601cda243f9a0aa81cd8841f0ffd"
+    },
+    {
+      "source": "components/espeak_ng/src/synth_mbrola.c",
+      "sha256": "410f7f376a0098700ad53edff25b4e5a7604f3a90f363f2932d0549ffb8a704e"
+    },
+    {
+      "source": "components/espeak_ng/src/synthdata.c",
+      "sha256": "776465e7139b8c0e349b0948a8c48a3f2d4ef5e75fe32017ca2de23aa06d465b"
+    },
+    {
+      "source": "components/espeak_ng/src/synthdata.h",
+      "sha256": "46f6315027e2145bab900277a9c9e10a467ea0bfa9a1b0b37a9f4c40fcb09f22"
+    },
+    {
+      "source": "components/espeak_ng/src/synthesize.c",
+      "sha256": "ed4aca3492fbf17f2fed9c3c7cdcc544743395de082e5f6a90c8dcdb918ec419"
+    },
+    {
+      "source": "components/espeak_ng/src/synthesize.h",
+      "sha256": "db8ebcf0c12c2c5bf0996fd588bf2d4c4240b196922bdd0640576215ec8b9b53"
+    },
+    {
+      "source": "components/espeak_ng/src/tr_languages.c",
+      "sha256": "83173f257cd5302f8bb0b9ba7a164bdf5e237e01bf336aaa6eda423da4a612fd"
+    },
+    {
+      "source": "components/espeak_ng/src/translate.c",
+      "sha256": "3ad1a16d51c091dd0ce5ecd9d4ceea0d849012788afc8ea4865b6a392fde59dd"
+    },
+    {
+      "source": "components/espeak_ng/src/translate.h",
+      "sha256": "8ff32baadc5a45e502e3151f8804a704916d9d9d27ac8a74a78e7e484185d271"
+    },
+    {
+      "source": "components/espeak_ng/src/translateword.c",
+      "sha256": "488efc1eb16e9a136a9fe241297d4cf5420cb8f0d6be5b9faedbc0dc22aaea7d"
+    },
+    {
+      "source": "components/espeak_ng/src/translateword.h",
+      "sha256": "6986ebf368deb77c5d4eeee029dba7e48d708c938f6bbfb7a606a4fa01346f25"
+    },
+    {
+      "source": "components/espeak_ng/src/voice.h",
+      "sha256": "68fb5aea4e09c8f6500adc906a275def3ef585e982dcbfc0fdca0e2894c4db6d"
+    },
+    {
+      "source": "components/espeak_ng/src/voices.c",
+      "sha256": "176614ac0a9b7cc0b6ac0bca4dda1973e2a429e2d85b57fea3e1345bba9c9559"
+    },
+    {
+      "source": "components/espeak_ng/src/wavegen.c",
+      "sha256": "9f327bb75ed2fd27535f58deef06fb51c994ab53e6ec7d05ea3f04eca78100d4"
+    },
+    {
+      "source": "components/espeak_ng/src/wavegen.h",
+      "sha256": "f2564d6fdb8227b10e243fc31c46cf73039051c7115c5caa4dbf362984d70be8"
+    },
+    {
+      "source": "components/espeak_ng/ucd/case.c",
+      "sha256": "04622da7360518fb8feb94a0e53e75f281b2a530690626a142d9522767bda3d7"
+    },
+    {
+      "source": "components/espeak_ng/ucd/categories.c",
+      "sha256": "edd26047254c98d65936f1f4237feb2389acb1cce3733a2b693e1a9b9f333880"
+    },
+    {
+      "source": "components/espeak_ng/ucd/ctype.c",
+      "sha256": "7c3a160f572c19d9b429aff57cfec9eb526b47535bcb96f747fadc5601d6ba93"
+    },
+    {
+      "source": "components/espeak_ng/ucd/proplist.c",
+      "sha256": "6a96e07b90ca58a9b807f6cf8ece6294f4864ba017e99c0574aeb235b0d41053"
+    },
+    {
+      "source": "components/espeak_ng/ucd/scripts.c",
+      "sha256": "01ad466cf4a176928f058ff55ec04ee5bedb4cb1d7eb849a3cc6c4184013280e"
+    },
+    {
+      "source": "components/espeak_ng/ucd/tostring.c",
+      "sha256": "4f5a4b311d5f2388e7c2473192ea42bfd6445fda16df75cf35b6d70a9cdeea91"
+    },
+    {
+      "source": "components/m3_lua/CMakeLists.txt",
+      "sha256": "f1009f2853a3e694ba44f5979f8d31d5814a532d7ba175fa7bb7d0f4f6e1e1a9"
+    },
+    {
+      "source": "components/m3_lua/UPSTREAM.md",
+      "sha256": "a9d2b751646d432088439f213d208bc1aa8f8c010a8d963c229701d195ec2274"
+    },
+    {
+      "source": "components/m3_lua/lapi.c",
+      "sha256": "cd369dc6900a7696ca55ccbd4f50eadfa799b975f34b7afe450e1b859517a56e"
+    },
+    {
+      "source": "components/m3_lua/lapi.h",
+      "sha256": "9522209670086adfbb11379416078a7f4dafe154043e320cd435fa1811aaabfb"
+    },
+    {
+      "source": "components/m3_lua/lauxlib.c",
+      "sha256": "257c287ed4964ec8bb07fe0a1fd1b52b712e4bccd6c889db62f84abb905d6996"
+    },
+    {
+      "source": "components/m3_lua/lauxlib.h",
+      "sha256": "2d9e18e577a6062646268e7f7228264c28bd9b972c186e1af81b8357179c0ab4"
+    },
+    {
+      "source": "components/m3_lua/lbaselib.c",
+      "sha256": "5dc9a64468c1ac31e59066c7d3597eeb8ea4ac8fc19a257a74c431624300b487"
+    },
+    {
+      "source": "components/m3_lua/lcode.c",
+      "sha256": "2cf13c7f8205e9f07c2ccf1fedc3f0f0a05d238c194b176c72cc22b2cc96210e"
+    },
+    {
+      "source": "components/m3_lua/lcode.h",
+      "sha256": "c5ad73fb12fd3e9f6b6a5f37fea5b60e4c09f8a262e9ac3ca85e8e047f745cea"
+    },
+    {
+      "source": "components/m3_lua/lcorolib.c",
+      "sha256": "5408ccec737678d045d421f84a56e1ce03192a42c55440ffef07bec356aaec89"
+    },
+    {
+      "source": "components/m3_lua/lctype.c",
+      "sha256": "3e21ae6a8faab3ed470ae0de19360da6b4e21a0a0f8572f502f7e13d590186f8"
+    },
+    {
+      "source": "components/m3_lua/lctype.h",
+      "sha256": "c800311872ecba642f6d013b290eda83ba6cd8df8061e25cdca1dd4adcbed8b5"
+    },
+    {
+      "source": "components/m3_lua/ldblib.c",
+      "sha256": "349afd63c8be2cb8a522e4a04e9f444b65ed1fc7f4dabba5b4b61fd8c11d0c42"
+    },
+    {
+      "source": "components/m3_lua/ldebug.c",
+      "sha256": "06d065d1f26c29546cc74b61a50267cb70567ae538691f190bf15ca5cd29d308"
+    },
+    {
+      "source": "components/m3_lua/ldebug.h",
+      "sha256": "b0fd38f6461251ec481cf5633d622569cef939067e37cac23331d9f96b601702"
+    },
+    {
+      "source": "components/m3_lua/ldo.c",
+      "sha256": "af1522801876fe267bf2f892caa24209c395459331ac9a1fdf7ad3ed82402a6c"
+    },
+    {
+      "source": "components/m3_lua/ldo.h",
+      "sha256": "a577744f7c773bd91263540a1effefe75d3dfbfc8a9874349844f9a1ddae8d52"
+    },
+    {
+      "source": "components/m3_lua/ldump.c",
+      "sha256": "3c05402c5e282e06c2218f2469b1f38e1b84c783b9387aec7740c60b287d82c9"
+    },
+    {
+      "source": "components/m3_lua/lfunc.c",
+      "sha256": "38809428b76fafa79db9f65b7248cc0c02c9b696e7410fc4ab1699940768f1b2"
+    },
+    {
+      "source": "components/m3_lua/lfunc.h",
+      "sha256": "81dc02d55ae8000461ab90bb9689d2600ba51f2ea9ac9fb019386995c07e3e4a"
+    },
+    {
+      "source": "components/m3_lua/lgc.c",
+      "sha256": "caa4df2eccfae0899686d1aed3f2bad91184de3bd12176fdfead91147f704e0b"
+    },
+    {
+      "source": "components/m3_lua/lgc.h",
+      "sha256": "c83d3b8e31345c0aacd37442954a7f2434312ee48f98a8b9ae4fc8aad26d0c99"
+    },
+    {
+      "source": "components/m3_lua/linit.c",
+      "sha256": "3578568e27b9c1e2f4a7f9a53fdb4bc8ac095db75cc86e966bb1deec2792158e"
+    },
+    {
+      "source": "components/m3_lua/liolib.c",
+      "sha256": "bd3176d1c5d30d61fdfc2aa17d7af0819f2da51694942a24b6c185ef797f0060"
+    },
+    {
+      "source": "components/m3_lua/ljumptab.h",
+      "sha256": "6c3e9858b9dad03ccd61445ab0bff0eb6ddfa5e731e044f93350fe6c6b2ad8d5"
+    },
+    {
+      "source": "components/m3_lua/llex.c",
+      "sha256": "5cfbaabf3dc0d75835aaafc37fcd87a92f3dba451e002732747b602fda122958"
+    },
+    {
+      "source": "components/m3_lua/llex.h",
+      "sha256": "5ce0302528260ed6a40ec3ebf5e27d3bc108242d9dca57e8cdbe80fe34e13410"
+    },
+    {
+      "source": "components/m3_lua/llimits.h",
+      "sha256": "d588bdac3c8e1adc88df3dc92c950a1bfa29663d15f9221f58e2aa553b05a422"
+    },
+    {
+      "source": "components/m3_lua/lmathlib.c",
+      "sha256": "da5c7d74cffce22f0a9eb468e6e7e80b543ea6bec5c21aefb8cf285a3556722a"
+    },
+    {
+      "source": "components/m3_lua/lmem.c",
+      "sha256": "6154c2865bec97e61a92d8284be7e8ba21818f6edc95f5d72adb5dcf3e9532ca"
+    },
+    {
+      "source": "components/m3_lua/lmem.h",
+      "sha256": "8318a170a1d4bf21c3cb4deb1f8661f1dc7cf4eb688e4ec9a1e7ea16bfc3b5cf"
+    },
+    {
+      "source": "components/m3_lua/loadlib.c",
+      "sha256": "f21cafa3258669d6f8c4f09195c654a4a588ab402f5e976c731918658b747a5b"
+    },
+    {
+      "source": "components/m3_lua/lobject.c",
+      "sha256": "7a9748e38c52e45bc468cae74ccea08b98f8c53a523c1b0f9a117e5cf162c921"
+    },
+    {
+      "source": "components/m3_lua/lobject.h",
+      "sha256": "8539beae7dd9a08efc09b04d64c09663e9afc0f2ad342abc612bb000c0c9be70"
+    },
+    {
+      "source": "components/m3_lua/lopcodes.c",
+      "sha256": "bdc9d39fd8bf1a350c0249f726c5f61bef64b122b93a0fbc172b0328dc01f594"
+    },
+    {
+      "source": "components/m3_lua/lopcodes.h",
+      "sha256": "b3f511933be3039a4b92ba79601b2e5daf75b34f268bfc757adf3e24ea4f1ec9"
+    },
+    {
+      "source": "components/m3_lua/lopnames.h",
+      "sha256": "fbdbebc96b136efc6165cba1ac2b311b0c52413aaef59ae9ec750748f13c9e9a"
+    },
+    {
+      "source": "components/m3_lua/loslib.c",
+      "sha256": "474f2a3ee7ca8083e4552177da426ea159be82b4b34f3bd2151239810b57bb0e"
+    },
+    {
+      "source": "components/m3_lua/lparser.c",
+      "sha256": "e24f9e869afd690749404b3075fd82efaf3af882a13a131b612c6ff28e052a8c"
+    },
+    {
+      "source": "components/m3_lua/lparser.h",
+      "sha256": "68c34ef2d6e5a227f7cff18436a42c6739b1470ce12f059f168d9bb69fc8d49c"
+    },
+    {
+      "source": "components/m3_lua/lprefix.h",
+      "sha256": "626785d4eda75e9435f0ac21a780ae3b11f8b27dc36934e637a5c2305f906531"
+    },
+    {
+      "source": "components/m3_lua/lstate.c",
+      "sha256": "e5f3b17104f6764bad609d18ce8f3008a87731491a41cb78b79aed78777c21d8"
+    },
+    {
+      "source": "components/m3_lua/lstate.h",
+      "sha256": "8816454aa1df7c6cb1bc6366ca163b575e259e36497b75db354c572a81836cee"
+    },
+    {
+      "source": "components/m3_lua/lstring.c",
+      "sha256": "b6162f3a65735a902911ffafcafe1db0994c3b0df441581dcbb04dca6bc0b71d"
+    },
+    {
+      "source": "components/m3_lua/lstring.h",
+      "sha256": "a8cb0d737276f6a41071a0776ee1d8aa13cf02fa7c79ea096d202b14ea792e31"
+    },
+    {
+      "source": "components/m3_lua/lstrlib.c",
+      "sha256": "d386f8bbb75d5ef7b04c8ca9e747ff256525a9546bb6ff01c788b912b6995aa6"
+    },
+    {
+      "source": "components/m3_lua/ltable.c",
+      "sha256": "27a711276b1e22aaea3b9182e2d17693f598cfe9bc7fd203c05d400df6673853"
+    },
+    {
+      "source": "components/m3_lua/ltable.h",
+      "sha256": "1c8736b87aa408ef2afebfe693f46ae5424d658d798fb2a8a88b6868cf5569b5"
+    },
+    {
+      "source": "components/m3_lua/ltablib.c",
+      "sha256": "3d430a6f9cde66d0b791444c6164e7559ccf62b7cdc3a6325882408c6806e26c"
+    },
+    {
+      "source": "components/m3_lua/ltm.c",
+      "sha256": "7cbe645ed7e1161d31eb32ea467d8220b592c0acfa6107f0194487f0ddbf954b"
+    },
+    {
+      "source": "components/m3_lua/ltm.h",
+      "sha256": "5b2f6e59951edeef6e71bebe5ac4351f4b3602ee0461729308b80dcee8cea910"
+    },
+    {
+      "source": "components/m3_lua/lua.c",
+      "sha256": "ee7b72f64fa489d3e5393494f09c2517f5bdceb43f768c087a9ced74060af254"
+    },
+    {
+      "source": "components/m3_lua/lua.h",
+      "sha256": "06138352a12f0710bc214eb3a2e134889979cadc9a7a761a4e43dafa926419af"
+    },
+    {
+      "source": "components/m3_lua/luac.c",
+      "sha256": "3a424e6cb4177886c8790821cf15345f488764bc215eb29719c80002ef24cdc1"
+    },
+    {
+      "source": "components/m3_lua/luaconf.h",
+      "sha256": "af243c94bee6d2601383e8b65ed66a0d1b4ab3b7418ff903fcd0679912160e3a"
+    },
+    {
+      "source": "components/m3_lua/lualib.h",
+      "sha256": "4ea0f67d3e467f5d6a327616e22a3c2da8e03d47a3c3660916275f2842f521ea"
+    },
+    {
+      "source": "components/m3_lua/lundump.c",
+      "sha256": "7f7b078026e162161d402feba73a69cbe66a98558ec0745a445a595f42eac688"
+    },
+    {
+      "source": "components/m3_lua/lundump.h",
+      "sha256": "1137c0c9d8654ce223374d21c52a599fd1cc1ccb869801f87a27238a7bf55e8e"
+    },
+    {
+      "source": "components/m3_lua/lutf8lib.c",
+      "sha256": "441251bdf176e066e60a36735594f0cb92c067143fed32e373949bdb65a52866"
+    },
+    {
+      "source": "components/m3_lua/lvm.c",
+      "sha256": "7df5095ee2f6c88162d3536afb1fa04527b98fa3265cb579fc9aa6dcf05606de"
+    },
+    {
+      "source": "components/m3_lua/lvm.h",
+      "sha256": "aba601b887236d5e135392e0c49370df3b5a9ac5c66ab2d44156b3244f2dcef3"
+    },
+    {
+      "source": "components/m3_lua/lzio.c",
+      "sha256": "fba61ceeeb257a3fe5f63310f21e14fc26c4be647583dcf8e74cbc7fb7e43e8a"
+    },
+    {
+      "source": "components/m3_lua/lzio.h",
+      "sha256": "9673f62eac2d0fe3010f9d23148be7b8113319fdf4c4490015cd9feae2ecaad4"
+    },
+    {
+      "source": "docs/ACTIVITY_PANEL.md",
+      "sha256": "ee7844da60dc361fda378a0869a947d8df861fec563bac48ea46e0945b0f4906"
+    },
+    {
+      "source": "docs/AZURE_SPEECH.md",
+      "sha256": "018a9716c3fb5bc01447c55240e7707193f78ca6cdbfdee69492ced8481ab9e3"
+    },
+    {
+      "source": "docs/BATTERY_STATUS.md",
+      "sha256": "d1ace87f929aa95fc41051ec9751ae491788c2c658be37ba048dd5abfb9f78e5"
+    },
+    {
+      "source": "docs/BOOT_LOGO.md",
+      "sha256": "ea9f1e80051f1838ed50914208f5706632f1912ea690f7ef044e1720050acc30"
+    },
+    {
+      "source": "docs/CORE_USAGE_REVIEW.md",
+      "sha256": "55113182c308dd9a8cedd8f04dd8826a6e0e0c0db8498ea1b6573d49c4e96bdf"
+    },
+    {
+      "source": "docs/DEVICE_SETTINGS.md",
+      "sha256": "87de1a52d205e952d4bd0a0e986957a26e8ce97190dfee5df1f847c9f8cc0500"
+    },
+    {
+      "source": "docs/DMA_MEMORY.md",
+      "sha256": "62a3998391b6f2665089b174b53ac6c8ea8026ca7fd3725d467b785ac660e481"
+    },
+    {
+      "source": "docs/EXTERNAL_DOWNLOAD_IMPLEMENTATION.md",
+      "sha256": "7506c1a109ed2f83a066798eff95ff710ab258b9ceadb780cd0b4a959b0fc5f8"
+    },
+    {
+      "source": "docs/EXTERNAL_DOWNLOAD_PERFORMANCE_PLAN.md",
+      "sha256": "11d0db8717574e22cfe9843d38c2c0aa5b7c47decc6524193b60cbb0a5e852a9"
+    },
+    {
+      "source": "docs/GALLERY_GRID.md",
+      "sha256": "a01624d94ca0b9ce3cddc94b98bc8b4265f993890fbc38083ce5475bc908de8d"
+    },
+    {
+      "source": "docs/GEMINI_AGENT.md",
+      "sha256": "3fd8c5135afdcd0a4181aa43c4b684f6f4bb3d41523db132c45455638231090e"
+    },
+    {
+      "source": "docs/HOME_AND_RADIO.md",
+      "sha256": "0fa17c35181371c6c9d94883a88be65f709ca11227d88a5c9141e64fd3d30ee8"
+    },
+    {
+      "source": "docs/HOME_WIDGETS.md",
+      "sha256": "83995b490db7d4628441ac920f5f65e1c9c4d4796c3bba02d16173c329081841"
+    },
+    {
+      "source": "docs/JAPANESE_AND_TEXT.md",
+      "sha256": "eedf50c7b1f9242214236dbaccff2de568a777e5edea59d52ef77fa37ab789e9"
+    },
+    {
+      "source": "docs/MAIN_WEB_PSRAM.md",
+      "sha256": "f12ad51f252e7bb33e325cdddf1351f9ce39609271920bf7dd7828ab1f5e6143"
+    },
+    {
+      "source": "docs/MUSIC.md",
+      "sha256": "72b2e579486387c0981062b7d7e8246b986302925f31b902be60533971d7392a"
+    },
+    {
+      "source": "docs/MUSIC_PLAYER.md",
+      "sha256": "8dd3661cb70f5b74e9924704c01f9395056f87f529b1957010b868508db24fad"
+    },
+    {
+      "source": "docs/OPTIMIZATION_AND_VALIDATION.md",
+      "sha256": "f9c374ec09fba97701a6a207a11ec055e08fa79b49b117b18f9a49cdc6edc206"
+    },
+    {
+      "source": "docs/PHONE_APPS.md",
+      "sha256": "7f7fbac34fc3f939e0a25bca46fe8519d376cc2d0e5f66dae1087dd85a10bc33"
+    },
+    {
+      "source": "docs/RADIO.md",
+      "sha256": "8700b2958b21c4c3743f0fec9eaf56f67adc480da001f64fb7ec0ed753d9bd00"
+    },
+    {
+      "source": "docs/SD_APPS.md",
+      "sha256": "20e5afd396307f7f70444c10b1e61ae9d862dc121b9877417d3532ff918c4228"
+    },
+    {
+      "source": "docs/SD_PRIVATE_SETTINGS.md",
+      "sha256": "ccb23e851c0e4456a89550dd744f6439e994cf01a1c3bbdc96827a25d0abf313"
+    },
+    {
+      "source": "docs/SPEECH_AND_YOUTUBE_FIXES.md",
+      "sha256": "615f4a77e343165a44584b71f175a69954f00a065cc4e26121c7f46dac70e213"
+    },
+    {
+      "source": "docs/SYSTEM_SOUNDS.md",
+      "sha256": "8d5eb7ea98851039657962da705ad52434214181af3b5da33f63c3993ff538c0"
+    },
+    {
+      "source": "docs/TEXT_READER.md",
+      "sha256": "c32bf15b4fd83e8282b4f8c4aa2d6409471228828a484bb2d3242d9cce7c3655"
+    },
+    {
+      "source": "docs/UNICODE_FILENAMES.md",
+      "sha256": "fe691a6b24060e6d39fd11d2615ced53c563ee840f1d9c56d623a22c9c5337a6"
+    },
+    {
+      "source": "docs/VOICE_INPUT.md",
+      "sha256": "c8acb14b06cbf34e6cfcfab0b337d72074aaf90cd86479a2e924f07a6f17b152"
+    },
+    {
+      "source": "docs/WEB_ADDRESS_QR.md",
+      "sha256": "30a52bbc48ecaa8c1f9d74ae699784d2f015c724b7b61d36d224d629c19a86dc"
+    },
+    {
+      "source": "docs/YOUTUBE_MUSIC_CACHE.md",
+      "sha256": "e842fe852c2d77d696f8aab28c6dc5e3ba98847f5b164e24be0a663e6e3a07a6"
+    },
+    {
+      "source": "docs/examples/api_keys.example.json",
+      "sha256": "ce03fb6a254ec0fdd53c870499a9c67643324893c1ae2f85c549c440670cf5a0"
+    },
+    {
+      "source": "docs/examples/wifi.example.json",
+      "sha256": "aad70381eb71410c6a181d5b02d3698c0c83e0386a5fa797392e8ce88e92be55"
+    },
+    {
+      "source": "docs/hardware/1_PWR.png",
+      "sha256": "102b9cb4306b64f6ba657fd565c7a0d5076c48f3c04a1ac865f4565a45d8dd3d"
+    },
+    {
+      "source": "docs/hardware/3_ESP32-P4.png",
+      "sha256": "080864ff9da6ff908f8a818d5eff5d465361b53273be540f81de574412036f95"
+    },
+    {
+      "source": "docs/hardware/6_CODEC&TFCARD.png",
+      "sha256": "d617d691c9820117b39764cd8c5c8aed1fac046406efdac5e0cbaa2be72115bc"
+    },
+    {
+      "source": "docs/hardware/7_OTHER.png",
+      "sha256": "70b58f2b7f432831fbf03903747609e1f74b5c91a02926924998c9c8823e7f47"
+    },
+    {
+      "source": "docs/hardware/CASE_DIMENSIONS.md",
+      "sha256": "ae2383bb67b87c766c5e21b7bbbf61166064dfc54432d48ffd1333160324217a"
+    },
+    {
+      "source": "docs/hardware/IIC_IP5306_REG_V1.4.pdf",
+      "sha256": "38f0f94adb2af36ea33242337ffe4e1bb0f51035fb201396a0d60f367b5bb06b"
+    },
+    {
+      "source": "docs/hardware/JC4880P443C_I_W-Specifications-EN-V1.0.pdf",
+      "sha256": "50306097eab8b1c4f709803508d5ad19d1f8c0c50ee8087b09e3af2731c94ca3"
+    },
+    {
+      "source": "docs/hardware/dimensions-page-6.png",
+      "sha256": "3a6d60639ea2c21d62014bb42c4143445b228f4e683da855fc9ad0afcf20c384"
+    },
+    {
+      "source": "docs/hardware/dimensions-page-7.png",
+      "sha256": "9434ffb224e3cc17136358e6d80362d2b75594153a8f7115286baac296cbb477"
+    },
+    {
+      "source": "docs/hardware/sources.json",
+      "sha256": "d2702baec9044ff773f193ee9577a4f4c8a8418d7c12ade6040e94ef87270128"
+    },
+    {
+      "source": "m3_c6_partitions.csv",
+      "sha256": "bcde0130ee23a596aec2be1ce20bf36e185dadb3dbc8b3edb9139a9c9160cd2b"
+    },
+    {
+      "source": "main/CMakeLists.txt",
+      "sha256": "9a1560c20f506b3bb25d9ae1c1997957199476c793286fc9f0d4c4730b08218c"
+    },
+    {
+      "source": "main/Kconfig.projbuild",
+      "sha256": "6b0fe841a71daf7d11830657a792f27bcf13dacda030373739576d2dc017bc56"
+    },
+    {
+      "source": "main/ai_media.js",
+      "sha256": "869058bb230f7e78b7f0699d04ca2c0a727a1ee970c6d6a165b6d8bee8158e93"
+    },
+    {
+      "source": "main/ai_router.js",
+      "sha256": "c783af7cec792a9e123a09c4e5c5a3baad4460f20cdda467741e734088915013"
+    },
+    {
+      "source": "main/ai_studio.html",
+      "sha256": "b651063b92d3983a13e10408fa0d6ac1cc2076be5112721f38b3d831a4bd2797"
+    },
+    {
+      "source": "main/ai_studio.js",
+      "sha256": "626657703759f5248490cfefb8448917547ca97c82bac1a487e134a2c2de64ac"
+    },
+    {
+      "source": "main/cloud_relay.c",
+      "sha256": "5899ffd9cb8633451f84e2b083d4df00691bd7746b63f320ab9a37fa5e7ed632"
+    },
+    {
+      "source": "main/cloud_relay_stream.inc",
+      "sha256": "c31ec15d59502e1f28d4564928b440bb1b9e6b911374e7654c376d6859e639c3"
+    },
+    {
+      "source": "main/dns_server.c",
+      "sha256": "2bf713c832ac8a2726ddaee46d5a94e57476be8e8bf4d403d7a283d65a3d7cfb"
+    },
+    {
+      "source": "main/https_memory.c",
+      "sha256": "c9929f78a29741b2d3871d6bf84448b30a1d48902438e6c3da6a3bac6b6fbfd8"
+    },
+    {
+      "source": "main/idf_component.yml",
+      "sha256": "5736c2f3ecddad7dd506a3efb3b08848373bd9c6ebbb97fbe31860e0f6a1eaa3"
+    },
+    {
+      "source": "main/include/assets_webp.h",
+      "sha256": "5e2797e9704d6437780d5aad6c67557839f444cf3b6d6f97423cfbd9d05bb98f"
+    },
+    {
+      "source": "main/include/board_storage.h",
+      "sha256": "a4fb483d29768f7de072fd08b6aa90c7cb55aef9ea7dd5c754c0d36b138f42a8"
+    },
+    {
+      "source": "main/include/cloud_relay.h",
+      "sha256": "15435f315b8fe0a01ef3008c43a0c47509431db16d4165636de177691aa30796"
+    },
+    {
+      "source": "main/include/cloud_relay_config.h",
+      "sha256": "f8985092588429f44be6e18f58f1d9583350757e15fd48896e2c69e14dc854f9"
+    },
+    {
+      "source": "main/include/dns_server.h",
+      "sha256": "4edc5e12f62db96edf0a8fb9f46a870e4bc98457a9ee9cdf9839a9c263cdbcd1"
+    },
+    {
+      "source": "main/include/https_memory.h",
+      "sha256": "7bb322736b88dede516a7a881cc385ab624727941c3441b5496e5a928581f3de"
+    },
+    {
+      "source": "main/include/m3_2048.h",
+      "sha256": "4c9e4f7d9a992a64910141ad04eb65ebe615429e3ffeff1e6f2defd47c20faa0"
+    },
+    {
+      "source": "main/include/m3_agent.h",
+      "sha256": "87008981dd39fb1fb2cac3f03a7f0de8930496665e463f142ca126b0762512ee"
+    },
+    {
+      "source": "main/include/m3_audio.h",
+      "sha256": "501505e5ac69b35560067c4452c1bc074fa7923bba718866478dbcc13d469721"
+    },
+    {
+      "source": "main/include/m3_audio_apps.h",
+      "sha256": "8032572e0a66b2601eff30cdd988fe7547f9038c77c19807c90ccbbe951d99f2"
+    },
+    {
+      "source": "main/include/m3_azure_audio.h",
+      "sha256": "df3cce21d4b8640e022c9bcc78f8d0974e7aa718d991bce9c6ca5adbcb0af111"
+    },
+    {
+      "source": "main/include/m3_azure_config.h",
+      "sha256": "5917683dd9cb7d3cac7d4f583d3bb4777380e0ba001eccd77bb7282b76157170"
+    },
+    {
+      "source": "main/include/m3_board.h",
+      "sha256": "5607228fb15b4f5bf26b2e032088f688a22b0ecc1f36a97ffc8da9437644b04c"
+    },
+    {
+      "source": "main/include/m3_boot_splash.h",
+      "sha256": "7e563970e45c41802836d1d80adf621777d214c75d554916fa4569fd7268123e"
+    },
+    {
+      "source": "main/include/m3_c6_update.h",
+      "sha256": "860c8862b9f1f4ad6392077971303820dd095ab89e876f28d088728ad0eb0020"
+    },
+    {
+      "source": "main/include/m3_calculator.h",
+      "sha256": "7cebf4b4df0fe70d797571048fafa5b5a7364328bd90fb4bd6d21cb6d1819ce7"
+    },
+    {
+      "source": "main/include/m3_calendar.h",
+      "sha256": "bc497a0164bc929c37de6c5e5d939303bc4de5172b9655fd77b06d6e3b8aee81"
+    },
+    {
+      "source": "main/include/m3_cores.h",
+      "sha256": "e85388a4481a87728b6541202f97bb6fc9439baeddf2d5f2c923be0e54e92d2d"
+    },
+    {
+      "source": "main/include/m3_crossing.h",
+      "sha256": "5cff9a97738ea64407814e3ec82ea636b876e1b5f2d131d77a197ce5c266b356"
+    },
+    {
+      "source": "main/include/m3_feedback.h",
+      "sha256": "e17c7f8b4a578743c05bd19c708c7e9b7a0a4de1af192f04aa6fb4f75aad1bdf"
+    },
+    {
+      "source": "main/include/m3_font_bitmap.h",
+      "sha256": "913141d0835e4436ed474c851f61d1cfb921df43c2070d2d28dde43273db5bba"
+    },
+    {
+      "source": "main/include/m3_gallery.h",
+      "sha256": "eb350d5fecd1a6f987fba3ec784386290fade828047f415bbdb5cba367072470"
+    },
+    {
+      "source": "main/include/m3_gemini_config.h",
+      "sha256": "5bfe2ccb89bc84e63d141364c0111a4e7e9c234ca75e2667b9f174968577d5b9"
+    },
+    {
+      "source": "main/include/m3_gemini_private.example.h",
+      "sha256": "c39077e067e195d64a6625cb973b216cc248549a17a6b29dd7b84cf64f9e6040"
+    },
+    {
+      "source": "main/include/m3_google_audio.h",
+      "sha256": "863de94cb51d51eac68ab5e3918831efe6a872c4ae79b6124d561a0b96f9e62c"
+    },
+    {
+      "source": "main/include/m3_hangul.h",
+      "sha256": "51d245e8ecb5cb0821ff72f4d5b743b4ceed57a0665043c92d9962e5bf0982e9"
+    },
+    {
+      "source": "main/include/m3_i18n.h",
+      "sha256": "349b8a0606ba2bbc25325b97e9ce3c22ea6007ff2bfdeb7be67a1d8a3b46cad6"
+    },
+    {
+      "source": "main/include/m3_kana.h",
+      "sha256": "a45c1067ee8bdc4093a859951ee104f5a64471a1332006cfe7576dadf3107b17"
+    },
+    {
+      "source": "main/include/m3_memory.h",
+      "sha256": "fd54dbec747c59308f8c5c06615edf95ffa561aa10a5eeb18c20b76f99b50372"
+    },
+    {
+      "source": "main/include/m3_mp4.h",
+      "sha256": "32fa7b5d227585dbc28405a9a8677f26ebe85a801aa22df5f079819ccfd1e2cb"
+    },
+    {
+      "source": "main/include/m3_mp4_demux.h",
+      "sha256": "34fb39d1a47e0ee627b165a55a6a9b42a57eefa6e56cff9f7c675de64c569cc6"
+    },
+    {
+      "source": "main/include/m3_music.h",
+      "sha256": "684f1f107d5081ce482fe878b7922c309dc9b9f8773a15e6914a3cc9f567481e"
+    },
+    {
+      "source": "main/include/m3_panel_init.h",
+      "sha256": "6fac06f1e72f2eae8af3edada3e78e4f9e572ff304644224242d3015a54b230c"
+    },
+    {
+      "source": "main/include/m3_pcm.h",
+      "sha256": "40179d767bb5915abad7275679207f9c2eec519cb373e2aa73df7b31f12ae71e"
+    },
+    {
+      "source": "main/include/m3_photos.h",
+      "sha256": "42679b8f6199cac99fde6a43cbb2f70c0d5c13f67cc688ca786215b7792fd762"
+    },
+    {
+      "source": "main/include/m3_power.h",
+      "sha256": "5a5cf126c5d934e85402f6f1ee50545863fdd37a8a339d65576afd9155817819"
+    },
+    {
+      "source": "main/include/m3_preferences.h",
+      "sha256": "236a8713eb01b1b5950bde85f39297a98d9fa1a39c01158dcce0c8248bb502ac"
+    },
+    {
+      "source": "main/include/m3_reader.h",
+      "sha256": "05adab27515731a3ecd31c5db755c6cf9e7e45c335fd147c6d6269961ff7ed32"
+    },
+    {
+      "source": "main/include/m3_reader_font.h",
+      "sha256": "83e8736240bd78c7452a4db5e89d012d7bc2ae0cd1cac816b683525224563ca3"
+    },
+    {
+      "source": "main/include/m3_recorder.h",
+      "sha256": "10fa4b6778e338caabe365128cbecd0cbda902e0412b4c957af6ee8a32a15300"
+    },
+    {
+      "source": "main/include/m3_runtime.h",
+      "sha256": "c55ce7fe1659f055cb11f971a5e206c8809bc4579fda08da32114f4840cf7e3a"
+    },
+    {
+      "source": "main/include/m3_sd_apps.h",
+      "sha256": "a089038667897d35e7c161ebb7216d56c2f2bb51f3d52a61bad06b284c040def"
+    },
+    {
+      "source": "main/include/m3_sd_settings.h",
+      "sha256": "c76fc04a584d0fd083d9e8d812cf3a6cc8c8b1758a2addf5f3998f340d9e969a"
+    },
+    {
+      "source": "main/include/m3_tube.h",
+      "sha256": "9b6c35b9b553c0c4b2e5e1e2e56ae4499d611a0cac4ad9fe2fb420daf944e2b3"
+    },
+    {
+      "source": "main/include/m3_tube_config.h",
+      "sha256": "08d8088d94d800cf7c4bb3be819e7b50dac86a0254c7817f01a1b95cd791c0b0"
+    },
+    {
+      "source": "main/include/m3_tube_private.example.h",
+      "sha256": "34aa9805bb1461a3c6004080102963e8b96fdc7453b5b741662ff7ab81c53180"
+    },
+    {
+      "source": "main/include/m3_ui.h",
+      "sha256": "052832c1f22a4c6b68c89877e043e01faf1d66a83e702ea593978c0b3a78182f"
+    },
+    {
+      "source": "main/include/m3_utf8.h",
+      "sha256": "74d15acc0677b3ca1fd9bc1eb20507e0812050066f3e4344527e90d6d865ab1c"
+    },
+    {
+      "source": "main/include/m3_voice.h",
+      "sha256": "9d8e6f3549cad300ee1a06856328a96bb761506490d2c8fe2c7b1dc104f41385"
+    },
+    {
+      "source": "main/include/m3_wav.h",
+      "sha256": "341d17282fc537d126a616969595bbb209a336a361e403208a2cbf566de4ad8c"
+    },
+    {
+      "source": "main/include/m3_web_address.h",
+      "sha256": "d5f19c8620d726b57abf2c23e0bdb3fb166e0618262d0503082abfa537af7968"
+    },
+    {
+      "source": "main/include/m3_web_assets.h",
+      "sha256": "b8093dce29f77081e998e9e6a4852abbc408d16a64bc8c9f56116d57d54219b2"
+    },
+    {
+      "source": "main/include/m3_wifi_performance.h",
+      "sha256": "203cfefa4a2b87a577361170bcc07f54dd2173d760abf57025e88f62ed5f2cbd"
+    },
+    {
+      "source": "main/include/network_manager.h",
+      "sha256": "567ac66a9f1290796edb4d77a7fc0f67f8b2612ae3457df44736a4c486c44c2c"
+    },
+    {
+      "source": "main/include/network_settings.h",
+      "sha256": "f33695893fb3f30278b40719d9da0c5f57839b5f95bbfc37833a4146473637e2"
+    },
+    {
+      "source": "main/include/qr_printer.h",
+      "sha256": "690994403deba860c5481a1d97750259ebc9e2af24d6dff57be768503c139adc"
+    },
+    {
+      "source": "main/include/qrcode.h",
+      "sha256": "efe510ff6a0a47412f37634b60cdfb78c7711de245ef1dfe4f8919c4342eafcc"
+    },
+    {
+      "source": "main/include/sd_media.h",
+      "sha256": "152ebd6acb7a7d41d57d570fe221bee023aeaceeb3920dc07289b7f5499cf884"
+    },
+    {
+      "source": "main/include/storage_view.h",
+      "sha256": "fd3268123bf637fd374d38b647c10af960999c8391e1f1cd54e020e3d75338e7"
+    },
+    {
+      "source": "main/include/web_pages.h",
+      "sha256": "fe2635d05c3ba0e9e8d4d8459cd6cf146204bcdf92e0339d4679f5d9209520fb"
+    },
+    {
+      "source": "main/include/web_server.h",
+      "sha256": "84c684e9fe0adc101332ea5503a250825f38e9d8f2cd1fc04b46b6f8c57becf0"
+    },
+    {
+      "source": "main/m3_2048.c",
+      "sha256": "97e7b846fabb073278bfa0bae8d47256af36c081bd3e37b0e7f19db9a074958f"
+    },
+    {
+      "source": "main/m3_agent.c",
+      "sha256": "053dbe49a561ebeaa0ef513aa32906fec1e66cbf058d63d55a00a38d7f12edf6"
+    },
+    {
+      "source": "main/m3_audio.c",
+      "sha256": "da5ac7e2d16a1cb970adc511ca4f0459f8a0e224fc151740a54c0997e39ead7e"
+    },
+    {
+      "source": "main/m3_azure_audio.c",
+      "sha256": "064c1e3f39e5cd05020ed1f46d93d2f979a30bcce63f4ec729c97acb8e3ea352"
+    },
+    {
+      "source": "main/m3_board.c",
+      "sha256": "726ae10b72fc8b35cc35689dcaaf2d04154b9b517b120f068461dae94f9e1baf"
+    },
+    {
+      "source": "main/m3_boot_logo.inc",
+      "sha256": "af67c78af351f2b23caff2c02b37337997634b212790c373d6e3a3e7f8f6e33e"
+    },
+    {
+      "source": "main/m3_boot_product_mark.inc",
+      "sha256": "adbfcdc92cda008a1cf65cb9a5a051f52ecfed18581278e576d30e42514c16e3"
+    },
+    {
+      "source": "main/m3_boot_splash.c",
+      "sha256": "06597d4d8bafe2f369935625d6108fcfb0ef08085ac454b83624c7686abac3f8"
+    },
+    {
+      "source": "main/m3_c6_update.c",
+      "sha256": "a733e2a31e0422ec4bdf89f761dea98c789241a2432e0f3e5259a2cb408cb8fa"
+    },
+    {
+      "source": "main/m3_calculator.c",
+      "sha256": "c1eaec8407c0266ce147f885b8f7a8c54ab5a111e4b0e93de62dc00ed212c526"
+    },
+    {
+      "source": "main/m3_calendar.c",
+      "sha256": "8cfe17a6eb1e2c7ad2fc3ae2538bf77c534afd4e6b918cde9a7aca1ed8d6aeb4"
+    },
+    {
+      "source": "main/m3_crossing.c",
+      "sha256": "529f2ba1987b704ca1c5cfb064467f2bbee1dad45760298506f7293e40c74f97"
+    },
+    {
+      "source": "main/m3_feedback.c",
+      "sha256": "0060097a0f32a7a84a45e808c91015750fa5e7f1f182ff0f49021e8d23c72c9f"
+    },
+    {
+      "source": "main/m3_font_bitmap.c",
+      "sha256": "b01051f266086d8e045df7c2693d540c0bc0f54f35dcece551009a4571dd0d2c"
+    },
+    {
+      "source": "main/m3_font_cjk.c",
+      "sha256": "4a462aae190bc3443472cb986a2d87bad7bc3e399b4f071a7befe9a119b09929"
+    },
+    {
+      "source": "main/m3_font_clock.c",
+      "sha256": "9a64515ada6fec648cbc38862f81884463dbe2ef13500bbf6c3f085d5ef0e641"
+    },
+    {
+      "source": "main/m3_font_korean.c",
+      "sha256": "761bf019c0faee10fa0dd8cc9478d77875712c1d988b9ad0984c701b60adb7c7"
+    },
+    {
+      "source": "main/m3_font_large.c",
+      "sha256": "2c1d58bfd18a86063534e6a7bf61712115d5b646f65d25e5b823bbaffef4f9d8"
+    },
+    {
+      "source": "main/m3_font_reader.c",
+      "sha256": "319bfe366a9c0a52294f5aa2326da76d72418ea2d6d990ef3f844e5856ebf2fc"
+    },
+    {
+      "source": "main/m3_font_splash.c",
+      "sha256": "10558728a63f90bfe9a514c992b54d8edfaaa93077ed06eaa3c700cb25473954"
+    },
+    {
+      "source": "main/m3_font_splash_small.c",
+      "sha256": "525a1e219f1c5d486fcd25e287630eaf5e6b017d86a90282461195de615444a8"
+    },
+    {
+      "source": "main/m3_font_title.c",
+      "sha256": "54a2462a2f73b9fc00586f0f7e0d69ef2e6b5ba16ee92ae1e6712d924c3b0746"
+    },
+    {
+      "source": "main/m3_gallery.c",
+      "sha256": "262e835ea8091e5fd21b9f111ce6baea9cc1ecac2efe675320ad38ba980c6608"
+    },
+    {
+      "source": "main/m3_gallery_index.inc",
+      "sha256": "4a0a0ff73c9be7c0bc8c07a38a154e2befccd7886eeb456a83ded8c76cb76a74"
+    },
+    {
+      "source": "main/m3_gallery_ui.inc",
+      "sha256": "3697687971d174b660dff50604657fb58fc9f2abdf16ec3d7234a99c32421844"
+    },
+    {
+      "source": "main/m3_google_audio.c",
+      "sha256": "f140bf3b940c1b8559bcb392e9d3f24fcb5709da11ea2d54aaa47b4aa74c1bd9"
+    },
+    {
+      "source": "main/m3_hangul.c",
+      "sha256": "63c246b63397673643ab01a43ffe7742054ca0609f776abbe8f0ba5e04e5f517"
+    },
+    {
+      "source": "main/m3_i18n.c",
+      "sha256": "bf4a072ea16f25b065250e12278e4ff28029ff2118da1d665399d45ee086aa6d"
+    },
+    {
+      "source": "main/m3_i18n_ja.inc",
+      "sha256": "ea9584cc6f78ff60f6cf23d94ddcb6338e6bde2509eaf9cb4ffec7a0ae8da607"
+    },
+    {
+      "source": "main/m3_kana.c",
+      "sha256": "200542064d85b89b84453d07c39594a13754285fdd82bf802d5ec95d1b96e7d3"
+    },
+    {
+      "source": "main/m3_mp4.c",
+      "sha256": "8b10797f3aa17ba9e0ecd89708b8069855d5b5cefde00be82abee650dd33c671"
+    },
+    {
+      "source": "main/m3_mp4_demux.c",
+      "sha256": "848dff1bd504c546fd8f95591112252daafdbdd87e0d1c480a25d40d7f2de9cd"
+    },
+    {
+      "source": "main/m3_mp4_pixels.c",
+      "sha256": "539071e17d3a23f915b6692fffb121b37bdeed9cc44db18a519c7c4c8c8509a1"
+    },
+    {
+      "source": "main/m3_music.c",
+      "sha256": "08503e8c64a182208abb6844c236924c488b589dc0dab752dd63f4149aae5ea6"
+    },
+    {
+      "source": "main/m3_netif_guard.c",
+      "sha256": "ce23af422572840519f371dbdb1acfd9ad0e7b410f75dc72d53b76d590acda34"
+    },
+    {
+      "source": "main/m3_pcm.c",
+      "sha256": "541f845313162dcd4236735ec6fb148ddfe00e31363a579816976e4f57cda31d"
+    },
+    {
+      "source": "main/m3_phone_ui.inc",
+      "sha256": "87a09a40444b2ab303f9e007fd1a04b0524aeb2b1804ba1b212b2d5175686363"
+    },
+    {
+      "source": "main/m3_photo_pixels.c",
+      "sha256": "558ec64c0c87e9a77767500ffe5cfb10f4b5dcfb3d46ba1b23ce95d9fbaeac62"
+    },
+    {
+      "source": "main/m3_photos.c",
+      "sha256": "a17700ef3d13ae5f798cd13dc322509c0b34108dbfd0ce12d54e65c01dde5e23"
+    },
+    {
+      "source": "main/m3_power.c",
+      "sha256": "e879afab656bcb5146622af417a34e2fbcdd84e385d42f139d743a8ee61d11c0"
+    },
+    {
+      "source": "main/m3_preferences.c",
+      "sha256": "7ec20d8dddce708ecb5f55173b914f8820a27994aa785c03df84c60644f50a6b"
+    },
+    {
+      "source": "main/m3_radio.c",
+      "sha256": "93b8ec3e55a29e3508bf3e149be65e863dcbcac6152f56d72db9b8bb5b4767d7"
+    },
+    {
+      "source": "main/m3_radio_stations.inc",
+      "sha256": "742a0eb08456d6164a7600664ae208e42d7652b6c394ea2b4df2da5a5e5593a1"
+    },
+    {
+      "source": "main/m3_reader.c",
+      "sha256": "8f7e275a52709db940a9a87d327c0a3f4c2ff084419236453f3dc6de3aa3428e"
+    },
+    {
+      "source": "main/m3_reader_ui.inc",
+      "sha256": "c8ee5e10eb885596d4aabecae365aba42a10957e53b6d3c788be2b888ff80e79"
+    },
+    {
+      "source": "main/m3_recorder.c",
+      "sha256": "3bf775534a711f545a96a96330638882777647730aad7cd096529f6f27edcc10"
+    },
+    {
+      "source": "main/m3_runtime.c",
+      "sha256": "0e33e0788c8c01b2d92b0ff20d8550ad90519f49861377fc22a9d0780464d3ae"
+    },
+    {
+      "source": "main/m3_sd_apps.c",
+      "sha256": "d2906b3f7e3f2fb14b88a07761e317b9863563561181da7e1d0215efec4903b0"
+    },
+    {
+      "source": "main/m3_sd_settings.c",
+      "sha256": "d869c57ec6e56f3469f012ec18aced5b7dfe5c00c4601017e3b26026975b9e4e"
+    },
+    {
+      "source": "main/m3_tts.c",
+      "sha256": "8a253f359f14892060a87ca93c67a08958ce0e0e65271e24f41a4c9375fe3d42"
+    },
+    {
+      "source": "main/m3_tts_assets.inc",
+      "sha256": "483d1b8b52fe41ae0d04d3063fda5398af87419ff535bb5c166b5e5453f4e4eb"
+    },
+    {
+      "source": "main/m3_tts_data.c",
+      "sha256": "997ac34c20645a4940ea88ad1ed13a608ecb4dac475332b7d89a4db7f6c025fa"
+    },
+    {
+      "source": "main/m3_tube.c",
+      "sha256": "b64b2a8b04d9582deb4ffaae768d14b7aded961df852723faca25664f42f26d2"
+    },
+    {
+      "source": "main/m3_tube_download.inc",
+      "sha256": "2de92336baaebcd0206cc88a257ed176120abe9d08769cf2612bbf24c156a75d"
+    },
+    {
+      "source": "main/m3_tube_music.inc",
+      "sha256": "d46c71632dbbeababd24c010c6627838d46553e8123b5bbfff47d89df39c35a2"
+    },
+    {
+      "source": "main/m3_ui.c",
+      "sha256": "17c566b2703b764d03196321065df8dd0ceb79ade6ea34da65825601a0d9bf37"
+    },
+    {
+      "source": "main/m3_voice.c",
+      "sha256": "99e6c2d31cd54453612283148eb285152da75aa27d724cb058a3ae8a2544d96a"
+    },
+    {
+      "source": "main/m3_wav.c",
+      "sha256": "7abb2cb73674e8b835491f1b2bf1a013a82414e437f7d6acfc5addfaee255094"
+    },
+    {
+      "source": "main/m3_web_assets.c",
+      "sha256": "1e4825b0b7c0e16a41fc3df7565b09df5fc59bb0246f511756058a6e61e21ed5"
+    },
+    {
+      "source": "main/m3_wifi_performance.c",
+      "sha256": "fc2af1d866a652c7ee3622a8021e06175f2441545a93c4478f6fb08db7392fe4"
+    },
+    {
+      "source": "main/m3_ytmusic_ui.inc",
+      "sha256": "bbacd5d99028daffcc5f93a3d785287a480d96a47e5cfff58302239ecde1ee4d"
+    },
+    {
+      "source": "main/main.c",
+      "sha256": "4e4b61cbe113e6f8f073d20fa5440f0c41227761d08fceb5cd432496faa489f2"
+    },
+    {
+      "source": "main/network_manager.c",
+      "sha256": "8c7011996e3cead3d7b9064889ff1dfcfa3de976596908995af499f1b99f6322"
+    },
+    {
+      "source": "main/network_mdns.inc",
+      "sha256": "5363745052ac84bec8034bf5d5a8fe8b1c1f86f114fce9d8f0fe92f1be326d21"
+    },
+    {
+      "source": "main/network_settings.inc",
+      "sha256": "48c1425b2da416609fe6396c888c0f7fe9bdf1410b6a99cbaff2a8f94df48529"
+    },
+    {
+      "source": "main/qr_printer.c",
+      "sha256": "91ed31f515af05b5de08d23b5d00e943996a0c2818a97e4ee85274b24fa65880"
+    },
+    {
+      "source": "main/qrcode.c",
+      "sha256": "360f647310db7a3f9244935b8f830288ebfc975249a0a3b3c724912824a4696c"
+    },
+    {
+      "source": "main/sd_media.c",
+      "sha256": "7c72e324d41c27315e02f4b0a1b46e05c642e0843470978750d257567857d26d"
+    },
+    {
+      "source": "main/storage_view.c",
+      "sha256": "623522e5c57e6b75ad4170a1ec800d842b55c1f1e58e59a20fe1d208a11d3c34"
+    },
+    {
+      "source": "main/web_agent_diagnostics.inc",
+      "sha256": "7add8498238187dc8a7f7c77fcd3b49046d1dc0b9518c77d6e5ab628e4abdddf"
+    },
+    {
+      "source": "main/web_agent_tools.inc",
+      "sha256": "65a22d7077bb154cc94769639d7e19fdd312fdaca9aa352896aee9812d5acc09"
+    },
+    {
+      "source": "main/web_ai_login.inc",
+      "sha256": "91ab4aea47449e0846483ad23aaa81eec7121ad1941fe64161c28a66fc84418a"
+    },
+    {
+      "source": "main/web_ai_proxy.inc",
+      "sha256": "aff515565ec461964442d51fe9647d3cffe1d49d32c72afa9e1258aa58b3e816"
+    },
+    {
+      "source": "main/web_ai_request.inc",
+      "sha256": "66e9c52ca30a7ede19081959ffcb475069390c6d90bc83c1fe5e11e980617769"
+    },
+    {
+      "source": "main/web_ai_security.inc",
+      "sha256": "32a12fa94d86ccc04746cde05e7aa404050b0bc20dc8ff0849b270f050c46dad"
+    },
+    {
+      "source": "main/web_device_settings.inc",
+      "sha256": "620b2acc5458d8a2f516d7b9189c06bcb432055dd050bd274ade26876c34f8f9"
+    },
+    {
+      "source": "main/web_file_dates.inc",
+      "sha256": "5e766832793cbdf3ec03500dcbc4bd019e7a21fe18a1a13bd872436b7ecf819d"
+    },
+    {
+      "source": "main/web_media_range.inc",
+      "sha256": "bb8ab1824ebe3cff0e91cac6936e6daf8c528d956f5a8734373145c52a13cfa0"
+    },
+    {
+      "source": "main/web_network_setup.inc",
+      "sha256": "fdf6dda5e715391f86c52bfac93874c6e0684b7e54bea3c79b6be6a649b12cd4"
+    },
+    {
+      "source": "main/web_page_admin.c",
+      "sha256": "2a5731cf20ae81f19fe77d86658fdfee5f4a33de650846ffb36c62402da6ad23"
+    },
+    {
+      "source": "main/web_page_ai.c",
+      "sha256": "6ccf02b29ea71ed81bcb011c61596d95dc379773a045c0ab93c88f76884dbbb7"
+    },
+    {
+      "source": "main/web_page_factory.c",
+      "sha256": "6cbfb229b16bdaa093febfd1629d8309c0b3410980e3fd80b12e4c14ae1ad5b3"
+    },
+    {
+      "source": "main/web_page_static.c",
+      "sha256": "357f9b244da6e304abc190de50c140f33b906d8226569cce31d35d4eba5050ac"
+    },
+    {
+      "source": "main/web_pages_gzip.c",
+      "sha256": "bb48fd9bc0fb8b432994616e9ffd0285fa10a51ddd47e95880bb1acd96ea4102"
+    },
+    {
+      "source": "main/web_public_stream.inc",
+      "sha256": "7ab52b47e0b46e35658ac1ddc6a339c59fa70a5e001e2a77a9a9541b045f539d"
+    },
+    {
+      "source": "main/web_sd_admin.inc",
+      "sha256": "f36023e660ba1d990b8b836a8aae53cf6dd8782388c1d98212488a6a0f1787d1"
+    },
+    {
+      "source": "main/web_sd_admin_ui.inc",
+      "sha256": "da22880591a87c762cd561f5fd0cad0c211d8a5d67b9a7ef5a5d495720ced519"
+    },
+    {
+      "source": "main/web_sd_index.inc",
+      "sha256": "997fcdc944ad69d4e4c49568a980492866f42064098f6584e72d10ebc8c360f1"
+    },
+    {
+      "source": "main/web_server.c",
+      "sha256": "194a0d9bb1ac3721fde41105bd25ef23a1140e82e706f36cf759753abcbc2096"
+    },
+    {
+      "source": "main/web_wifi_setup_html.inc",
+      "sha256": "d53976976fd5a3907053ecf5241dbf24ebd32ec2de98dd4181273500d022d0e1"
+    },
+    {
+      "source": "partitions_16mb.csv",
+      "sha256": "616d9c6ff5570aa6c7a21727844ba3991244a14301feb0aac294df417dd6d416"
+    },
+    {
+      "source": "prepare_c6.ps1",
+      "sha256": "57bafe75692bccc24925acf0d670077a56a1eda122eb900530fb323d8588ea0f"
+    },
+    {
+      "source": "sd_apps/apps/sand_tetris.lua",
+      "sha256": "96568aff61d1a98d310c4d24d1421924f22f717cdfd529ad35a59e07e69b8321"
+    },
+    {
+      "source": "sd_apps/apps/watermelon.lua",
+      "sha256": "92bbc6b356543ec683d91f779c0af645ed492da8094ade3497df73fd3cfe08fd"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/admin.html",
+      "sha256": "fdb797511663b091552f021b3b4fb823374dcdfaab71e73f57e679b5dcca68c9"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/ai.html",
+      "sha256": "cb4558f88458af8ad3e440083e44c44fe96e0e626bf62fdd4e87c2aa6fb69543"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/ai_studio.html",
+      "sha256": "a002739917990c6c25b8a1de43bab9ea41615863b171e651d6b22c00a1d9c7c2"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/help.html",
+      "sha256": "36bd4c2c0d67af0e7f6b5f28aad69cdf4370c6433f87372563ca7d73eb434c6a"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/index.html",
+      "sha256": "4ee456ad598bd10a79a8c1bd7b969f2688d2ffec02582af8bd4b486caf82347d"
+    },
+    {
+      "source": "sd_assets/Main WebFlie/setup.html",
+      "sha256": "eb2b58473aa065e25bb3f56773db39cf686d296fe2d56d567374c1b44e8b0441"
+    },
+    {
+      "source": "sd_assets/books/M3_Reader_Sample.txt",
+      "sha256": "0b7a0491620e2ebd9e7c0a5c748628f076d37c06c611f36e21203b0f8ee953ab"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/10.wav",
+      "sha256": "c7926c34f4474fc535949c3487d73784d348f75753e6401942c7146df895fbea"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/11.wav",
+      "sha256": "c7da82ba42c231d706d67f19455dc1c29c94daaa67c2c2d1e92b853b5074de59"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/12.wav",
+      "sha256": "7928a89626380afcf49621d70b9e3b5e6a716a2e9657f3873dc76f0ad2e3b47e"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/13.wav",
+      "sha256": "b47eebf935834147a27e931485c9a5e876270f0d36892b0a23078b6ad412feec"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/14.wav",
+      "sha256": "a029b559fadaa46b02ba7e0df2a7fc310d5afe6301174055ade73ecafb6460c1"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/15.wav",
+      "sha256": "30fc895d5acae5a983d40f83aa5a7c10292b071936ca8d8a2910dc341671221b"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/16.wav",
+      "sha256": "a0398701018bf70c48ca197cb413294da5df17876bdb840855286cd01fb3c95e"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/17.wav",
+      "sha256": "f1819e2be786579f05e20bd702c231994a5ad8adc72dc91b4539c8f3e4bec425"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/18.wav",
+      "sha256": "31623e16134b512fac02aafcdc489b3f773a69e157594d38e5c9560611f40e6e"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/19.wav",
+      "sha256": "453366632da488ed108474ef4eaa35baac07d12e9cc1001a3784d8039ee160f8"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/2.wav",
+      "sha256": "b1242c21e965ebc7cdfeac36ead8fe487fdd27d7c678c575cb2497bacfbe5c25"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/20.wav",
+      "sha256": "842486cda9480c3737098bae55b77cdb9f50e83063c2a03a81942a56d9b8c255"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/21.wav",
+      "sha256": "f8b9bef9432ef1e14b774aba7979b467ad042dc6f5e62a1f4f5015c4e00226f6"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/22.wav",
+      "sha256": "aec58849c4d7b487e2bada27ae2c6d7c6f4a503f377a06ccee3fb7898ec7ca02"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/23.wav",
+      "sha256": "875e0a6c9bd5e0386a15b73d29b180b5c5b1c83d1efdba2464be51c16ec16dfe"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/24.wav",
+      "sha256": "84cc9316bf290f85d6092a6c86daf223d706da3903da6d99c1c23d55fbc3cefa"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/3.wav",
+      "sha256": "618d82557d5d8caacabf9258023e2b3df2e8bcf0bbda7c53af9daacec8bab30b"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/4.wav",
+      "sha256": "f2360b323a9c7c6d65cfe2c9203b2ecc414de97e0ddc13e3eb8bb7bf02752d9e"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/5.wav",
+      "sha256": "c0b12fc6e962ed6bff75ad6cec11a75fd94f27d5bf4fce6c77344a84c21cce8a"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/6.wav",
+      "sha256": "dd285404f07384284fa7192be573ff3fa3a5e9be91ef122062b55fa67d7d2117"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/7.wav",
+      "sha256": "d57c6efc5fff1ec7f91878dd591b8a3e14072b8bf74caae54de702721a88da35"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/8.wav",
+      "sha256": "18faa44063eeabc91097ca91f206d828e512ab7d45b393aa71887db116efcd97"
+    },
+    {
+      "source": "sd_assets/sounds/m3/en/9.wav",
+      "sha256": "f147dbfaf9fe88a5a048c25d3e8199d028aa035c7248fed17bf21439ab427aeb"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/10.wav",
+      "sha256": "98ba3c8b24a5fe7915e4b5817e8fcad700d711d331306ce5324a8c36aaab24f2"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/11.wav",
+      "sha256": "cc551d5b4be2eff98b15d40a25d7d8f09a766154e3acd89201d0803f0cf27a80"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/12.wav",
+      "sha256": "adf2d914400525faaaacfe43c8caef3cba6c1d089231c84c47e4b9784837cd7c"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/13.wav",
+      "sha256": "0bbc82277033ca4e3bd23af4dacf1e539445acb30fb09687c8fc1ce269daf5ee"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/14.wav",
+      "sha256": "f19ce612b6e60e4cce93e43fa2c982081febbb6e4df9064bb0e4d61266f3c358"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/15.wav",
+      "sha256": "9852f9e54ab4e1f3e423d7855be0513d32b375121ad0d71e0133e2daae88b695"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/16.wav",
+      "sha256": "4f7208c3f5f2082dec72e07e2f3f517ff07eed3d6b2c7c06eb6f043ad5715974"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/17.wav",
+      "sha256": "1224ece3c4d585e3e46284fe5716fd2d3546787d2a4fd9b3873f84a95396e725"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/18.wav",
+      "sha256": "4419fb8e7a939743207978da4b619ad94d1a9ba7cbcb467f98138f9b7bab620d"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/19.wav",
+      "sha256": "d996b9e6308d6f17ffa8684e043ce279be88dca23edf7feb3baf0a19da174a22"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/2.wav",
+      "sha256": "5fce7d42f6d6fa464704160c11ab0ed8c3265c2fab66dcadff83711b73ddc6b5"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/20.wav",
+      "sha256": "50f68c33af26bf4432dc832c1f2de5fb7e0761c14ed43b361ba9c767832a0d71"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/21.wav",
+      "sha256": "63cebebf05915ae37c810b3e41e395f73fec97ced410a9ec1a360618f9ffacf2"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/22.wav",
+      "sha256": "54dad066f982d0dafa9ac706b866e80f182326b27473934e697954110cc8f581"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/23.wav",
+      "sha256": "e7629c15aa30c9e2dc9f16c565f16d8db1fd7e73c0564a74ecf5804efe6f74da"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/24.wav",
+      "sha256": "d77171b2e2e668bf770078cb22672835f4493eb161bb1570c8aecf7087828e27"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/3.wav",
+      "sha256": "947317ba68b88f06e70635283a056f9d51927306b4a0c517df9dc7b26e3bea7d"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/4.wav",
+      "sha256": "5a79828c27f1c3983a487545be305e75888ebd4190d1f4972c2e206506c80da4"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/5.wav",
+      "sha256": "3d62d850eaa4b8885f5db8d584e28e4c02525789ea128b4d93a087335faf6510"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/6.wav",
+      "sha256": "407c05b9b5dd06dcb12ce82a3d2e37e8af345f63228e4c876bc265db55bc5273"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/7.wav",
+      "sha256": "bc58e1cd83b3063ab1da20813a640b84e9209e40f02aa38ccaa939fdceb281df"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/8.wav",
+      "sha256": "707565638b52f5baa6f7acbefb43ad48392aa5154960f76d4de5d88185e58821"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ja/9.wav",
+      "sha256": "369d4050c5bf1e19848a7afa8e7d47fb2653bc3ed98e68132b8143eb96779977"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/10.wav",
+      "sha256": "31b04a9b4afc050b664c23771b10388e7c9166e2198684fca6622bac6cf04997"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/11.wav",
+      "sha256": "da6a19ea5185ea7b5bedbe6ac91b59ddb00f0a1e98b9d17c9abae0c2b67cf4ee"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/12.wav",
+      "sha256": "4c1008413b6296269e906efafff1326ad986c3453b77182932cf64509f06ab5f"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/13.wav",
+      "sha256": "84c155417aace817505d8738b0464701d108193360b64e2cd56889d4e735c758"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/14.wav",
+      "sha256": "908bc834009042bf5ce162df462e743f4bd7a17b4ce7d361db08df2fee388c4a"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/15.wav",
+      "sha256": "c86d89c0c25663ffc5c318fee5c5d951d4fc48d3c38d7f39c6524353ca530f52"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/16.wav",
+      "sha256": "c5aea8e682638d136c0cab9c562d9522dc66e90f343b9174df48411b96c66a10"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/17.wav",
+      "sha256": "5a41cbefc5ec3ff0926e54a9dc0275adbd0ce07aaaa159472b31779ecb06ddd9"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/18.wav",
+      "sha256": "5ff04e279e581ade39a96357b9c531f7bfd982f6f954d77584765c3ef4ed3c7e"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/19.wav",
+      "sha256": "a82f65bb0197e1e74183bf11511f92512737f52dd88217c369e35505d392a6e2"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/2.wav",
+      "sha256": "f648c99e13160c1e906eb330fb14c878615bfbd5b1c927bc7c75b3df3fe62bf1"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/20.wav",
+      "sha256": "0a4850a17699097adcdc389ef8b07b4116ffbe4a01a9c706663173e28966d852"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/21.wav",
+      "sha256": "f61ff3c1ddc875cc26638ba145d595f9b066b9509565481d14fd3511fefc8eb7"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/22.wav",
+      "sha256": "d195e8ad1b14d857d0ef588bba7b6a296018536efc3a152f2e7912a045ef0621"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/23.wav",
+      "sha256": "e1143e2a65ff55ce1dcae0813d239aa74ed3268cbf85fff33c89a3cf7b083a2a"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/24.wav",
+      "sha256": "d60a8fffa2cc97ed45e64222fa265748395b2fc22bffc21a2eee8749d5c23405"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/3.wav",
+      "sha256": "de5f02ed3b79a3e36f4845727491196c0846f4737f71b2895d1000d58ca6ed01"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/4.wav",
+      "sha256": "cddf4e3f9a92c5919d046bbb058284a6697d6b476a5cd20837d85598848da5b4"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/5.wav",
+      "sha256": "65489f35c43c0aa29f19d1b8cc608c67f76a2297545b77ebc2c248e0631a77c5"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/6.wav",
+      "sha256": "faa06119baeaec176f7c4cc09ea8b413bfe76c7db9fdffffc318595b2be6fe6c"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/7.wav",
+      "sha256": "ce3c194c3b67bbcda3a7d2591d3892729f0bfb85c9e8a32a97c28d423852af0a"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/8.wav",
+      "sha256": "f361d17f2c46bdc4a404a14a003de6ffcf3808a810502c21ed90cc131bfb4649"
+    },
+    {
+      "source": "sd_assets/sounds/m3/ko/9.wav",
+      "sha256": "3cb5d44bf5140a3ebc1aa1a0169144f3aee05f0028ed6466ca08f1f361add9e4"
+    },
+    {
+      "source": "sd_assets/sounds/m3/manifest.json",
+      "sha256": "d64aafc94d0c64fd2c3c7b041a2dd42e56f017c444af69229b3a5d1dc902d0a2"
+    },
+    {
+      "source": "sd_assets/sounds/m3/tones/boot.wav",
+      "sha256": "54a19f244fe075275bad1bd5f363a858a2e1a129be1d35067c9a3e603244a36b"
+    },
+    {
+      "source": "sd_assets/sounds/m3/tones/confirm.wav",
+      "sha256": "7bd95c96a46e6e3653a7ef411761efad5cec6ec5f8dc2a755e52a3afac3d54a9"
+    },
+    {
+      "source": "sd_assets/sounds/m3/tones/error.wav",
+      "sha256": "0af2dc4f55ed5e1d8c28b38d8f1b3af3bc80ff8b6771c9eebe66fee81c733aba"
+    },
+    {
+      "source": "sd_assets/sounds/m3/tones/tap.wav",
+      "sha256": "ec1092a9372533f96db3b9b4a98197751d2e0b0a0f3b75a7338350c8223401c2"
+    },
+    {
+      "source": "sd_assets/sounds/m3/tones/wifi_setup.wav",
+      "sha256": "6db08e5e326e11c91f51fa0eee271ff18c5a01bf4604dd9902966a60f15d9e6d"
+    },
+    {
+      "source": "sdkconfig.defaults",
+      "sha256": "a4dfa015bf393d7090b6424731806327db3a4e673d60b59863460fa3b665430c"
+    },
+    {
+      "source": "third_party/guition-bsp-LICENSE",
+      "sha256": "23d8f6e09950562ded33d9e354247376dd46cf8be57d23759d7c40c1dba5459a"
+    },
+    {
+      "source": "third_party/minimp4/REVISION.txt",
+      "sha256": "095baf21a237f0ff039948919b16b52875126162aa73a4c402a70576179d6224"
+    },
+    {
+      "source": "third_party/minimp4/minimp4.h",
+      "sha256": "82ee67e25a9edc5dcf6331b52de30a2f28490af70f49cdc5ea2d5e77a929b7f3"
+    },
+    {
+      "source": "third_party/nanum-gothic/NanumGothic-Regular.ttf",
+      "sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31"
+    },
+    {
+      "source": "third_party/nanum-gothic/OFL.txt",
+      "sha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f"
+    },
+    {
+      "source": "third_party/unifont/LICENSE.txt",
+      "sha256": "1e74cb82bf476843e97c2596297b04219b1a7e51f7238944a8c031cb9401fa87"
+    },
+    {
+      "source": "third_party/unifont/NOTICE.md",
+      "sha256": "1c6cc7636f5cfc598e65f19e49b7150367a06cd225da832877f4d8fbb0628c04"
+    },
+    {
+      "source": "third_party/unifont/OFL-1.1.txt",
+      "sha256": "869692af094c57fb7258c57fe26820c759319603321d0ffeb278de3651763ded"
+    },
+    {
+      "source": "third_party/unifont/UNICODE-LICENSE.txt",
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+    },
+    {
+      "source": "third_party/unifont/joyo-17.0.json",
+      "sha256": "10aed0876df3fad72133a23ef6fddf01f87bd68f8da2f25e88f47e071e2c5d47"
+    },
+    {
+      "source": "third_party/unifont/subset-manifest.json",
+      "sha256": "ad50594e98c14d23897c9118ad90f6346c41f4bba535fa7559c24271f5b2b9a7"
+    },
+    {
+      "source": "third_party/unifont/unifont_jp-17.0.05.hex.gz",
+      "sha256": "ecf9455c8a44b09e3f645e6b1bab4ac22a57399bf19b1f8e950e11af9523df8c"
+    },
+    {
+      "source": "tools/audit_core_usage.py",
+      "sha256": "529e991c1dc8ba6c11994a6a6f4628bee8454b1469aa50808762654851516e75"
+    },
+    {
+      "source": "tools/audit_psram.py",
+      "sha256": "30d1e8aa9c8ce06866bd8ae38696d352aa08b0745d8c1822ae1d9dc59acf0d6e"
+    },
+    {
+      "source": "tools/benchmark_external_download.py",
+      "sha256": "741ca6d55b41663fdf234ae0846669d60689f3d47a0166b89483cdff683ac792"
+    },
+    {
+      "source": "tools/configure_sdio_clock.py",
+      "sha256": "b9fdd94ea2dff485c87e208f77a028c3563a78d108dea476fd0bd6eb39fcbc56"
+    },
+    {
+      "source": "tools/embed_ai_studio.cjs",
+      "sha256": "254acfee11e35373931c3b2cbe91659b3c4c94dd9e60988a567f4f96de1740e5"
+    },
+    {
+      "source": "tools/embed_home.cjs",
+      "sha256": "22bb14e6483ffb2a69756b65b93ef08bb7e5149c54fd8f556828d8754c2cb5b8"
+    },
+    {
+      "source": "tools/espeak_source_manifest.json",
+      "sha256": "127e9d97bd953c74b3712cfb14d97be1a173b09e34e65f2e4a9bff27f0432b1d"
+    },
+    {
+      "source": "tools/export_main_web.py",
+      "sha256": "28572cd377670c4e4bbdc2d2e53c42bdc63527402f20f27634a038e44d705f9c"
+    },
+    {
+      "source": "tools/fetch_lua.py",
+      "sha256": "ad8eb9e79b3c05b31ba62d152f09741fcc2c5e61b862cd383043c5d7d89155ba"
+    },
+    {
+      "source": "tools/generate_boot_splash.py",
+      "sha256": "6e1194e6bc0a43ebcf6e4ea380d29b795bea075e84031cf5e994cd7929ee8c18"
+    },
+    {
+      "source": "tools/generate_cjk_font.py",
+      "sha256": "6175ae6760613b13c88799670af288d407e599ef3149ed5b1b4c2d1216293828"
+    },
+    {
+      "source": "tools/generate_japanese.py",
+      "sha256": "589644bb64605c6540a017b60669e991125a8cf7eb0f7962fa18a360e06091ae"
+    },
+    {
+      "source": "tools/generate_radio_catalog.py",
+      "sha256": "baa4ffb99676536b5bcbd7783123fbeda46cb008123650fe0d7051ac48f31fbb"
+    },
+    {
+      "source": "tools/generate_system_sounds.py",
+      "sha256": "88aed8469d24317c2699e2730251f6e797922832d2ca24cd16505d1dfe00ca2c"
+    },
+    {
+      "source": "tools/generate_tts_assets.py",
+      "sha256": "2989636c2ec58d73f9ad92e996e07ff8cf7aeb198501e93595654d8817eec0ed"
+    },
+    {
+      "source": "tools/generate_ui_fonts.py",
+      "sha256": "e6bea096beecaa120d95aa8d3bdb3681727d0b54b310fb072aafab0309b40ba7"
+    },
+    {
+      "source": "tools/generate_web_gzip.py",
+      "sha256": "3454218ac24540c8267b63ab304f83de027f4bc3964afef1baf7e63f72d24baa"
+    },
+    {
+      "source": "tools/install_system_sounds.py",
+      "sha256": "21be3eb6a8b7214b2a95bd2e9237f2359f3b1e79e84f101cbb2d7eea96fe5945"
+    },
+    {
+      "source": "tools/prepare_gallery.py",
+      "sha256": "b7df3f01de22069ec0f8d47fc9385338350d52e0f3c0807871f01583f2efafac"
+    },
+    {
+      "source": "tools/preview_boot_splash.py",
+      "sha256": "9768f6a3df2c1d4091ff50deeb1090ae2a18e24b388871d8b639a164a2803ade"
+    },
+    {
+      "source": "tools/preview_filename_fonts.py",
+      "sha256": "e3f357aaeb75aa83b9973dff786549fa8e57b912bbacb57cc307dbf2dc0920a1"
+    },
+    {
+      "source": "tools/preview_large_fonts.py",
+      "sha256": "aaf64fc005f2967fded5cc57f69025b0ed743a63919c005a3c1e9a43841e8ebc"
+    },
+    {
+      "source": "tools/sd_apps/.gitignore",
+      "sha256": "5436d1777182a425a2da3f70230df0d67dc1ed90cc7d96ef1742650cb7bbd32c"
+    },
+    {
+      "source": "tools/sd_apps/package-lock.json",
+      "sha256": "4bede62207b0561d70211d5b77bf98c6c88c87e33eecf5f32768389583d66632"
+    },
+    {
+      "source": "tools/sd_apps/package.json",
+      "sha256": "eac99c8758c66ef2db0360dcd653667af8cbc548f072c1a6b00a29c498605c3e"
+    },
+    {
+      "source": "tools/sd_apps/test.cjs",
+      "sha256": "65b850a276b00c2f918a4c0812527431edc36711b8d29ce198922a5cf2e3ac8f"
+    },
+    {
+      "source": "tools/sd_apps/test_watermelon.cjs",
+      "sha256": "6fa040f40ddf1513c00f22089f35a4a099a610ff641ee4adf8130531b4938fad"
+    },
+    {
+      "source": "tools/sound_catalog.json",
+      "sha256": "d91ca1b4a15f1b8da40918281f6d8148f5519af5d010e47691f83c55c1c043de"
+    },
+    {
+      "source": "tools/test_activity_shade.cjs",
+      "sha256": "61bd3f00351c56e711894a55c2ab32097147e250c8e874bcbd0172346e4433fb"
+    },
+    {
+      "source": "tools/test_ai_key.cjs",
+      "sha256": "d7eb86e1457cce4fca9d5cd30d59fc9781bcca233190c3b320ca81fdd9705874"
+    },
+    {
+      "source": "tools/test_ai_media.cjs",
+      "sha256": "1b679ea7af7cc49d4d23b09c8f03e01296690fcde6e062fc54191cd291e8ccb3"
+    },
+    {
+      "source": "tools/test_ai_router.cjs",
+      "sha256": "ea4125538a5fbd2388191ed6f1674d68731f70b707908d6317d80e1007e28e07"
+    },
+    {
+      "source": "tools/test_ai_studio.cjs",
+      "sha256": "e9b8493e727ce38d275ed85c641262667e242faf34c60be6a852fcf16a6c8a69"
+    },
+    {
+      "source": "tools/test_audio_codec_link.cjs",
+      "sha256": "5d40b3bd80895c21d5dd3ef42e0c5f8d01a2b01446c71d014f7917d38bd5b8c7"
+    },
+    {
+      "source": "tools/test_audio_output.cjs",
+      "sha256": "6e983f0b4f38b26695f45bc1feaa4114b08e4980a43f2238cc97e3a5cc5a2645"
+    },
+    {
+      "source": "tools/test_azure_speech.cjs",
+      "sha256": "06d9f9ef66a3fc0895912e8af04f25d382b18dd128d061dc5e051fa764dc6e32"
+    },
+    {
+      "source": "tools/test_benchmark_external_download.py",
+      "sha256": "d57961ded6b7e01244e5273b250fb78f9713b9ff646712d5eae0f310877f49b5"
+    },
+    {
+      "source": "tools/test_board_profile.cjs",
+      "sha256": "04f953670c50bef71f17e232121f2fee7aa0fdfc157f8f72f263a152893f51e5"
+    },
+    {
+      "source": "tools/test_boot_splash.cjs",
+      "sha256": "418c46a262260538e14988e8bc4fa16874bfb29dc62528944b5efab9efbf8d23"
+    },
+    {
+      "source": "tools/test_cloud_speech.cjs",
+      "sha256": "08e42d077048730258b8fcd4eb3741c13a13b1ccddf8433722bad079b6876111"
+    },
+    {
+      "source": "tools/test_crossing.cjs",
+      "sha256": "b77c76125bc653eaa1990c60939d89f6a476d7f93c17d57f68f1f64567034ad1"
+    },
+    {
+      "source": "tools/test_dashboard_polling.cjs",
+      "sha256": "06ea054123551ddcf37eef0ef6a9eaac29761bc193277c36ac510bc93bbdaaa9"
+    },
+    {
+      "source": "tools/test_device_settings.cjs",
+      "sha256": "280972529cea6fd89a1a55a18dc0a1b72ec48f680db008d37157240da41031dd"
+    },
+    {
+      "source": "tools/test_dma_memory.cjs",
+      "sha256": "c94ac6dd7c37f5a7bd50643ee6255adf28de08929a912a206d4a22419b611d6e"
+    },
+    {
+      "source": "tools/test_file_actions.cjs",
+      "sha256": "43c91e7f2f850e69e158491ab764f790b735bbf00b1cd003df103ffe3f936bf1"
+    },
+    {
+      "source": "tools/test_gallery_conversion.py",
+      "sha256": "722a4d7bab484d36aae68e458be6f11dc24b387078c5b2ef7138421ec9b6f52e"
+    },
+    {
+      "source": "tools/test_gallery_grid.cjs",
+      "sha256": "dda2868ae00bf4e8c07832aabad5c7c6a19435931af4a58ecac3cda4704bb039"
+    },
+    {
+      "source": "tools/test_gemini_agent.cjs",
+      "sha256": "e5219febdd96a4ed4d443dc7a4c97c011a85c676d8d2d19f364eaa48c2f8efe1"
+    },
+    {
+      "source": "tools/test_home_panel.cjs",
+      "sha256": "0cecd2805e08125a8b3ff360a4cebc5545fbacbff21ad651ab0d28067880f6ae"
+    },
+    {
+      "source": "tools/test_home_widgets.cjs",
+      "sha256": "d69a9376d23aecb192f70505f89c6cb79610306f01c2614b47ae527ef77821c3"
+    },
+    {
+      "source": "tools/test_hosted_compat.cjs",
+      "sha256": "6d1c29a5f47355b275f4cc0abad1f447ac3c25df6884ffd3b5c1b036e9cd2ff9"
+    },
+    {
+      "source": "tools/test_i18n.cjs",
+      "sha256": "028081446cb0130e3bff19b02d109578df62a2335b77f924ab03a0bf3bfb3d95"
+    },
+    {
+      "source": "tools/test_japanese.cjs",
+      "sha256": "3ead1dee11679b1ea0ff36b877d04e41d0b73bc1059439033400d85f801e7eeb"
+    },
+    {
+      "source": "tools/test_m3_integration.cjs",
+      "sha256": "5fe72057ca3a9848bf8b2cda99bbc31790c48aa9ff61d3cc2323b4b34fb9687f"
+    },
+    {
+      "source": "tools/test_main_web_export.py",
+      "sha256": "0df60d5442c27aaad99fbd4c95c255d42646ab7275637a134c211f7f478eadf0"
+    },
+    {
+      "source": "tools/test_media_apps.cjs",
+      "sha256": "8b700e9f1cc7cd5a99d502f10423f75470e0ba3beaf15cc62d93d54c761a295d"
+    },
+    {
+      "source": "tools/test_memory_budget.cjs",
+      "sha256": "08e609f4c85418a50e97d0857dd9cc1eed8a557943ee00819f5961d5b88b7777"
+    },
+    {
+      "source": "tools/test_mp4.cjs",
+      "sha256": "1edeb737941b4e769755e66f58132a6973a4dc3ca4a232c23290dd32d91cd8e4"
+    },
+    {
+      "source": "tools/test_music_features.cjs",
+      "sha256": "15a5285ac6ea1bc4f6fddfec50cd6e5445894a4173d15b840fcc7e16d9f95492"
+    },
+    {
+      "source": "tools/test_music_player.cjs",
+      "sha256": "a830e36c415f0c87ca779805f0433f7f0248edf81ed3d1885ad602b37dfaf9f7"
+    },
+    {
+      "source": "tools/test_netif_guard.cjs",
+      "sha256": "3952df23b0c73f46c91110c1cb37b036ca8338654289c9847f332fe9587a547c"
+    },
+    {
+      "source": "tools/test_network_performance_config.py",
+      "sha256": "b63a496e4c2b3f91e0626fb457825a0cf67cd5f4d9e7beebe10e63a749d8e9ea"
+    },
+    {
+      "source": "tools/test_phone_apps.cjs",
+      "sha256": "792890f61be50ac5e703b762f09431650e86145631e247c53731f9408ddc92ee"
+    },
+    {
+      "source": "tools/test_photo_worker.cjs",
+      "sha256": "1eb6a802eb038975dce2eff8f6cac4305b521610fe2fde53ec6c981aea4583ec"
+    },
+    {
+      "source": "tools/test_power_status.cjs",
+      "sha256": "edfad5cfa4fc3bb2248f5e7d9d51ec4474876aeba80dbc71ce81df794b2ade98"
+    },
+    {
+      "source": "tools/test_preferences.cjs",
+      "sha256": "cfc33095c203a1f95a18323347fa382ff07deb7df1d6fee6a8c596d194db9eb7"
+    },
+    {
+      "source": "tools/test_psram_policy.cjs",
+      "sha256": "4eecd4042696649582f82a1d78ca1856ce9bf16eaa4be069fdf7efbe4bdcbc15"
+    },
+    {
+      "source": "tools/test_radio_buffer.cjs",
+      "sha256": "fbed5c251b285962ee5b4965a4888a68f88dcbed9b23dc942829f6638471087d"
+    },
+    {
+      "source": "tools/test_reader.cjs",
+      "sha256": "5c431369088ba83e44def8f675d4c1c470acd796fc6cb79c0c20f24884405b6b"
+    },
+    {
+      "source": "tools/test_recorder.cjs",
+      "sha256": "9cd13d86748139f55055b8858a3d571b4ada92803cc637a5d9be85293e9b0581"
+    },
+    {
+      "source": "tools/test_relay_stream.cjs",
+      "sha256": "a93549cb1cb290a83eb29ebcdbbe87f29fe23a208bd9c4f1d07bb55e3088aae0"
+    },
+    {
+      "source": "tools/test_relay_yield.cjs",
+      "sha256": "6e9743932b1a8a449146049ccd05f31cd5f2e3d4310ccb6c790d9cda25c9a97a"
+    },
+    {
+      "source": "tools/test_sd_admin.cjs",
+      "sha256": "088bbe1b39fa69229ae7271310271423d1a78beba3d10749c82b406b6874ac52"
+    },
+    {
+      "source": "tools/test_sd_apps.cjs",
+      "sha256": "25f390a7642f560f57380ee529fd6e47f5f9a695b47df3a800d40d34e2e97dc8"
+    },
+    {
+      "source": "tools/test_sd_wifi_recovery.cjs",
+      "sha256": "e1b0a3ef2fcf7c75d90eac51a2912a059fb49345fd592be306acc4d7b1f54dcb"
+    },
+    {
+      "source": "tools/test_smartphone_home.cjs",
+      "sha256": "43af9337693d4c004474021665c3d44cb13c198cc1e6a164577b6570eea67f96"
+    },
+    {
+      "source": "tools/test_system_feedback.cjs",
+      "sha256": "1836316ac049d13586e14cd85a4278ee0031dee847dd8ca86c927ad543b236ad"
+    },
+    {
+      "source": "tools/test_system_sound_assets.py",
+      "sha256": "b2f342ddb30d41dad94dcad740d97914aa24185527a9aef6025f726fed2f6121"
+    },
+    {
+      "source": "tools/test_touch_apps.cjs",
+      "sha256": "ed1887b36fae9e245dea3e394b0a844a7a083d5f4e93d29dbe88c53a43704521"
+    },
+    {
+      "source": "tools/test_tube.cjs",
+      "sha256": "0f0335725f0f28704ff32457b74efaff7ecd15bdf37882e47e55269a5a3bb910"
+    },
+    {
+      "source": "tools/test_tube_download.cjs",
+      "sha256": "1707af04318e772f1023d3a2a6aee7c7a4c7927722f96f69acbfe4bd4d652a9f"
+    },
+    {
+      "source": "tools/test_tube_music_cache.cjs",
+      "sha256": "afb166324694e41cf1b50f72da23a226bdeedb998ad9ccc0fc21b19cb329c29b"
+    },
+    {
+      "source": "tools/test_tube_status.cjs",
+      "sha256": "2f3d4b991cbec1d88ae842800a7429214f20cffda285a7bcfecbc2e212db1831"
+    },
+    {
+      "source": "tools/test_unicode_filenames.cjs",
+      "sha256": "13f169a491ceed8483420190494d823e278242dc4b2243ddf3a51fdf984b05b9"
+    },
+    {
+      "source": "tools/test_voice_input.cjs",
+      "sha256": "a3e32d140ae103dd0ea8e34be7b7bae3d16ad38086b888abf668ab9929336b2a"
+    },
+    {
+      "source": "tools/test_wav.c",
+      "sha256": "b857e11ba4fcab2ef4febe9952d51d6ff0106eb8ff24c57a3ef3f4c4ffc5f25d"
+    },
+    {
+      "source": "tools/test_web_gzip.cjs",
+      "sha256": "c3ba70527eb470ec11cebfbca9f821ef98ded3b314b558ff7d96eb1ac3c60362"
+    },
+    {
+      "source": "tools/test_web_psram.cjs",
+      "sha256": "492b46502f4057eb947b52f4a79da8ab5729615cd6c7e59bf96fcf8eec76f0b8"
+    },
+    {
+      "source": "tools/test_web_qr.cjs",
+      "sha256": "3955d987d7aa64fc3747505e3c28498cd45f0debb8f6a2968503b108ed04eac2"
+    },
+    {
+      "source": "tools/test_wifi_performance.cjs",
+      "sha256": "456e0a9a2ec76654a3496a988205dcbe1f485107ec643e881d27fe2bd3220008"
+    },
+    {
+      "source": "tools/test_ytmusic.cjs",
+      "sha256": "a7f00de5845d27f8143fc802b95292822ca79a253a4f65dfb126583441ab5877"
+    },
+    {
+      "source": "tools/ui_sim/build.ps1",
+      "sha256": "cb1530b8d7e0ad0e6fcec109c4ab96f5c75d71e894ba9232533c908cd3c14c8f"
+    },
+    {
+      "source": "tools/ui_sim/gen_sdkconfig.py",
+      "sha256": "90a69b46a4b417d47f8ee7273a87cc5b8120f90dd9866597c0e38ed9381b077a"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_chip_info.h",
+      "sha256": "69df293ef85a1753c45534533ea72253cd2b7c22165c3508e81ae610825a6de5"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_err.h",
+      "sha256": "e7c0481f18cf1984eeb0755705852c9e319028f01aa7cfb66a4a5ae0f0565035"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_heap_caps.h",
+      "sha256": "a87731aebe11896dfa35be6b3110456e110d2f1a3a85846950d51f276053a61f"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_psram.h",
+      "sha256": "64a0cee54fb55e968ff7e85c299694c00f3cffaad15c60d014327d030c84d418"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_random.h",
+      "sha256": "8fe8d167b1dac059c8febc7de0235c7eae8599033b44bcb6556df6cb444b9288"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_system.h",
+      "sha256": "e7fed9e94b75189ecc0fc3b9c7d7a5131aeba5eff512425fa02806004c86fd9f"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_timer.h",
+      "sha256": "82a7c14acf5d1cdcbea1b23bab880c69562da88013adc34ff5f2ae2115fb08d1"
+    },
+    {
+      "source": "tools/ui_sim/include/esp_wifi_types.h",
+      "sha256": "a689ad30d3f0cf18fbb34eb0931fac68de56a3063bc51990fc52c4b7e92a36c0"
+    },
+    {
+      "source": "tools/ui_sim/include/m3_board.h",
+      "sha256": "9b94c631f8289449c31de28058324c52010064c7e6d07e72ca52c328b1d0caf8"
+    },
+    {
+      "source": "tools/ui_sim/include/nvs.h",
+      "sha256": "674fa9d1d35fb72383601b25565f7c2f18bba52cd774fc99dd6142da394ad9a2"
+    },
+    {
+      "source": "tools/ui_sim/include/strings.h",
+      "sha256": "192ed8b2bc3b7dbdc8cff91706e9aecaf1798c4e147910559c0fdad19a73dd65"
+    },
+    {
+      "source": "tools/ui_sim/include/time_compat.h",
+      "sha256": "233ad9898b804361eefddd2006e4007b47c8437663d22c5c59fa66ef9a061cf7"
+    },
+    {
+      "source": "tools/ui_sim/scenarios.inc",
+      "sha256": "dcaa03c0efbe763d566b737749eafa46eb4b9b70384208c063963ee2b6b81a2c"
+    },
+    {
+      "source": "tools/ui_sim/sim_main.c",
+      "sha256": "190aecdaab496f6a3a24360f22ef6beb543496dfa24a982cbefb33351790e049"
+    },
+    {
+      "source": "tools/ui_sim/to_png.py",
+      "sha256": "a3fbeb6351e89cd968b762351b412bed2bc824d5e4eefb619e11426869e2beb4"
+    },
+    {
+      "source": "tools/verify_azure_speech.py",
+      "sha256": "86802da8305d95dc744fe3dc6c27ed278b7e45658de18fc924735b03ec04ccb0"
+    },
+    {
+      "source": "translations/ja.json",
+      "sha256": "72b06af27a1b95005f45adb9d9d508b8b6bdb3317d79b51c7604abf343e2e1d8"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/en_dict",
+      "sha256": "1053f74a34af38abb6fbd64b7838dacbc655a687c48ce1bb663d364a127b05de"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/intonations",
+      "sha256": "031a105bf6bb2ebcd73a2c579ccfb42469b27266db0078af65ae298fd3588b21"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/ko_dict",
+      "sha256": "93e8fb2972126a3d10185fe177955a81f2fe3a580995f3b8eb9357327d9a9d66"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/lang/gmw/en",
+      "sha256": "4605d5330801de3641c6e366d15f129ea1f5ffbce8722642aba01ace07ab9c83"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/lang/gmw/en-US",
+      "sha256": "41534c2a22df5dd4f1052ff9e1a33a3ea7bff5a26b5c02bdad5ba8ddb7524704"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/lang/ko",
+      "sha256": "c2dfbf88d9aa2ac9bf2f30e92e260120e4f2c21123a02265014ae98d59d5774e"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/phondata",
+      "sha256": "a0b643b155cb6b12628d9e7865b57d9fca0d35844614f2594a5e009c80c80bb4"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/phonindex",
+      "sha256": "384e5fa6f714ba5356c58008249b78699c31c1ad044b243068d263fb806b7d73"
+    },
+    {
+      "source": "tts_data/espeak-ng-data/phontab",
+      "sha256": "1b40690667e1e9aa1ba5e5234773c799e7e72ea751426e5150423d53c3f24fa2"
+    },
+    {
+      "source": "tts_data/manifest.json",
+      "sha256": "7cd73f4df4b34ea347070fefce29b67b83024d1c490f366739ac19ea8d385a41"
+    },
+    {
+      "source": "web/index.html",
+      "sha256": "4ee456ad598bd10a79a8c1bd7b969f2688d2ffec02582af8bd4b486caf82347d"
+    }
+  ],
+  "reference_files": [
+    {
+      "path": "main/board.h",
+      "sha256": "37defc3677c26ad726ac116e00d34f79b0ee5cd6b5be7a42f98e9880140b0324"
+    },
+    {
+      "path": "main/bsp_display.cpp",
+      "sha256": "59f37a930b25da86e93dd3584b3b19e9fd713ad5a3f812790ad37c2cddd66ddd"
+    },
+    {
+      "path": "main/panel_init.c",
+      "sha256": "1c2283dee513fd8414f3a2fa19afdee1e2799918c3b8eb787fa11bfcc4c01193"
+    },
+    {
+      "path": "main/panel_init.h",
+      "sha256": "a31cc5a136264cd4d19ce2ef331463d2691fabc10ed221cc32bc9445929fd46f"
+    },
+    {
+      "path": "main/Kconfig.projbuild",
+      "sha256": "e386a7f258d185fe70c2a4b1134e7569d175de2241a5830cdc02cac4b770885b"
+    },
+    {
+      "path": "main/idf_component.yml",
+      "sha256": "efedec36af8b9d41b4fd3d1656862905638034a2299f765a687c9b1f5c0144e1"
+    },
+    {
+      "path": "sdkconfig.defaults",
+      "sha256": "6bcfa47dc39496b20d0898a8398557091e0748a6df61219a2e6b1a1be3437ec2"
+    }
+  ]
+}

@@ -28,6 +28,7 @@ typedef struct {
     char ssid[33];
     int8_t rssi;
     wifi_auth_mode_t authmode;
+    bool saved;
 } wifi_scan_item_t;
 
 esp_err_t network_init(void);
@@ -35,6 +36,9 @@ net_mode_t network_get_mode(void);
 bool network_setup_has_clients(void);
 esp_err_t network_start_softap(void);
 esp_err_t network_connect_sta(const char *ssid, const char *pass);
+/* Scan first; try visible saved profiles in descending RSSI order. Service task. */
+esp_err_t network_connect_saved(void);
+bool network_recovery_pending(void);
 esp_err_t network_save_credentials(const char *ssid, const char *pass);
 bool network_has_saved_credentials(char *out_ssid, size_t ssid_len, char *out_pass, size_t pass_len);
 esp_err_t network_save_static_ip(const char *ip, const char *gw, const char *mask);

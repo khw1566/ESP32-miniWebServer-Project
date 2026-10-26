@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include "m1_sound.h"
 #include "cloud_relay.h"
 #include "https_memory.h"
 #include "sd_media.h"
@@ -1510,11 +1511,13 @@ esp_err_t web_server_start(void) {
     ESP_LOGI(TAG, "HTTP Server started successfully (Admin, WebP & File "
                   "Manager Enabled)");
     atomic_store(&s_server_running, true);
+    m1_sound_play(M1_SOUND_SERVER_START);
     if(!sd_index_task_handle && xTaskCreate(sd_index_task,"sd_index",4096,NULL,1,&sd_index_task_handle)!=pdPASS)
       ESP_LOGW(TAG,"SD background index task unavailable; direct listing remains available");
     return ESP_OK;
   }
   ESP_LOGE(TAG, "Failed to start HTTP Server");
+  m1_sound_play(M1_SOUND_ERROR);
   return ESP_FAIL;
 }
 
@@ -1523,7 +1526,8 @@ void web_server_stop(void) {
   ai_sessions_clear();
   network_mdns_stop();
   if (s_server) {
-    httpd_stop(s_server);
+    esp_err_t stop_err = httpd_stop(s_server);
     s_server = NULL;
+    m1_sound_play(stop_err == ESP_OK ? M1_SOUND_SERVER_STOP : M1_SOUND_ERROR);
   }
 }

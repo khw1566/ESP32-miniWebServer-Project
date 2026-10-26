@@ -1,12 +1,18 @@
+import { parseDuration } from './ytmusic.mjs';
 // Offline tests for the relay helpers. No network, yt-dlp or ffmpeg.
 import assert from 'node:assert';
-import { sanitize, JpegSplitter, PcmChunker, PACKET, packet, parsePackets, Interleaver, toItem, validVideoId, musicItem } from './lib.mjs';
+import { sanitize, searchText, JpegSplitter, PcmChunker, PACKET, packet, parsePackets, Interleaver, toItem, validVideoId, musicItem } from './lib.mjs';
 
 // Text: board fonts have ASCII + Hangul only.
 assert.equal(sanitize('뉴진스 ‘Ditto’ — Official \u{1F496}MV【HD】'), "뉴진스 'Ditto' - Official MV[HD]");
 assert.equal(sanitize('Tyna Nguyễn'), 'Tyna Nguyen');
 assert.equal(sanitize('ＡＢＣ　１２３'), 'ABC 123');
-assert.equal(sanitize('日本語タイトル abc'), 'abc');
+assert.equal(sanitize('日本語タイトル abc'), '日本語タイトル abc');
+assert.equal(sanitize('夜に駆ける / ヨルシカ / 米津玄師'), '夜に駆ける / ヨルシカ / 米津玄師');
+assert.equal(searchText('日本語の歌 YOASOBI'), '日本語の歌 YOASOBI');
+assert.equal(searchText('  日本語\nの\t歌\u0000 '), '日本語 の 歌');
+assert.equal(searchText('日'.repeat(100)), '日'.repeat(100));
+assert.equal(searchText('日'.repeat(200), 384), '日'.repeat(128));
 assert(Buffer.byteLength(sanitize('가'.repeat(200), 30)) <= 30, 'UTF-8 byte limit');
 assert.equal(sanitize('가'.repeat(200), 31).length, 10, 'never cuts inside a syllable');
 
@@ -65,4 +71,6 @@ const song = { id: 'ArmDp-zijuc', ie_key: 'Youtube', url: 'https://www.youtube.c
 assert(musicItem(song));
 assert.equal(musicItem({ ...song, duration: 3 * 3600 }), null, 'long mixes are skipped');
 assert.equal(musicItem({ ...song, live_status: 'is_live' }), null, 'live streams are skipped');
-console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering, mono PCM, music filtering.');
+// YouTube Music durations.
+assert.equal(parseDuration('3:45'), 225); assert.equal(parseDuration('1:02:03'), 3723); assert.equal(parseDuration('LIVE'), 0);
+console.log('PASS: text cleanup, JPEG splitting at every boundary, PCM chunking, packet format, interleave order/backpressure, entry filtering, mono PCM, music filtering, YouTube Music durations.');

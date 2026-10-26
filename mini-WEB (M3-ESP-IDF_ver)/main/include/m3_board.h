@@ -19,3 +19,4 @@ i2c_master_bus_handle_t m3_board_i2c(void);
 lv_display_t *m3_board_display(void);
 bool m3_board_touch_ready(void);
 esp_err_t m3_board_set_brightness(unsigned percent);
+esp_err_t m3_board_set_screen_on(bool on);

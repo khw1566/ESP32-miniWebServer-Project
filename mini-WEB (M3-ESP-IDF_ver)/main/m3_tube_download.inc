@@ -35,22 +35,25 @@ static void download_worker(void *unused) {
     snprintf(final, sizeof(final), SD_MEDIA_ROOT M3_TUBE_DOWNLOAD_FOLDER "/%s", filename);
     snprintf(partial, sizeof(partial), "%s.part", final);
     sink_t sink = {0};
+    m3_relay_profile_t relay = {0};
     if (!sd_media_ready()) { message = "SD unavailable or busy"; goto done; }
     if (network_get_mode() != NET_MODE_STA_CONNECTED) { message = "Connect Wi-Fi first"; goto done; }
     if (!lease_tls(1500, &owned)) { message = "HTTPS busy; stop radio or video and retry"; goto done; }
+    if (!m3_relay_select(&relay)) { message = "Relay connection failed"; goto done; }
     buffer = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buffer) { message = "Video buffer allocation failed"; goto done; }
-    esp_http_client_config_t config = {.url = M3_TUBE_URL "/api/download", .timeout_ms = 5000,
+    snprintf(url, sizeof(url), "%s/api/download", relay.url);
+    esp_http_client_config_t config = {.url = url, .timeout_ms = 5000, .disable_auto_redirect = true,
         .buffer_size = 4096, .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = sink_event, .user_data = &sink};
     http = esp_http_client_init(&config);
     if (!http) { message = "Relay connection failed"; goto done; }
-    esp_http_client_set_header(http, "x-m3-token", M3_TUBE_TOKEN);
+    esp_http_client_set_header(http, "x-m3-token", relay.token);
     esp_http_client_set_header(http, "Accept-Encoding", "identity");
     esp_http_client_set_header(http, "Content-Length", "0");
-    snprintf(url, sizeof(url), "%s/api/download?id=%.11s&quality=%s", M3_TUBE_URL, download_id, quality_name(download_quality));
+    snprintf(url, sizeof(url), "%s/api/download?id=%.11s&quality=%s", relay.url, download_id, quality_name(download_quality));
     int status = download_json(http, &sink, buffer, url, HTTP_METHOD_POST);
     if (status != 202) {
-        message = status == 409 ? "PC download is busy" : status == 401 ? "Relay token rejected; rerun setup and rebuild" :
+        message = status == 409 ? "PC download is busy" : status == 401 ? "Relay token rejected; check SD relay settings" :
             status == 404 ? "Update PC relay for quality and downloads" : "Download failed"; goto done;
     }
     buffer[sink.length] = 0;
@@ -65,7 +68,7 @@ static void download_worker(void *unused) {
     int64_t deadline = esp_timer_get_time() + 660LL * 1000000;
     bool ready = false;
     while (!download_stopped() && esp_timer_get_time() < deadline) {
-        snprintf(url, sizeof(url), "%s/api/download/status?job=%s", M3_TUBE_URL, job);
+        snprintf(url, sizeof(url), "%s/api/download/status?job=%s", relay.url, job);
         status = download_json(http, &sink, buffer, url, HTTP_METHOD_GET);
         if (status != 200) { message = "Relay connection failed"; goto done; }
         buffer[sink.length] = 0;
@@ -87,7 +90,7 @@ static void download_worker(void *unused) {
     if (mkdir(SD_MEDIA_ROOT M3_TUBE_DOWNLOAD_FOLDER, 0775) != 0 && errno != EEXIST) { message = "SD video write failed"; goto done; }
     struct stat existing;
     if (stat(final, &existing) == 0) { message = "Video already saved on SD"; saved = true; goto done; }
-    snprintf(url, sizeof(url), "%s/api/download/file?job=%s", M3_TUBE_URL, job);
+    snprintf(url, sizeof(url), "%s/api/download/file?job=%s", relay.url, job);
     sink.data = NULL;
     esp_http_client_set_method(http, HTTP_METHOD_GET); esp_http_client_set_url(http, url);
     if (esp_http_client_open(http, 0) != ESP_OK || esp_http_client_fetch_headers(http) < 0 || esp_http_client_get_status_code(http) != 200) goto done;
@@ -131,7 +134,7 @@ done:
     if (http) {
         esp_http_client_close(http);
         if (job[0] && !saved) {
-            snprintf(url, sizeof(url), "%s/api/download/status?job=%s", M3_TUBE_URL, job);
+            snprintf(url, sizeof(url), "%s/api/download/status?job=%s", relay.url, job);
             download_json(http, &sink, buffer, url, HTTP_METHOD_DELETE);
         }
         esp_http_client_cleanup(http);

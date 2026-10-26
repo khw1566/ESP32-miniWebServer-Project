@@ -1,18 +1,23 @@
 #include "m3_mp4_demux.h"
 #include "sd_media.h"
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #include <limits.h>
 
-enum { MOOV_LIMIT = 4 * 1024 * 1024, INDEX_BUDGET = 4 * 1024 * 1024, SAMPLE_LIMIT = 100000,
-    VIDEO_SAMPLE_LIMIT = 256 * 1024, AUDIO_SAMPLE_LIMIT = 8192, FILE_LIMIT = 512 * 1024 * 1024 };
+/* Long files: ~3 h of 60 fps video or ~4 h of 48 kHz AAC per track; the index lives in PSRAM. */
+enum { MOOV_LIMIT = 16 * 1024 * 1024, INDEX_BUDGET = 16 * 1024 * 1024, SAMPLE_LIMIT = 700000,
+    VIDEO_SAMPLE_LIMIT = 1024 * 1024, AUDIO_SAMPLE_LIMIT = 8192, DURATION_LIMIT_S = 4 * 3600 };
 typedef union allocation allocation_t;
 typedef struct { allocation_t *head; size_t used; bool failed; } pool_t;
 union allocation { max_align_t alignment; struct { allocation_t *next, *previous; pool_t *pool; size_t bytes; } item; };
-static pool_t *allocating; /* Only the sole audio worker opens/closes the demuxer. */
+static pool_t *allocating; /* Protected while minimp4 builds either playback or thumbnail indexes. */
+static atomic_flag indexing = ATOMIC_FLAG_INIT;
 static void *mp4_alloc(size_t bytes) {
     if (!allocating || !bytes || bytes > INDEX_BUDGET || allocating->used > INDEX_BUDGET - bytes) {
         if (allocating) allocating->failed = true;
@@ -57,7 +62,8 @@ static void *mp4_realloc(void *pointer, size_t bytes) {
 #define BOX(a,b,c,d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (d))
 typedef struct {
     uint32_t seen, timescale, trim, samples;
-    unsigned nal_length, width, height;
+    uint32_t *sync; /* Zero-based stss entries; absent means every sample is a sync sample. */
+    unsigned nal_length, width, height, sync_count;
     bool avc, audio;
 } track_probe_t;
 struct m3_mp4_demux {
@@ -123,7 +129,8 @@ static bool boxes(m3_mp4_demux_t *d, const uint8_t *data, size_t bytes, unsigned
         const uint8_t *p = data + at + header; size_t n = (size_t)length - header;
         unsigned flag = type == BOX('s','t','s','d') ? 1 : type == BOX('s','t','t','s') ? 2 : type == BOX('s','t','s','z') ? 4 :
             type == BOX('s','t','s','c') ? 8 : type == BOX('s','t','c','o') || type == BOX('c','o','6','4') ? 16 :
-            type == BOX('c','t','t','s') ? 32 : type == BOX('m','d','h','d') ? 64 : type == BOX('h','d','l','r') ? 128 : type == BOX('e','l','s','t') ? 256 : 0;
+            type == BOX('c','t','t','s') ? 32 : type == BOX('m','d','h','d') ? 64 : type == BOX('h','d','l','r') ? 128 : type == BOX('e','l','s','t') ? 256 :
+            type == BOX('s','t','s','s') ? 512 : 0;
         if (flag) { if (!track || (track->seen & flag)) return false; track->seen |= flag; }
         if (type == BOX('m','v','e','x') || type == BOX('m','o','o','f') || type == BOX('s','i','n','f') || type == BOX('s','e','n','c')) return false;
         if (type == BOX('t','r','a','k')) {
@@ -148,6 +155,18 @@ static bool boxes(m3_mp4_demux_t *d, const uint8_t *data, size_t bytes, unsigned
         } else if (type == BOX('e','l','s','t')) {
             if (n != 20 || be32(p) || be32(p + 4) != 1 || be32(p + 12) > INT32_MAX || be32(p + 16) != 0x10000) return false;
             track->trim = be32(p + 12);
+        } else if (type == BOX('s','t','s','s')) {
+            if (n < 8 || be32(p)) return false;
+            unsigned count = be32(p + 4);
+            if (!count || count > SAMPLE_LIMIT || n != 8 + (uint64_t)count * 4) return false;
+            track->sync = heap_caps_malloc((size_t)count * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!track->sync) return false;
+            for (unsigned i = 0; i < count; ++i) {
+                uint32_t sample = be32(p + 8 + i * 4);
+                if (!sample || (i && sample - 1 <= track->sync[i - 1])) return false;
+                track->sync[i] = sample - 1;
+            }
+            track->sync_count = count;
         } else if (type == BOX('s','t','s','z')) {
             if (n < 12 || be32(p)) return false;
             unsigned count = be32(p + 8), fixed = be32(p + 4);
@@ -202,14 +221,34 @@ bool m3_mp4_demux_sample(m3_mp4_demux_t *d, bool video, unsigned index, m3_mp4_s
 bool m3_mp4_demux_read(m3_mp4_demux_t *d, const m3_mp4_sample_t *sample, uint8_t *out, size_t capacity) {
     return d && sample && out && sample->bytes <= capacity && read_at(d, sample->offset, out, sample->bytes);
 }
+static int64_t video_pts(const m3_mp4_demux_t *d, unsigned sample) {
+    const MP4D_track_t *t = &d->index.track[d->video];
+    return ((int64_t)t->timestamp[sample] - d->probe[d->video].trim) * 1000000 / t->timescale;
+}
+unsigned m3_mp4_demux_keyframe(m3_mp4_demux_t *d, unsigned index, int64_t until_us) {
+    if (!d || d->video < 0) return index;
+    const track_probe_t *probe = &d->probe[d->video];
+    unsigned count = probe->sync ? probe->sync_count : d->index.track[d->video].sample_count;
+    /* Timestamps were validated as nondecreasing, so the last sync sample at or before until_us is found by bisection. */
+    unsigned low = 0, high = count;
+    while (low < high) {
+        unsigned middle = low + (high - low) / 2, sample = probe->sync ? probe->sync[middle] : middle;
+        if (video_pts(d, sample) <= until_us) low = middle + 1; else high = middle;
+    }
+    if (!low) return index;
+    unsigned sample = probe->sync ? probe->sync[low - 1] : low - 1;
+    return sample > index ? sample : index;
+}
 const uint8_t *m3_mp4_demux_parameter(m3_mp4_demux_t *d, bool pps, unsigned index, int *size) {
     if (!d || d->video < 0 || !size || index) return NULL;
     return pps ? MP4D_read_pps(&d->index, d->video, index, size) : MP4D_read_sps(&d->index, d->video, index, size);
 }
 void m3_mp4_demux_close(m3_mp4_demux_t *d) {
     if (!d) return;
-    allocating = &d->pool; MP4D_close(&d->index); allocating = NULL;
+    /* Every allocation carries its own pool; close only frees and never selects an allocator. */
+    MP4D_close(&d->index);
     while (d->pool.head) mp4_free(d->pool.head + 1);
+    for (unsigned i = 0; i < 4; ++i) free(d->probe[i].sync);
     if (d->file) fclose(d->file);
     free(d->moov); free(d);
 }
@@ -236,7 +275,8 @@ m3_mp4_result_t m3_mp4_demux_open(const char *relative, unsigned job, bool (*cur
     d->file = fopen(path, "rb"); long length = 0;
     if (d->file && !fseek(d->file, 0, SEEK_END)) length = ftell(d->file);
     sd_media_admin_unlock();
-    if (!d->file || length < 16 || length > FILE_LIMIT) { result = M3_MP4_STORAGE; goto done; }
+    /* ftell returns -1 past the 2 GiB long range, which also rejects those files. */
+    if (!d->file || length < 16) { result = M3_MP4_STORAGE; goto done; }
     d->size = length;
     bool ftyp = false; unsigned roots = 0;
     for (uint64_t at = 0; at < d->size;) {
@@ -259,9 +299,14 @@ m3_mp4_result_t m3_mp4_demux_open(const char *relative, unsigned job, bool (*cur
         at += bytes;
     }
     if (!ftyp || !d->moov || !d->tracks || !d->media_count) goto done;
+    while (atomic_flag_test_and_set(&indexing)) {
+        if (!current(job)) { result = M3_MP4_STOPPED; goto done; }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     allocating = &d->pool;
     bool indexed = MP4D_open(&d->index, index_read, d, d->size) != 0;
     allocating = NULL;
+    atomic_flag_clear(&indexing);
     if (!indexed) { if (d->pool.failed) result = M3_MP4_MEMORY; goto done; }
     if (d->index.track_count != d->tracks) goto done;
     for (unsigned i = 0; i < d->tracks; ++i) {
@@ -275,17 +320,22 @@ m3_mp4_result_t m3_mp4_demux_open(const char *relative, unsigned job, bool (*cur
             if (!audio_config(t, info)) goto done;
             d->audio = i;
         } else goto done;
+        if (p->sync && (int)i == d->video && p->sync[p->sync_count - 1] >= t->sample_count) goto done;
         uint32_t previous = 0;
         for (unsigned s = 0; s < t->sample_count; ++s) {
             if (!current(job) || (s && t->timestamp[s] < previous) || !t->duration[s] || t->duration[s] > t->timescale ||
-                (uint64_t)t->timestamp[s] + t->duration[s] > (uint64_t)t->timescale * 1800) goto done;
+                (uint64_t)t->timestamp[s] + t->duration[s] > (uint64_t)t->timescale * DURATION_LIMIT_S) goto done;
             previous = t->timestamp[s];
+            if (!(s & 4095)) vTaskDelay(1); /* Long indexes must not starve the idle task. */
         }
     }
     if (d->video < 0) goto done;
     for (unsigned pass = 0; pass < 2; ++pass) {
         unsigned count = pass ? info->audio_samples : info->video_samples;
-        for (unsigned i = 0; i < count; ++i) { m3_mp4_sample_t sample; if (!sample_valid(d, !pass, i, &sample)) goto done; }
+        for (unsigned i = 0; i < count; ++i) {
+            m3_mp4_sample_t sample; if (!sample_valid(d, !pass, i, &sample)) goto done;
+            if (!(i & 4095)) { if (!current(job)) goto done; vTaskDelay(1); }
+        }
     }
     m3_mp4_sample_t last;
     if (!sample_valid(d, true, info->video_samples - 1, &last) || last.pts_us + (int64_t)last.duration_us <= 0) goto done;

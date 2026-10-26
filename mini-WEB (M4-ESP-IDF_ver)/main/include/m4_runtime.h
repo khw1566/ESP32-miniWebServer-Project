@@ -1,0 +1,37 @@
+#pragma once
+#include "storage_view.h"
+#include "network_manager.h"
+#include "m4_power.h"
+#define M4_WIFI_RESULTS 8
+typedef enum { M4_WIFI_SCAN, M4_WIFI_CONNECT, M4_WIFI_SETUP, M4_WIFI_IPV6, M4_WIFI_CONNECT_SAVED } m4_wifi_action_t;
+typedef struct {
+    bool initialized, web, sd, cloud;
+    m4_power_state_t power;
+    bool cpu_valid;
+    unsigned cpu_percent[2], cpu_revision;
+    net_mode_t mode;
+    int rssi;
+    unsigned requests, disconnects, file_revision;
+    char ip[32], url[96], message[96], folder[256];
+    char cloud_url[96]; /* public https address while the cloud relay is online, else empty */
+    char domain_url[96], ipv6_url[96], mdns_url[96];
+    char ipv6_status[24], cloud_status[24];
+    bool mdns_ready;
+    bool browse_sd;
+    storage_view_t files;
+    storage_capacity_t flash;
+    bool wifi_busy, wifi_ready, wifi_password_saved;
+    unsigned scan_revision, settings_revision, wifi_revision;
+    int scan_count;
+    wifi_scan_item_t networks[M4_WIFI_RESULTS];
+    network_settings_t settings; /* Public fields only; password is always cleared. */
+    char wifi_message[128];
+    unsigned mutation_revision;
+    esp_err_t mutation_result;
+    bool mutation_busy;
+} m4_runtime_state_t;
+esp_err_t m4_runtime_start(bool force_setup);
+void m4_runtime_state(m4_runtime_state_t *out);
+bool m4_runtime_browse(bool sd, const char *folder, unsigned offset);
+bool m4_runtime_wifi(m4_wifi_action_t action, const network_settings_t *settings);
+bool m4_runtime_file_action(bool sd, const char *source, const char *destination, bool remove);

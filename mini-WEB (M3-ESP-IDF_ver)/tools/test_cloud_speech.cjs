@@ -47,9 +47,9 @@ assert(source.includes('"ko-KR-Chirp3-HD-Aoede"'));assert(source.includes('.disa
 assert(source.includes('https_memory_exclusive_end()'));assert(source.includes('TTS_RESPONSE_LIMIT = 2 * 1024 * 1024'));
 assert(audio.includes('PLAY_OPENAI_TTS'));assert(audio.includes('m3_audio_tts_provider(unsigned provider)'));
 // Segment index = provider number passed to m3_voice_set_provider / m3_audio_tts_provider.
-const ui=read('main/m3_ui.c');assert(ui.includes('recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5"}'));
-assert(ui.includes('engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE}'));
+const ui=read('main/m3_ui.c');assert(ui.includes('recognizers[] = {"OpenAI", "Gemini 3.1", "Gemini 3.5", "Azure"}'));
+assert(ui.includes('engines[] = {T_TTS_OPENAI, T_TTS_GOOGLE, T_TTS_OFFLINE, T_TTS_AZURE}'));
 assert(ui.includes('m3_voice_set_provider(segment_value(voice_provider))'));assert(ui.includes('m3_audio_tts_provider(provider)'));
-const agent=read('main/m3_agent.c');assert(agent.indexOf('if (leased) https_memory_exclusive_end();')<agent.indexOf('if (!m3_audio_speak(deferred_speech, 165))'));
+const agent=read('main/m3_agent.c');assert(agent.indexOf('if (leased) https_memory_exclusive_end();')<agent.indexOf('if (!m3_audio_speak(deferred_speech))'));
 assert(!/API_KEY\s+"[^"\n]+"/.test(read('main/include/m3_gemini_private.example.h')),'public template contains no keys');
 console.log('PASS: RIFF chunks/bounds/PCM validation, OpenAI mono24k signed PCM stereo playback across blocks, stop/write failure/drain, provider/model routes, TLS release before agent speech, empty public key template.');
