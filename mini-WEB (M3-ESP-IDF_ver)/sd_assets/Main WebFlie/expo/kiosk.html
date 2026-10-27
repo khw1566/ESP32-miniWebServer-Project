@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10402f">
+<title>카페 주문 키오스크</title>
+<link rel="stylesheet" href="expo.css">
+<style>
+.shop{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:clamp(16px,2.4vw,28px);align-items:start}
+.menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:20px;min-height:170px;text-align:left;cursor:pointer;
+  background:var(--silk);color:var(--mask-deep);border:0;border-radius:10px;transition:transform .15s}
+.item:active{transform:scale(.97)}
+.item .cup{width:46px;height:46px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 5px rgba(255,255,255,.55);margin-bottom:auto}
+.item b{font-size:19px;line-height:1.3}
+.item span{font-size:15px;color:#4c5a52}
+.cart h2{font-size:22px}
+.lines{list-style:none;margin:14px 0 0;padding:0;min-height:120px}
+.lines li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:12px 0;border-bottom:1px solid rgba(238,235,223,.12)}
+.lines .qty{display:flex;align-items:center;gap:6px}
+.lines .qty button{width:36px;height:36px;border-radius:50%;border:1px solid rgba(238,235,223,.35);background:transparent;cursor:pointer;font-size:18px;line-height:1}
+.lines .qty output{min-width:22px;text-align:center;font-weight:800}
+.lines small{grid-column:1;color:var(--silk-dim)}
+.empty{color:var(--silk-dim);padding:18px 0}
+.total{display:flex;justify-content:space-between;align-items:baseline;margin:18px 0}
+.total b{font-size:30px}
+.cart .btn{width:100%}
+.done{position:fixed;inset:0;background:rgba(10,42,31,.92);display:grid;place-items:center;padding:24px;z-index:5}
+.done[hidden]{display:none}
+.ticket{width:min(380px,100%);background:var(--silk);color:var(--mask-deep);border-radius:12px;padding:32px;text-align:center;animation:rise .35s ease-out}
+@keyframes rise{from{transform:translateY(24px);opacity:0}}
+.ticket .no{font-size:72px;font-weight:800;letter-spacing:-.03em;line-height:1;margin:10px 0 16px}
+.ticket p{color:#4c5a52}
+.ticket .btn{margin-top:22px;width:100%}
+@media (max-width:980px){.shop{grid-template-columns:1fr}.menu{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body data-idle="120">
+<header class="bar">
+  <a class="back" href="hub.html">예제 목록</a>
+  <span class="live"><i></i><span>보드 상태 확인 중</span></span>
+</header>
+<main class="page">
+  <div class="ex-head">
+    <div>
+      <h1>카페 주문 키오스크</h1>
+      <p class="lede">메뉴를 눌러 담고 주문해 보세요. 결제는 일어나지 않고, 주문 번호만 받습니다.</p>
+    </div>
+    <p class="note"><b>이 예제가 보여주는 것</b>값비싼 키오스크 장비 대신 보드 한 장과 손님의 휴대폰으로 주문을 받는 작은 가게용 화면입니다. 인터넷이 끊겨도 매장 Wi-Fi 안에서는 그대로 동작합니다.</p>
+  </div>
+
+  <div class="shop">
+    <section class="menu" id="menu" aria-label="메뉴"></section>
+    <aside class="panel cart" aria-live="polite">
+      <h2>담은 메뉴</h2>
+      <ul class="lines" id="lines"></ul>
+      <div class="total"><span>합계</span><b class="num" id="total">0원</b></div>
+      <button class="btn" id="order" disabled>주문하기</button>
+    </aside>
+  </div>
+</main>
+
+<div class="done" id="done" hidden role="dialog" aria-modal="true" aria-labelledby="doneTitle">
+  <div class="ticket">
+    <p id="doneTitle">주문이 접수되었습니다</p>
+    <div class="no num" id="no">A-001</div>
+    <p id="doneSummary"></p>
+    <button class="btn" id="again">새 주문 시작</button>
+  </div>
+</div>
+
+<script src="expo.js"></script>
+<script>
+(function(){
+  var MENU = [
+    {id:'am', name:'아메리카노', price:4500, c:'#4a2f1f'},
+    {id:'la', name:'카페라테', price:5000, c:'#c69c72'},
+    {id:'va', name:'바닐라라테', price:5500, c:'#e8d3a6'},
+    {id:'gr', name:'녹차라테', price:5500, c:'#7fa565'},
+    {id:'le', name:'레몬에이드', price:5000, c:'#f0cf45'},
+    {id:'cr', name:'버터 크루아상', price:3800, c:'#d9a44f'}
+  ];
+  var cart = {}, $ = function(id){ return document.getElementById(id); };
+  function won(n){ return n.toLocaleString('ko-KR') + '원'; }
+
+  MENU.forEach(function(m){
+    var b = document.createElement('button');
+    b.className = 'item'; b.style.setProperty('--c', m.c);
+    b.innerHTML = '<i class="cup"></i><b></b><span></span>';
+    b.querySelector('b').textContent = m.name; b.querySelector('span').textContent = won(m.price);
+    b.setAttribute('aria-label', m.name + ' ' + won(m.price) + ' 담기');
+    b.onclick = function(){ cart[m.id] = (cart[m.id] || 0) + 1; render(); };
+    $('menu').appendChild(b);
+  });
+
+  function render(){
+    var ul = $('lines'), total = 0, count = 0; ul.textContent = '';
+    MENU.forEach(function(m){
+      var q = cart[m.id]; if (!q) return;
+      total += q * m.price; count += q;
+      var li = document.createElement('li');
+      li.innerHTML = '<span><b></b></span><span class="qty"><button aria-label="하나 빼기">-</button><output></output><button aria-label="하나 더">+</button></span><small></small>';
+      li.querySelector('b').textContent = m.name; li.querySelector('output').textContent = q;
+      li.querySelector('small').textContent = won(q * m.price);
+      var bs = li.querySelectorAll('button');
+      bs[0].onclick = function(){ if (--cart[m.id] <= 0) delete cart[m.id]; render(); };
+      bs[1].onclick = function(){ cart[m.id]++; render(); };
+      ul.appendChild(li);
+    });
+    if (!count){ ul.innerHTML = '<li class="empty">왼쪽 메뉴를 누르면 여기에 담깁니다.</li>'; }
+    $('total').textContent = won(total);
+    $('order').disabled = !count;
+    $('order').textContent = count ? count + '개 주문하기' : '주문하기';
+    return {total:total, count:count};
+  }
+
+  $('order').onclick = function(){
+    var s = render(), n = 0;
+    try { n = (+localStorage.getItem('m3-order') || 0) % 999 + 1; localStorage.setItem('m3-order', n); } catch (e) { n = Math.floor(Math.random() * 900) + 100; }
+    $('no').textContent = 'A-' + ('00' + n).slice(-3);
+    $('doneSummary').textContent = s.count + '개, ' + won(s.total) + '. 번호가 불리면 카운터에서 받아 가세요.';
+    $('done').hidden = false; $('again').focus();
+  };
+  $('again').onclick = function(){ cart = {}; render(); $('done').hidden = true; };
+  render();
+})();
+</script>
+</body>
+</html>

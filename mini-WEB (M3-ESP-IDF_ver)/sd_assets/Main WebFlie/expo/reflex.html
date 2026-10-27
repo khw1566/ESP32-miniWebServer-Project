@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10402f">
+<title>반응 속도 게임</title>
+<link rel="stylesheet" href="expo.css">
+<style>
+.game{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:clamp(16px,2.4vw,28px);align-items:stretch}
+.pad{position:relative;min-height:min(60vh,520px);border-radius:14px;border:0;cursor:pointer;background:var(--mask-deep);display:grid;place-items:center;text-align:center;padding:24px;touch-action:manipulation;user-select:none;-webkit-user-select:none;transition:background .08s}
+.pad .lamp{display:block;width:clamp(120px,22vw,220px);height:clamp(120px,22vw,220px);border-radius:50%;background:#3a1f1c;margin:0 auto 26px;box-shadow:inset 0 0 0 10px rgba(0,0,0,.25);transition:background .05s,box-shadow .05s}
+.pad b{display:block;font-size:clamp(26px,3.4vw,40px);font-weight:800;line-height:1.2}
+.pad small{display:block;margin-top:10px;font-size:17px;color:var(--silk-dim)}
+.pad[data-s=go]{background:#2a1512}
+.pad[data-s=go] .lamp{background:var(--led);box-shadow:0 0 60px 10px rgba(255,91,74,.55)}
+.pad[data-s=early]{background:#3a2d12}
+.pad[data-s=result] b{font-size:clamp(56px,8vw,96px);letter-spacing:-.03em}
+.board h2{font-size:22px}
+.board ol{margin:14px 0 0;padding:0;list-style:none;counter-reset:r}
+.board li{counter-increment:r;display:grid;grid-template-columns:36px 1fr auto;padding:10px 0;border-bottom:1px solid rgba(238,235,223,.12);font-size:17px}
+.board li:before{content:counter(r);font-weight:800;color:var(--copper)}
+.board li b{font-variant-numeric:tabular-nums}
+.board li.me{color:var(--copper)}
+.board .empty{display:block;color:var(--silk-dim)}
+.board .empty:before{content:none}
+.board .tries{margin-top:22px;font-size:15px;color:var(--silk-dim)}
+.board .btn{margin-top:18px;width:100%}
+@media (max-width:900px){.game{grid-template-columns:1fr}.pad{min-height:52vh}}
+</style>
+</head>
+<body data-idle="120">
+<header class="bar">
+  <a class="back" href="hub.html">예제 목록</a>
+  <span class="live"><i></i><span>보드 상태 확인 중</span></span>
+</header>
+<main class="page">
+  <div class="ex-head">
+    <div>
+      <h1>반응 속도 게임</h1>
+      <p class="lede">빨간 불이 켜지는 순간 화면을 누르세요. 너무 일찍 누르면 다시 해야 합니다.</p>
+    </div>
+    <p class="note"><b>이 예제가 보여주는 것</b>게임처럼 즉시 반응해야 하는 화면도 보드에서 받아 온 파일 하나로 브라우저에서 바로 돌아갑니다. 설치할 앱이 없습니다.</p>
+  </div>
+
+  <div class="game">
+    <button class="pad" id="pad" data-s="idle" aria-live="assertive">
+      <span><span class="lamp" aria-hidden="true"></span><b id="msg">눌러서 시작</b><small id="sub">스페이스 바로도 할 수 있습니다</small></span>
+    </button>
+    <aside class="panel board">
+      <h2>이 기기의 오늘 기록</h2>
+      <ol id="rank"></ol>
+      <p class="tries" id="tries">아직 시도하지 않았습니다.</p>
+      <button class="btn ghost" id="reset">기록 지우기</button>
+    </aside>
+  </div>
+</main>
+<script src="expo.js"></script>
+<script>
+(function(){
+  var pad = document.getElementById('pad'), msg = document.getElementById('msg'), sub = document.getElementById('sub');
+  var state = 'idle', timer, t0, tries = 0, last = null, key = 'm3-reflex-' + new Date().toDateString();
+  function load(){ try { return JSON.parse(localStorage.getItem(key)) || []; } catch (e) { return []; } }
+  function save(a){ try { localStorage.setItem(key, JSON.stringify(a)); } catch (e) {} }
+  var best = load();
+
+  function show(s, m, sm){ state = s; pad.dataset.s = s; msg.textContent = m; sub.textContent = sm; }
+  function rank(){
+    var ol = document.getElementById('rank'); ol.textContent = '';
+    if (!best.length){ ol.innerHTML = '<li class="empty">첫 기록의 주인공이 되어 보세요.</li>'; }
+    best.forEach(function(ms){
+      var li = document.createElement('li'); li.innerHTML = '<span>' + (ms === last ? '방금 기록' : '') + '</span><b></b>';
+      li.querySelector('b').textContent = ms + ' ms'; if (ms === last) li.className = 'me'; ol.appendChild(li);
+    });
+    document.getElementById('tries').textContent = tries ? '이번에 ' + tries + '번 시도했습니다.' : '아직 시도하지 않았습니다.';
+  }
+
+  function press(){
+    if (state === 'idle' || state === 'result' || state === 'early'){
+      show('wait', '기다리세요', '불이 켜지면 누르세요');
+      timer = setTimeout(function(){ t0 = performance.now(); show('go', '지금!', ''); }, 1500 + Math.random() * 2500);
+    } else if (state === 'wait'){
+      clearTimeout(timer); show('early', '너무 빨랐어요', '불이 켜진 뒤에 누르세요. 다시 하려면 누르세요');
+    } else if (state === 'go'){
+      var ms = Math.round(performance.now() - t0); tries++; last = ms;
+      best.push(ms); best.sort(function(a, b){ return a - b; }); best = best.slice(0, 5); save(best);
+      var verdict = ms < 200 ? '프로게이머 수준입니다' : ms < 260 ? '아주 빠릅니다' : ms < 330 ? '평균보다 빠릅니다' : '한 번 더 해 보세요';
+      show('result', ms + ' ms', verdict + '. 다시 하려면 누르세요');
+      rank();
+    }
+  }
+  pad.addEventListener('pointerdown', function(e){ e.preventDefault(); press(); });
+  pad.addEventListener('click', function(e){ if (e.detail === 0) press(); });
+  addEventListener('keydown', function(e){ if (e.code === 'Space' && e.target === document.body){ e.preventDefault(); press(); } });
+  document.getElementById('reset').onclick = function(){ best = []; last = null; save(best); rank(); };
+  rank();
+})();
+</script>
+</body>
+</html>

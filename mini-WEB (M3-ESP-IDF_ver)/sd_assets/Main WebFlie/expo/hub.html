@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10402f">
+<title>M3 예제 둘러보기</title>
+<link rel="stylesheet" href="expo.css">
+<style>
+.intro{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px 48px;align-items:end;margin-bottom:clamp(28px,4vw,48px)}
+.intro h1{font-size:clamp(36px,5.4vw,68px);max-width:14em}
+.facts{display:grid;grid-template-columns:repeat(2,auto);gap:6px 28px;font-size:15px;color:var(--silk-dim)}
+.facts b{display:block;color:var(--silk);font-size:22px;font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(16px,2.4vw,28px)}
+/* Each example sits on a component footprint: copper pads at the corners. */
+.ex{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:20px;align-items:center;padding:30px 30px 30px 32px;min-height:220px;
+  background:var(--mask-deep);border:1px solid rgba(238,235,223,.12);border-radius:10px;text-decoration:none;transition:border-color .2s,background .2s}
+.ex:before,.ex:after{content:"";position:absolute;width:14px;height:14px;background:var(--copper-dim);border-radius:2px;top:-7px;left:24px;transition:background .2s}
+.ex:after{left:auto;right:24px}
+.ex:hover,.ex:focus-visible{border-color:var(--copper);background:#0d3226}
+.ex:hover:before,.ex:hover:after{background:var(--copper)}
+.ex h2{font-size:clamp(22px,2.2vw,28px)}
+.ex p{margin-top:10px;color:var(--silk-dim);font-size:16px}
+.ex .go{display:inline-block;margin-top:18px;font-weight:800;color:var(--copper)}
+.viz{height:130px;display:grid;place-items:center}
+/* mini previews */
+.gauge{width:130px;height:130px;border-radius:50%;background:conic-gradient(var(--copper) calc(var(--v,.3)*1turn),rgba(238,235,223,.12) 0);display:grid;place-items:center;transition:--v .6s}
+.gauge span{width:96px;height:96px;border-radius:50%;background:var(--mask-deep);display:grid;place-items:center;font-weight:800;font-size:22px;line-height:1.1;text-align:center}
+.gauge small{display:block;font-size:12px;font-weight:600;color:var(--silk-dim)}
+.receipt{width:124px;padding:12px 14px;background:var(--silk);color:var(--mask-deep);border-radius:4px;font-size:13px;line-height:1.5;transform:rotate(-3deg)}
+.receipt b{display:block;font-size:26px;line-height:1.1}
+.bars{display:flex;align-items:flex-end;gap:10px;height:110px}
+.bars i{width:22px;border-radius:3px 3px 0 0;background:var(--copper);animation:grow 3s ease-in-out infinite alternate}
+.bars i:nth-child(2){animation-delay:-1s}.bars i:nth-child(3){animation-delay:-2s}.bars i:nth-child(4){animation-delay:-.5s}
+@keyframes grow{from{height:30%}to{height:95%}}
+.target{width:110px;height:110px;border-radius:50%;border:3px solid rgba(238,235,223,.25);display:grid;place-items:center}
+.target i{width:46px;height:46px;border-radius:50%;background:var(--led);animation:pop 2.4s ease-in-out infinite}
+@keyframes pop{0%,60%{transform:scale(.3);opacity:.3}70%,100%{transform:scale(1);opacity:1}}
+.foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:40px;color:var(--silk-dim);font-size:14px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.intro{grid-template-columns:1fr}}
+@media (max-width:520px){.ex{grid-template-columns:1fr;padding:26px 22px}.viz{display:none}}
+</style>
+</head>
+<body data-idle="120">
+<header class="bar">
+  <a class="home" href="index.html"><span class="chipmark" aria-hidden="true"></span>Mini WebServer M3</a>
+  <span class="live"><i></i><span>보드 상태 확인 중</span></span>
+</header>
+<main class="page">
+  <div class="intro">
+    <div>
+      <h1>보드 한 장으로 만든 웹 서비스, 직접 눌러 보세요.</h1>
+      <p class="lede">아래 네 가지 예제는 모두 이 보드의 SD 카드에서 나옵니다. 인터넷이 끊겨도 같은 Wi-Fi 안에서는 그대로 동작합니다.</p>
+    </div>
+    <div class="facts" aria-label="보드 사양">
+      <div><b>ESP32-P4</b>처리</div><div><b>ESP32-C6</b>무선</div>
+      <div><b>32 MB</b>PSRAM</div><div><b>4.3인치</b>터치 화면</div>
+    </div>
+  </div>
+
+  <nav class="grid" aria-label="예제 목록">
+    <a class="ex" href="monitor.html">
+      <div><h2>보드 상태 실시간 보기</h2><p>지금 이 보드의 메모리와 Wi-Fi 신호, 가동 시간을 2초마다 직접 읽어 옵니다.</p><span class="go">상태 보기</span></div>
+      <div class="viz" aria-hidden="true"><div class="gauge" id="miniGauge"><span><span id="miniPsram">-</span><small>PSRAM 사용</small></span></div></div>
+    </a>
+    <a class="ex" href="kiosk.html">
+      <div><h2>카페 주문 키오스크</h2><p>작은 가게의 주문 화면을 보드 하나로. 메뉴를 담고 주문 번호를 받아 보세요.</p><span class="go">주문해 보기</span></div>
+      <div class="viz" aria-hidden="true"><div class="receipt">주문 번호<b>A-027</b>아메리카노 2<br>합계 9,000원</div></div>
+    </a>
+    <a class="ex" href="farm.html">
+      <div><h2>스마트팜 제어판</h2><p>온도와 습도를 지켜보고 물 주기와 환기를 원격으로 켜고 끄는 화면입니다.</p><span class="go">농장 살펴보기</span></div>
+      <div class="viz" aria-hidden="true"><div class="bars"><i></i><i></i><i></i><i></i></div></div>
+    </a>
+    <a class="ex" href="reflex.html">
+      <div><h2>반응 속도 게임</h2><p>불이 켜지는 순간 누르세요. 오늘 전시장 최고 기록에 도전할 수 있습니다.</p><span class="go">게임 시작</span></div>
+      <div class="viz" aria-hidden="true"><div class="target"><i></i></div></div>
+    </a>
+  </nav>
+
+  <div class="foot"><span>2분 동안 아무 입력이 없으면 처음 안내 화면으로 돌아갑니다.</span><a href="index.html">처음 안내 화면 보기</a></div>
+</main>
+<script src="expo.js"></script>
+<script>
+(function(){
+  function tick(){
+    M3.system().then(function(d){
+      var used = d.psram_total ? 1 - d.psram_free / d.psram_total : 0;
+      document.getElementById('miniGauge').style.setProperty('--v', used.toFixed(3));
+      document.getElementById('miniPsram').textContent = Math.round(used * 100) + '%';
+    });
+  }
+  tick(); setInterval(tick, 5000);
+})();
+</script>
+</body>
+</html>

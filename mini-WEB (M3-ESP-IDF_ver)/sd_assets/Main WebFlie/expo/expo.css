@@ -1,0 +1,53 @@
+/* M3 exhibition site. Palette taken from the board itself: solder mask, copper, silkscreen, power LED. */
+:root{
+  --mask:#10402f;--mask-deep:#0a2a1f;--mask-lift:#175440;
+  --copper:#d08c3c;--copper-dim:#8a5d2a;
+  --silk:#eeebdf;--silk-dim:#b9c4b8;
+  --led:#ff5b4a;
+  --font:"Pretendard","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --gutter:clamp(16px,4vw,56px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--mask);color:var(--silk);font-family:var(--font);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word;
+  background-image:radial-gradient(circle at 1px 1px,rgba(238,235,223,.06) 1px,transparent 0);background-size:24px 24px}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--copper);outline-offset:4px}
+h1,h2,h3{margin:0;font-weight:800;letter-spacing:-.025em;line-height:1.15;word-break:keep-all}
+p{margin:0;word-break:keep-all}
+button{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+.nb{white-space:nowrap}
+
+/* Shared top bar for hub and examples */
+.bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px var(--gutter);border-bottom:1px solid rgba(238,235,223,.14)}
+.bar a.home{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700}
+.bar .chipmark{width:30px;height:30px;border:2px solid var(--copper);border-radius:4px;position:relative}
+.bar .chipmark:after{content:"";position:absolute;inset:6px;background:var(--copper);border-radius:1px}
+.live{display:inline-flex;align-items:center;gap:10px;font-size:14px;color:var(--silk-dim)}
+.live i{width:9px;height:9px;border-radius:50%;background:var(--led);box-shadow:0 0 0 4px rgba(255,91,74,.18)}
+.live[data-state=demo] i{background:var(--silk-dim);box-shadow:none}
+.back{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid var(--copper);border-radius:999px;text-decoration:none;font-size:15px;font-weight:700;color:var(--copper)}
+.back:hover{background:var(--copper);color:var(--mask-deep)}
+
+.page{max-width:1180px;margin:0 auto;padding:clamp(28px,5vw,64px) var(--gutter) 80px}
+.lede{max-width:62ch;color:var(--silk-dim);font-size:18px;margin-top:14px}
+
+/* Example page shell */
+.ex-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,340px);gap:32px;align-items:end;margin-bottom:36px}
+.ex-head h1{font-size:clamp(34px,5vw,56px)}
+.note{border-left:3px solid var(--copper);padding:4px 0 4px 18px;color:var(--silk-dim);font-size:15px}
+.note b{display:block;color:var(--silk);margin-bottom:4px}
+.panel{background:var(--mask-deep);border:1px solid rgba(238,235,223,.12);border-radius:10px;padding:clamp(18px,3vw,28px)}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border:0;border-radius:8px;background:var(--copper);color:var(--mask-deep);font-weight:800;font-size:16px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--silk);border:1px solid rgba(238,235,223,.35)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.demo-flag{margin-top:18px;font-size:14px;color:var(--silk-dim)}
+.demo-flag[hidden]{display:none}
+
+@media (max-width:760px){
+  body{font-size:16px}
+  .ex-head{grid-template-columns:1fr;gap:20px}
+  .bar .live span{display:none}
+}
+@media (prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

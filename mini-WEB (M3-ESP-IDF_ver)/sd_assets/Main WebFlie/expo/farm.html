@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10402f">
+<title>스마트팜 제어판</title>
+<link rel="stylesheet" href="expo.css">
+<style>
+.farm{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:clamp(16px,2.4vw,28px);align-items:start}
+.sensors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.sensor .k{font-size:15px;color:var(--silk-dim)}
+.sensor .v{font-size:clamp(34px,4vw,48px);font-weight:800;line-height:1.15;margin-top:4px}
+.sensor .v small{font-size:.45em;color:var(--silk-dim);font-weight:600;margin-left:4px}
+.range{position:relative;height:10px;border-radius:5px;background:rgba(238,235,223,.12);margin-top:16px}
+.range .band{position:absolute;top:0;bottom:0;background:rgba(127,216,166,.28);border-radius:5px}
+.range .dot{position:absolute;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:var(--silk);border:3px solid var(--mask-deep);transition:left .8s ease}
+.state{font-size:14px;margin-top:10px;color:#7fd8a6}
+.state.bad{color:var(--led)}
+.ctl h2{font-size:22px;margin-bottom:6px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:16px 0;background:none;border:0;border-bottom:1px solid rgba(238,235,223,.12);cursor:pointer;text-align:left}
+.sw span b{display:block;font-size:17px}.sw span small{color:var(--silk-dim);font-size:14px}
+.sw i{flex:none;width:58px;height:32px;border-radius:16px;background:rgba(238,235,223,.2);position:relative;transition:background .2s}
+.sw i:after{content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:var(--silk);transition:transform .2s}
+.sw[aria-pressed=true] i{background:var(--copper)}
+.sw[aria-pressed=true] i:after{transform:translateX(26px)}
+.sw:disabled{opacity:.45;cursor:not-allowed}
+.log{list-style:none;margin:16px 0 0;padding:0;font-size:14px;color:var(--silk-dim);max-height:180px;overflow:auto}
+.log li{padding:5px 0}.log time{color:var(--silk);margin-right:8px}
+@media (max-width:980px){.farm{grid-template-columns:1fr}}
+@media (max-width:520px){.sensors{grid-template-columns:1fr}}
+</style>
+</head>
+<body data-idle="120">
+<header class="bar">
+  <a class="back" href="hub.html">예제 목록</a>
+  <span class="live"><i></i><span>보드 상태 확인 중</span></span>
+</header>
+<main class="page">
+  <div class="ex-head">
+    <div>
+      <h1>스마트팜 제어판</h1>
+      <p class="lede">온실 1동의 환경을 보여 주는 화면입니다. 오른쪽 스위치를 켜면 값이 어떻게 바뀌는지 지켜보세요.</p>
+    </div>
+    <p class="note"><b>이 예제가 보여주는 것</b>센서와 릴레이를 보드에 연결하면 이런 화면으로 농장이나 공장 설비를 원격 제어할 수 있습니다. 전시용으로 센서 값은 가상으로 만들어 보여 줍니다.</p>
+  </div>
+
+  <div class="farm">
+    <section class="sensors" id="sensors" aria-live="polite"></section>
+    <aside class="panel ctl">
+      <h2>장치 제어</h2>
+      <button class="sw" data-dev="auto" aria-pressed="false"><span><b>자동 모드</b><small>적정 범위를 벗어나면 알아서 켭니다</small></span><i></i></button>
+      <button class="sw" data-dev="pump" aria-pressed="false"><span><b>물 주기</b><small>토양 수분을 올립니다</small></span><i></i></button>
+      <button class="sw" data-dev="fan" aria-pressed="false"><span><b>환기팬</b><small>온도와 습도를 낮춥니다</small></span><i></i></button>
+      <button class="sw" data-dev="shade" aria-pressed="false"><span><b>차광막</b><small>햇빛과 온도를 낮춥니다</small></span><i></i></button>
+      <ul class="log" id="log"></ul>
+    </aside>
+  </div>
+</main>
+<script src="expo.js"></script>
+<script>
+(function(){
+  var S = [
+    {id:'temp', name:'실내 온도', unit:'°C', min:5, max:40, lo:18, hi:27, v:29.4},
+    {id:'hum', name:'공기 습도', unit:'%', min:0, max:100, lo:55, hi:75, v:82},
+    {id:'soil', name:'토양 수분', unit:'%', min:0, max:100, lo:40, hi:70, v:31},
+    {id:'lux', name:'햇빛 세기', unit:'klx', min:0, max:80, lo:15, hi:50, v:58}
+  ];
+  var dev = {auto:false, pump:false, fan:false, shade:false}, by = {}, $ = function(id){ return document.getElementById(id); };
+  var names = {auto:'자동 모드', pump:'물 주기', fan:'환기팬', shade:'차광막'};
+
+  S.forEach(function(s){
+    by[s.id] = s;
+    var el = document.createElement('div'); el.className = 'panel sensor';
+    el.innerHTML = '<div class="k"></div><div class="v num"><span></span><small></small></div><div class="range"><i class="band"></i><i class="dot"></i></div><div class="state"></div>';
+    el.querySelector('.k').textContent = s.name; el.querySelector('small').textContent = s.unit;
+    var band = el.querySelector('.band');
+    band.style.left = pct(s, s.lo) + '%'; band.style.width = (pct(s, s.hi) - pct(s, s.lo)) + '%';
+    s.el = el; $('sensors').appendChild(el);
+  });
+  function pct(s, v){ return Math.max(0, Math.min(100, (v - s.min) / (s.max - s.min) * 100)); }
+
+  function log(text){
+    var li = document.createElement('li'), t = document.createElement('time'), d = new Date();
+    t.textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+    li.appendChild(t); li.appendChild(document.createTextNode(text));
+    $('log').insertBefore(li, $('log').firstChild);
+    while ($('log').children.length > 30) $('log').removeChild($('log').lastChild);
+  }
+  function set(k, on, why){
+    if (dev[k] === on) return;
+    dev[k] = on;
+    document.querySelector('[data-dev=' + k + ']').setAttribute('aria-pressed', on);
+    log(names[k] + (on ? ' 켬' : ' 끔') + (why ? ' (' + why + ')' : ''));
+    if (k === 'auto') [].forEach.call(document.querySelectorAll('.sw:not([data-dev=auto])'), function(b){ b.disabled = on; });
+  }
+  [].forEach.call(document.querySelectorAll('.sw'), function(b){ b.onclick = function(){ set(b.dataset.dev, !dev[b.dataset.dev]); }; });
+
+  function step(){
+    var t = by.temp, h = by.hum, s = by.soil, l = by.lux, n = function(){ return (Math.random() - .5) * .3; };
+    l.v += (dev.shade ? -1.6 : .5) + n() * 4;
+    t.v += (l.v > 45 ? .12 : -.04) - (dev.fan ? .22 : 0) - (dev.shade ? .05 : 0) + n();
+    h.v += (dev.pump ? .5 : .1) - (dev.fan ? .7 : 0) + n() * 2;
+    s.v += dev.pump ? 1.4 : -.12 + n();
+    S.forEach(function(x){ x.v = Math.max(x.min, Math.min(x.max, x.v)); });
+    if (dev.auto){
+      set('pump', s.v < s.lo + 5 || (dev.pump && s.v < s.hi - 8), '자동');
+      set('fan', t.v > t.hi || h.v > h.hi || (dev.fan && (t.v > t.hi - 2 || h.v > h.hi - 5)), '자동');
+      set('shade', l.v > l.hi || (dev.shade && l.v > l.hi - 15), '자동');
+    }
+    S.forEach(function(x){
+      x.el.querySelector('.v span').textContent = x.v.toFixed(1);
+      x.el.querySelector('.dot').style.left = pct(x, x.v) + '%';
+      var st = x.el.querySelector('.state');
+      st.className = 'state' + (x.v < x.lo || x.v > x.hi ? ' bad' : '');
+      st.textContent = x.v < x.lo ? '적정 범위보다 낮음 (' + x.lo + ' 이상 권장)' : x.v > x.hi ? '적정 범위보다 높음 (' + x.hi + ' 이하 권장)' : '적정 범위';
+    });
+  }
+  log('제어판 연결됨');
+  step(); setInterval(step, 1000);
+})();
+</script>
+</body>
+</html>
