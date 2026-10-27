@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10402f">
+<title>보드 상태 실시간 보기</title>
+<link rel="stylesheet" href="expo.css">
+<style>
+.dash{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:clamp(14px,2vw,22px)}
+.span4{grid-column:span 4}.span5{grid-column:span 5}.span7{grid-column:span 7}.span8{grid-column:span 8}
+.k{font-size:15px;color:var(--silk-dim)}
+.big{font-size:clamp(38px,5vw,60px);font-weight:800;line-height:1.1;margin-top:6px;letter-spacing:-.02em}
+.mid{font-size:26px;font-weight:800;margin-top:4px}
+.sub{font-size:14px;color:var(--silk-dim);margin-top:6px}
+.meter{height:12px;border-radius:6px;background:rgba(238,235,223,.12);margin-top:18px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--copper);transition:width .6s ease}
+.signal{display:flex;align-items:flex-end;gap:6px;height:44px;margin-top:10px}
+.signal i{width:12px;border-radius:2px;background:rgba(238,235,223,.15)}
+.signal i.on{background:var(--copper)}
+.signal i:nth-child(1){height:25%}.signal i:nth-child(2){height:50%}.signal i:nth-child(3){height:75%}.signal i:nth-child(4){height:100%}
+svg.spark{width:100%;height:150px;display:block;margin-top:14px}
+.spark .area{fill:rgba(208,140,60,.16)}.spark .line{fill:none;stroke:var(--copper);stroke-width:2.5;stroke-linejoin:round}
+.spark .grid{stroke:rgba(238,235,223,.1)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:10px 20px;margin:12px 0 0;font-size:16px}
+dt{color:var(--silk-dim)}dd{margin:0;font-weight:700;overflow-wrap:anywhere}
+.ok{color:#7fd8a6}.warn{color:var(--led)}
+@media (max-width:900px){.span4,.span5,.span7,.span8{grid-column:span 12}}
+</style>
+</head>
+<body data-idle="120">
+<header class="bar">
+  <a class="back" href="hub.html">예제 목록</a>
+  <span class="live"><i></i><span>보드 상태 확인 중</span></span>
+</header>
+<main class="page">
+  <div class="ex-head">
+    <div>
+      <h1>보드 상태 실시간 보기</h1>
+      <p class="lede">이 화면의 숫자는 꾸며낸 값이 아닙니다. 브라우저가 2초마다 보드에 상태를 물어보고, 보드가 그 순간의 값을 대답합니다.</p>
+    </div>
+    <p class="note"><b>이 예제가 보여주는 것</b>공장 설비, 서버실, 매장 기기처럼 멀리 있는 장비의 상태를 휴대폰 브라우저 하나로 확인하는 모니터링 화면입니다.</p>
+  </div>
+
+  <div class="dash">
+    <section class="panel span5"><div class="k">쉬지 않고 동작한 시간</div><div class="big num" id="up">-</div><div class="sub">마지막으로 켜진 뒤부터 센 시간</div></section>
+    <section class="panel span7"><div class="k">PSRAM 사용량 (화면, 웹 파일, 오디오 버퍼)</div><div class="big num"><span id="psU">-</span><span style="font-size:.5em;color:var(--silk-dim)"> / <span id="psT">-</span> MB</span></div><div class="meter"><i id="psBar"></i></div></section>
+
+    <section class="panel span8"><div class="k">내부 RAM 여유 (최근 2분)</div><div class="mid num"><span id="heap">-</span> KB <span class="sub" style="font-weight:400">최저 기록 <span id="minHeap">-</span> KB</span></div>
+      <svg class="spark" id="spark" viewBox="0 0 600 150" preserveAspectRatio="none" aria-label="내부 RAM 여유량 추이">
+        <line class="grid" x1="0" y1="50" x2="600" y2="50"/><line class="grid" x1="0" y1="100" x2="600" y2="100"/>
+        <path class="area" id="area"/><path class="line" id="line"/>
+      </svg>
+    </section>
+    <section class="panel span4"><div class="k">Wi-Fi 신호</div><div class="mid num" id="rssi">-</div><div class="signal" id="sig"><i></i><i></i><i></i><i></i></div><div class="sub" id="ssid">-</div></section>
+
+    <section class="panel span12" style="grid-column:1/-1"><div class="k">연결과 펌웨어</div>
+      <dl><dt>접속 주소</dt><dd id="ip">-</dd><dt>SD 카드</dt><dd id="sd">-</dd><dt>펌웨어</dt><dd id="ver">-</dd><dt>실행 중인 슬롯</dt><dd id="slot">-</dd></dl>
+    </section>
+  </div>
+  <p class="demo-flag" id="demo" hidden>지금은 보드에 연결되지 않은 미리보기라서 예시 값을 보여 줍니다. 보드 주소로 열면 실제 값이 나옵니다.</p>
+</main>
+<script src="expo.js"></script>
+<script>
+(function(){
+  var hist = [], max = 60;
+  function $(id){ return document.getElementById(id); }
+  function draw(){
+    if (hist.length < 2) return;
+    var lo = Math.min.apply(null, hist) * .97, hi = Math.max.apply(null, hist) * 1.01, span = hi - lo || 1;
+    var pts = hist.map(function(v, i){ return [(i / (hist.length - 1)) * 600, 150 - (v - lo) / span * 140]; });
+    var d = 'M' + pts.map(function(p){ return p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join('L');
+    $('line').setAttribute('d', d);
+    $('area').setAttribute('d', d + 'L' + pts[pts.length - 1][0].toFixed(1) + ' 150L0 150Z');
+  }
+  function tick(){
+    M3.system().then(function(d){
+      $('demo').hidden = d.live;
+      $('up').textContent = M3.uptime(d.uptime_sec);
+      var used = d.psram_total - d.psram_free;
+      $('psU').textContent = M3.mb(used); $('psT').textContent = M3.mb(d.psram_total);
+      $('psBar').style.width = (used / d.psram_total * 100).toFixed(1) + '%';
+      $('heap').textContent = Math.round(d.internal_free_heap / 1024);
+      $('minHeap').textContent = Math.round(d.min_heap / 1024);
+      hist.push(d.internal_free_heap); if (hist.length > max) hist.shift(); draw();
+      var r = d.rssi, n = !r ? 0 : r > -55 ? 4 : r > -65 ? 3 : r > -75 ? 2 : 1;
+      $('rssi').textContent = r ? r + ' dBm' : '연결 안 됨';
+      [].forEach.call($('sig').children, function(b, i){ b.classList.toggle('on', i < n); });
+      $('ssid').textContent = d.ssid && d.ssid !== '없음' ? d.ssid + '에 연결됨' : '공유기 없이 직접 Wi-Fi를 여는 중';
+      $('ip').textContent = d.ip + (d.mdns_url ? ' (' + d.mdns_url + ')' : '');
+      $('sd').innerHTML = d.sd_ready ? '<span class="ok">사용 중</span>' : '<span class="warn">인식되지 않음</span>';
+      $('ver').textContent = d.app_ver; $('slot').textContent = d.ota_slot;
+    });
+  }
+  tick(); setInterval(tick, 2000);
+})();
+</script>
+</body>
+</html>
